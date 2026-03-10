@@ -3,7 +3,7 @@ version: "2.0"
 
 services:
   mcp:
-    image: varitylabs/varity-mcp:latest
+    image: ghcr.io/varity-labs/varity-sdk/varity-mcp:latest
     expose:
       - port: 3100
         as: 80
