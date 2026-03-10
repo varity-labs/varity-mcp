@@ -24,7 +24,7 @@ profiles:
         memory:
           size: 512Mi
         storage:
-          size: 512Mi
+          - size: 512Mi
 
   placement:
     akash:
