@@ -1,0 +1,40 @@
+---
+version: "2.0"
+
+services:
+  mcp:
+    image: varitylabs/varity-mcp:latest
+    expose:
+      - port: 3100
+        as: 80
+        to:
+          - global: true
+    env:
+      - NODE_ENV=production
+      - VARITY_AUTH_URL=https://auth.varity.so
+      - VARITY_GATEWAY_URL=https://varity.app
+      - GITHUB_TOKEN=
+
+profiles:
+  compute:
+    mcp:
+      resources:
+        cpu:
+          units: 0.5
+        memory:
+          size: 512Mi
+        storage:
+          size: 512Mi
+
+  placement:
+    akash:
+      pricing:
+        mcp:
+          denom: uakt
+          amount: 2000
+
+deployment:
+  mcp:
+    akash:
+      profile: mcp
+      count: 1
