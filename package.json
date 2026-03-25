@@ -1,0 +1,68 @@
+{
+  "name": "@varity-labs/mcp",
+  "version": "1.5.0",
+  "description": "Varity MCP Server — build, deploy, and monetize apps from any AI coding tool in 60 seconds",
+  "type": "module",
+  "bin": {
+    "varity-mcp": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "start:http": "node dist/index.js --transport http --port 3100",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "varity",
+    "mcp",
+    "model-context-protocol",
+    "cursor",
+    "claude",
+    "deploy",
+    "ai",
+    "developer-tools",
+    "saas",
+    "fullstack",
+    "vibe-coding",
+    "copilot",
+    "windsurf",
+    "chatgpt"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/varity-labs/varity-sdk.git",
+    "directory": "packages/cli/varity-mcp"
+  },
+  "homepage": "https://docs.varity.so/ai-tools/mcp-server-spec",
+  "bugs": {
+    "url": "https://github.com/varity-labs/varity-mcp/issues"
+  },
+  "author": "Varity Labs <team@varity.so>",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "@sentry/node": "^8.38.0",
+    "express-rate-limit": "^7.4.1",
+    "helmet": "^8.0.0",
+    "winston": "^3.17.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "overrides": {
+    "hono": "^4.12.4",
+    "@hono/node-server": "^1.19.10"
+  }
+}
