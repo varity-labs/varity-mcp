@@ -118,10 +118,9 @@ async function startHttp(port: number): Promise<void> {
   const rateLimit = (await import("express-rate-limit")).default;
   const helmet = (await import("helmet")).default;
 
-  const server = createVarityServer("http");
-
-  // Track transports by session ID
-  const transports = new Map<string, StreamableHTTPServerTransport>();
+  // Track server+transport pairs by session ID
+  // Each session gets its own McpServer instance (SDK requires 1:1 server:transport)
+  const sessions = new Map<string, { server: ReturnType<typeof createVarityServer>; transport: StreamableHTTPServerTransport }>();
 
   // Rate limiting: 100 requests/minute per IP
   const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
@@ -192,35 +191,37 @@ async function startHttp(port: number): Promise<void> {
         // Check for existing session
         const sessionId = req.headers["mcp-session-id"] as string | undefined;
 
-        if (sessionId && transports.has(sessionId)) {
-          // Reuse existing transport for this session
-          const transport = transports.get(sessionId)!;
-          await transport.handleRequest(req, res);
+        if (sessionId && sessions.has(sessionId)) {
+          // Reuse existing session
+          const session = sessions.get(sessionId)!;
+          await session.transport.handleRequest(req, res);
           logHttpRequest(req.method || "POST", url.pathname, 200, Date.now() - startTime, sessionId);
           return;
         }
 
-        // New session — create transport
+        // New session — create a fresh server + transport pair
         if (req.method === "POST" && !sessionId) {
+          const sessionServer = createVarityServer("http");
           const transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => randomUUID(),
           });
 
           transport.onclose = () => {
             if (transport.sessionId) {
-              transports.delete(transport.sessionId);
+              sessions.delete(transport.sessionId);
               logger.info("Session closed", { sessionId: transport.sessionId });
             }
           };
 
-          await server.connect(transport);
+          await sessionServer.connect(transport);
+          await transport.handleRequest(req, res);
 
+          // Session ID is assigned after handleRequest processes the initialize message
           if (transport.sessionId) {
-            transports.set(transport.sessionId, transport);
+            sessions.set(transport.sessionId, { server: sessionServer, transport });
             logger.info("New MCP session created", { sessionId: transport.sessionId, ip: clientIp });
           }
 
-          await transport.handleRequest(req, res);
           logHttpRequest("POST", url.pathname, 200, Date.now() - startTime, transport.sessionId);
           return;
         }

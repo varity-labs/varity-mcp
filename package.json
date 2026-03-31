@@ -1,6 +1,6 @@
 {
   "name": "@varity-labs/mcp",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "Varity MCP Server — build, deploy, and monetize apps from any AI coding tool in 60 seconds",
   "type": "module",
   "bin": {
