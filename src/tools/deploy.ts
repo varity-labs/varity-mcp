@@ -2,7 +2,7 @@ import { z } from "zod";
 import { readdir, readFile, access } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
-import { execVaritykit, isCLIAvailable } from "../utils/cli-bridge.js";
+import { execCLI, execVaritykit, isCLIAvailable } from "../utils/cli-bridge.js";
 import { getDeploymentsDir } from "../utils/config.js";
 
 export function registerDeployTool(server: McpServer): void {
@@ -80,6 +80,30 @@ export function registerDeployTool(server: McpServer): void {
           `Project directory does not exist: ${cwd}`,
           "Check the path and ensure the project has been created (use varity_init first)."
         );
+      }
+
+      // Auto-build before deploying
+      let buildSkipped = true;
+      try {
+        const pkgRaw = await readFile(`${cwd}/package.json`, "utf-8");
+        const pkg = JSON.parse(pkgRaw);
+        if (pkg.scripts?.build) {
+          buildSkipped = false;
+          const buildResult = await execCLI("npm", ["run", "build"], { cwd, timeout: 300_000 });
+          if (buildResult.exitCode !== 0) {
+            return errorResponse(
+              "BUILD_FAILED",
+              `Build failed. Fix the errors before deploying:\n${(buildResult.stderr || buildResult.stdout).substring(0, 1000)}`,
+              "Check the build errors above, fix them, and try deploying again."
+            );
+          }
+        }
+      } catch (err: unknown) {
+        const isFileError = err instanceof Error && 'code' in err && (err as any).code === 'ENOENT';
+        const isParseError = err instanceof SyntaxError;
+        if (!isFileError && !isParseError) {
+          throw err;
+        }
       }
 
       const args = ["deploy"];

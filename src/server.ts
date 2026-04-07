@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerResources } from "./resources/index.js";
+import { registerPrompts } from "./prompts/index.js";
 import { registerSearchDocsTool } from "./tools/search-docs.js";
 import { registerCostCalculatorTool } from "./tools/cost-calculator.js";
 import { registerInitTool } from "./tools/init.js";
@@ -26,6 +27,7 @@ export type TransportMode = "stdio" | "http";
  * The server provides:
  *   - 5 resources (SDK reference — database, auth, UI components, patterns, deploy)
  *   - 14 tools (scaffold, deploy, build, dev-server, add-collection, manage, search, calculate)
+ *   - 3 prompts (build-app, add-feature, deploy-and-monetize)
  *
  * Resources give AI coding tools complete knowledge of the Varity SDK
  * so they can write correct code without searching docs or guessing.
@@ -39,6 +41,9 @@ export function createVarityServer(mode: TransportMode = "stdio"): McpServer {
 
   // ── Resources (always available — SDK reference for AI context) ──
   registerResources(server);
+
+  // ── Prompts (workflow templates for common tasks) ──
+  registerPrompts(server);
 
   // ── Public tools (no auth required) ──
   registerSearchDocsTool(server);

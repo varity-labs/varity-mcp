@@ -4,6 +4,14 @@ import { resolve, dirname } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 
+const RESERVED_WORDS = new Set([
+  "break", "case", "catch", "class", "const", "continue", "debugger", "default",
+  "delete", "do", "else", "export", "extends", "finally", "for", "function",
+  "if", "import", "in", "instanceof", "let", "new", "return", "super",
+  "switch", "this", "throw", "try", "typeof", "var", "void", "while", "with", "yield",
+  "id", "created_at", "updated_at",
+]);
+
 /**
  * Convert a collection name to PascalCase singular.
  * e.g. "invoices" → "Invoice", "team_members" → "TeamMember"
@@ -105,6 +113,16 @@ export function registerAddCollectionTool(server: McpServer): void {
       const camelPlural = toCamelCase(name);
       const hookName = `use${pascalPlural}`;
 
+      // Validate field names against reserved words
+      const invalidField = fields.find((f: { name: string }) => RESERVED_WORDS.has(f.name));
+      if (invalidField) {
+        return errorResponse(
+          "INVALID_FIELD_NAME",
+          `Field name "${invalidField.name}" is a reserved word and cannot be used.`,
+          "Choose a different field name. Reserved: id, created_at, updated_at, and JavaScript keywords like class, delete, return, etc."
+        );
+      }
+
       // ── 1. Append interface to src/types/index.ts ──
 
       const typesPath = resolve(projectPath, "src/types/index.ts");
@@ -128,8 +146,8 @@ export function registerAddCollectionTool(server: McpServer): void {
         `export interface ${pascalSingular} {`,
         "  id: string;",
         fieldLines,
-        "  createdAt: string;",
-        "  updatedAt: string;",
+        "  created_at: string;",
+        "  updated_at: string;",
         "}",
         "",
       ].join("\n");
@@ -148,7 +166,15 @@ export function registerAddCollectionTool(server: McpServer): void {
         return errorResponse(
           "FILE_NOT_FOUND",
           `Could not read ${dbPath}`,
-          "Ensure the project has src/lib/database.ts."
+          "This project may not have been created with varity_init. Run varity_init first to scaffold the project."
+        );
+      }
+
+      // Check if this collection already exists
+      if (dbContent.includes(`export const ${camelPlural} =`)) {
+        return errorResponse(
+          "COLLECTION_EXISTS",
+          `Collection '${name}' already exists in this project.`
         );
       }
 
@@ -189,7 +215,7 @@ export function registerAddCollectionTool(server: McpServer): void {
         return errorResponse(
           "FILE_NOT_FOUND",
           `Could not read ${hooksPath}`,
-          "Ensure the project has src/lib/hooks.ts."
+          "This project may not have been created with varity_init. Run varity_init first to scaffold the project."
         );
       }
 
@@ -243,11 +269,11 @@ export function ${hookName}(): UseCollectionReturn<${pascalSingular}> {
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  const create = async (input: Omit<${pascalSingular}, 'id' | 'createdAt' | 'updatedAt'>) => {
-    const optimistic: ${pascalSingular} = { ...input, id: crypto.randomUUID(), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() } as ${pascalSingular};
+  const create = async (input: Omit<${pascalSingular}, 'id' | 'created_at' | 'updated_at'>) => {
+    const optimistic: ${pascalSingular} = { ...input, id: crypto.randomUUID(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() } as ${pascalSingular};
     setData(prev => [optimistic, ...prev]);
     try {
-      await ${camelPlural}().add({ ...input, createdAt: optimistic.createdAt });
+      await ${camelPlural}().add({ ...input, created_at: optimistic.created_at });
       await refresh();
     } catch (err) {
       setData(prev => prev.filter(p => p.id !== optimistic.id));

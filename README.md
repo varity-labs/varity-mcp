@@ -4,12 +4,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/varity-labs/varity-sdk/blob/main/LICENSE)
 [![Status: Beta](https://img.shields.io/badge/Status-Beta-yellow.svg)](https://github.com/varity-labs/varity-mcp)
 
-> Build, deploy, and monetize production apps from any AI coding tool — Cursor, Claude Code, VS Code, ChatGPT, Windsurf, and more.
+> Build, deploy, and monetize production apps from any AI coding tool — Cursor, Claude Code, VS Code, ChatGPT, Windsurf, OpenClaw, and more.
 
-The Varity MCP Server gives your AI editor the power to scaffold, deploy, and manage full-stack apps with auth and database included. One server, every AI client, zero commands.
-
-**Browser Usage:** [See BROWSER_USAGE.md](./BROWSER_USAGE.md) for using in Claude.ai or ChatGPT browser
-**Quick Start:** Choose your editor below and run one command
+The Varity MCP Server is a full development engine for AI editors. It provides SDK knowledge, development tools, and deployment automation — so your AI can build complete apps with auth, database, and hosting auto-configured. Zero terminal commands required.
 
 ## Install
 
@@ -41,9 +38,7 @@ claude mcp add varity -- npx -y @varity-labs/mcp
 3. Command: `npx -y @varity-labs/mcp`
 4. Name: `Varity`
 
-### Windsurf
-
-Add to `mcp_config.json`:
+### Windsurf / OpenClaw / Any MCP client
 
 ```json
 {
@@ -56,110 +51,81 @@ Add to `mcp_config.json`:
 }
 ```
 
-### Claude.ai / ChatGPT (HTTP)
+## What's Included
 
-Use the hosted MCP server URL:
+### 5 SDK Resources
 
-```
-https://mcp.varity.so
-```
+Your AI gets complete knowledge of the Varity SDK — no searching, no guessing:
 
-### Any MCP-compatible client (stdio)
+| Resource | Content |
+|----------|---------|
+| `varity://sdk/database` | Collection CRUD API, QueryOptions, Document types, React hook patterns |
+| `varity://sdk/auth` | PrivyStack, usePrivy, ProtectedRoute, LoginButton, provider setup |
+| `varity://sdk/ui-components` | 52+ components with props, types, and usage examples |
+| `varity://sdk/patterns` | Canonical app patterns — file structure, CRUD pages, auth wrapping |
+| `varity://sdk/deploy` | Deployment reference, App Store submission, revenue split |
 
-```json
-{
-  "mcpServers": {
-    "varity": {
-      "command": "npx",
-      "args": ["-y", "@varity-labs/mcp"]
-    }
-  }
-}
-```
+### 14 Tools
 
-## Tools
+| Tool | Description | Transport |
+|------|-------------|-----------|
+| **Development** | | |
+| `varity_init` | Create a new app (auto-installs dependencies) | stdio |
+| `varity_install_deps` | Install npm packages | stdio |
+| `varity_add_collection` | Add database collection with types, accessor, hook, and optional page | stdio |
+| `varity_build` | Build for production | stdio |
+| `varity_dev_server` | Start/stop local dev server | stdio |
+| `varity_open_browser` | Open URL in default browser | stdio |
+| **Deployment** | | |
+| `varity_deploy` | Deploy to production (auto-builds first) | all |
+| `varity_deploy_status` | Check deployment status | all |
+| `varity_deploy_logs` | View build logs | all |
+| `varity_submit_to_store` | Submit to Varity App Store | all |
+| `varity_create_repo` | Create GitHub repo with template | all |
+| **Info** | | |
+| `varity_doctor` | Check environment prerequisites | all |
+| `varity_search_docs` | Search tutorials and guides | all |
+| `varity_cost_calculator` | Compare costs vs AWS/Vercel | all |
 
-| Tool | Description | Auth | Transport |
-|------|-------------|------|-----------|
-| `varity_search_docs` | Search Varity documentation | No | stdio + http |
-| `varity_cost_calculator` | Compare costs vs AWS/Vercel | No | stdio + http |
-| `varity_doctor` | Check environment prerequisites | No | stdio + http |
-| `varity_init` | Create a new production app | Yes | stdio only |
-| `varity_create_repo` | Create GitHub repo with template | Yes | stdio + http |
-| `varity_deploy` | Deploy to production | Yes | stdio + http |
-| `varity_deploy_status` | Check deployment status | Yes | stdio + http |
-| `varity_deploy_logs` | Read build/deployment logs | Yes | stdio + http |
-| `varity_submit_to_store` | Submit to Varity App Store | Yes | stdio + http |
+### 3 Workflow Prompts
 
-## Example Prompts
-
-Try these in Cursor Agent mode, Claude Code, or any MCP-enabled AI editor:
-
-**Create & Deploy:**
-- "Create a new SaaS app called my-dashboard"
-- "Deploy this project to production"
-- "Deploy and submit to the Varity App Store for $19/month"
-
-**Manage & Debug:**
-- "Show my deployments"
-- "Get the build logs for my last deployment"
-- "Why did my deployment fail?"
-
-**Docs & Pricing:**
-- "Search Varity docs for database setup"
-- "How much would it cost to host a SaaS app with 5,000 users on Varity?"
-- "Compare Varity vs AWS costs for my app"
+| Prompt | What it does |
+|--------|-------------|
+| `build-app` | Full workflow: scaffold → add collections → build pages → deploy |
+| `add-feature` | Add a feature to an existing app |
+| `deploy-and-monetize` | Build → deploy → submit to App Store |
 
 ## End-to-End Workflow
 
-From empty folder to deployed, monetized app — all from natural language:
+Describe what you want. The AI handles everything:
 
 ```
-You: "Create a new SaaS app called analytics-pro"
-AI:  ✅ Created analytics-pro with auth, database, dashboard, landing page
-
-You: "Deploy it to production"
-AI:  ✅ Deployed! Live at https://analytics-pro.varity.app
-
-You: "Submit to the App Store for $29/month"
-AI:  ✅ Submitted. You earn $26.10/month per user (90% revenue split)
+You: "Build me a client invoice tracker"
+AI:  ✅ Scaffolded project with auth, database, dashboard
+     ✅ Added invoices collection with types, hook, and CRUD page
+     ✅ Built and deployed to https://invoice-tracker.varity.app
+     ✅ Submitted to App Store at $49/month (you earn $44.10/user)
 ```
+
+No terminal commands. No configuration. No DevOps.
 
 ## What Makes This Different
 
-| Feature | Vercel MCP | Varity MCP |
-|---------|-----------|------------|
-| Create new apps | No | Yes |
-| Auth included | No | Yes |
-| Database included | No | Yes |
-| Payments | Stripe integration | Coming soon (90/10 split) |
-| Cost | $20+/mo | ~70% less |
-| Open source | No | Yes (MIT) |
-
-## Transports
-
-### stdio (default)
-
-For desktop AI editors — Cursor, Claude Code, VS Code, Windsurf.
-
-```bash
-npx -y @varity-labs/mcp
-```
-
-### HTTP
-
-For browser-based AI tools — Claude.ai, ChatGPT.
-
-```bash
-npx -y @varity-labs/mcp --transport http --port 3100
-```
-
-Hosted at `https://mcp.varity.so` — connect directly from any MCP client that supports HTTP.
+| | Traditional MCP | Varity MCP |
+|---|---|---|
+| AI knows the SDK | Searches docs | Full API reference always in context |
+| Create apps | Scaffold only | Scaffold + auto-install deps |
+| Database setup | Manual | `varity_add_collection` — types, hook, page |
+| Build | Manual `npm run build` | `varity_build` tool |
+| Deploy | Manual commands | `varity_deploy` (auto-builds first) |
+| Auth | Configure yourself | Zero-config, auto-injected |
+| Cost | AWS/Vercel pricing | ~70% cheaper |
+| Monetize | Not possible | 90/10 revenue split via App Store |
 
 ## Prerequisites
 
 - **Node.js** >= 18
-- **For deployment**: `pip install varitykit`
+- **For deployment**: `pip install varitykit` + `varitykit login`
 
 ## Cost
 
@@ -169,4 +135,4 @@ Varity is ~70% cheaper than AWS/Vercel. Auth and database are included at no ext
 
 **Part of the [Varity SDK](https://github.com/varity-labs/varity-sdk)** — Build, deploy, and monetize apps 70% cheaper than AWS.
 
-[Documentation](https://docs.varity.so/ai-tools/mcp-server-spec) · [GitHub](https://github.com/varity-labs/varity-sdk) · [Discord](https://discord.gg/7vWsdwa2Bg)
+[Documentation](https://docs.varity.so/ai-tools/mcp-server-spec) · [GitHub](https://github.com/varity-labs/varity-mcp) · [Discord](https://discord.gg/7vWsdwa2Bg)

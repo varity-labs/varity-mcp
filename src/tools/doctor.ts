@@ -110,7 +110,22 @@ export function registerDoctorTool(server: McpServer): void {
         nextSteps.push("pip install varitykit");
       }
 
-      // 4. Authentication — check for deploy_key in config
+      // 4. Python — required by varitykit
+      try {
+        const pyCmd = process.platform === "win32" ? "python" : "python3";
+        const pyResult = await execCLI(pyCmd, ["--version"], { timeout: 5_000 });
+        if (pyResult.exitCode === 0) {
+          checks.push({ name: "Python", status: "pass", version: pyResult.stdout.trim(), message: `${pyResult.stdout.trim()} detected` });
+        } else {
+          checks.push({ name: "Python", status: "fail", message: "Python not found", fix: "Install Python 3.8+ from https://python.org" });
+          nextSteps.push("Install Python 3.8+ from https://python.org");
+        }
+      } catch {
+        checks.push({ name: "Python", status: "fail", message: "Python not found", fix: "Install Python 3.8+ from https://python.org" });
+        nextSteps.push("Install Python 3.8+ from https://python.org");
+      }
+
+      // 5. Authentication — check for deploy_key in config
       const apiKey = await getApiKey();
       if (apiKey) {
         checks.push({

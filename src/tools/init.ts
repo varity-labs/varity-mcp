@@ -3,7 +3,7 @@ import { mkdir, access, readdir } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
-import { execNpx, execVaritykit, isCLIAvailable } from "../utils/cli-bridge.js";
+import { execCLI, execNpx, execVaritykit, isCLIAvailable } from "../utils/cli-bridge.js";
 
 /**
  * Resolve the working directory and project path from user inputs.
@@ -38,6 +38,17 @@ async function dirExists(dir: string): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+async function runNpmInstall(projectPath: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const result = await execCLI("npm", ["install"], { cwd: projectPath, timeout: 180_000 });
+    return result.exitCode === 0
+      ? { success: true }
+      : { success: false, error: result.stderr || "npm install failed" };
+  } catch (err) {
+    return { success: false, error: String(err) };
   }
 }
 
@@ -108,52 +119,64 @@ export function registerInitTool(server: McpServer): void {
           );
         }
 
+        const install = await runNpmInstall(projectPath);
+
         return successResponse(
           {
             project_name: name,
             project_path: projectPath,
             template,
-            next_steps: [
-              `cd ${projectPath}`,
-              "npm run dev",
-              "# Open http://localhost:3000",
-              "# When ready: varitykit app deploy",
-            ],
+            deps_installed: install.success,
+            ...(install.success ? {} : { note: "Dependencies could not be installed automatically. Run npm install manually." }),
+            next_steps: install.success
+              ? [
+                  `cd ${projectPath}`,
+                  "npm run dev",
+                  "# Open http://localhost:3000",
+                  "# When ready: use varity_deploy",
+                ]
+              : [
+                  `cd ${projectPath}`,
+                  "npm install",
+                  "npm run dev",
+                  "# When ready: use varity_deploy",
+                ],
             files_created: [
               "package.json",
               "next.config.js",
               "tailwind.config.ts",
               "src/app/layout.tsx",
               "src/app/page.tsx",
-              "src/app/(dashboard)/",
-              "src/app/(auth)/",
+              "src/app/dashboard/",
+              "src/app/login/",
             ],
           },
-          `Created "${name}" with the ${template} template at ${projectPath}. Run "cd ${projectPath} && npm run dev" to start developing.`
+          install.success
+            ? `Created "${name}" at ${projectPath} with dependencies installed. Ready to develop.`
+            : `Created "${name}" at ${projectPath}. Run "npm install" to finish setup.`
         );
       }
 
       // npx exited non-zero — but the project may have been partially created
       // (template copied, npm install timed out or failed). Check before falling back.
       if (await dirExists(projectPath)) {
-        const needsInstall = result.stderr?.includes("SIGTERM") || result.stderr?.includes("timed out");
+        const install = await runNpmInstall(projectPath);
         return successResponse(
           {
             project_name: name,
             project_path: projectPath,
             template,
-            note: needsInstall
-              ? "Project created but dependency install may be incomplete. Run npm install to finish."
-              : "Project created but the scaffolding command reported warnings. Check the project and run npm install if needed.",
-            next_steps: [
-              `cd ${projectPath}`,
-              "npm install",
-              "npm run dev",
-              "# Open http://localhost:3000",
-              "# When ready: varitykit app deploy",
-            ],
+            deps_installed: install.success,
+            note: install.success
+              ? "Project created and dependencies installed."
+              : "Project created but dependencies could not be installed automatically. Run npm install manually.",
+            next_steps: install.success
+              ? [`cd ${projectPath}`, "npm run dev", "# When ready: use varity_deploy"]
+              : [`cd ${projectPath}`, "npm install", "npm run dev", "# When ready: use varity_deploy"],
           },
-          `Created "${name}" at ${projectPath}. Run "cd ${projectPath} && npm install && npm run dev" to start developing.`
+          install.success
+            ? `Created "${name}" at ${projectPath} with dependencies installed. Ready to develop.`
+            : `Created "${name}" at ${projectPath}. Run "npm install" to finish setup.`
         );
       }
 
@@ -167,20 +190,21 @@ export function registerInitTool(server: McpServer): void {
         });
 
         if (await dirExists(projectPath)) {
+          const install = await runNpmInstall(projectPath);
           return successResponse(
             {
               project_name: name,
               project_path: projectPath,
               template,
               method: "varitykit",
-              next_steps: [
-                `cd ${projectPath}`,
-                "npm install",
-                "npm run dev",
-                "# When ready: varitykit app deploy",
-              ],
+              deps_installed: install.success,
+              next_steps: install.success
+                ? [`cd ${projectPath}`, "npm run dev", "# When ready: use varity_deploy"]
+                : [`cd ${projectPath}`, "npm install", "npm run dev", "# When ready: use varity_deploy"],
             },
-            `Created "${name}" with varitykit. Run "cd ${projectPath} && npm install && npm run dev" to start.`
+            install.success
+              ? `Created "${name}" at ${projectPath} with dependencies installed. Ready to develop.`
+              : `Created "${name}" at ${projectPath}. Run "npm install" to finish setup.`
           );
         }
 

@@ -3,6 +3,27 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { INFRASTRUCTURE } from "../utils/config.js";
 
+// Live docs cache — fetched once on first search, supplements hardcoded index
+let liveDocsContent: string | null = null;
+let fetchAttempted = false;
+
+async function getLiveDocsContent(): Promise<string | null> {
+  if (fetchAttempted) return liveDocsContent;
+  fetchAttempted = true;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch("https://docs.varity.so/llms.txt", { signal: controller.signal });
+    clearTimeout(timeout);
+    if (res.ok) {
+      liveDocsContent = await res.text();
+    }
+  } catch {
+    // Offline or timeout — hardcoded index is the fallback
+  }
+  return liveDocsContent;
+}
+
 /**
  * Complete documentation index for offline/fallback usage.
  * URLs verified against docs.varity.so (Astro Starlight, March 2026).
@@ -436,7 +457,20 @@ Fetch collections, access system fields, render data in React components.`,
 varitykit app deploy --submit-to-store
 
 No payment integration code required. Users pay with credit card.`,
-    keywords: ["payments", "monetize", "revenue", "pricing", "earn"],
+    keywords: ["payments", "monetize", "revenue", "pricing", "earn", "app store", "store", "submit"],
+  },
+  {
+    title: "App Store & Developer Portal",
+    section: "Deploy",
+    url: `${INFRASTRUCTURE.DOCS}/deploy/app-store`,
+    content: `Submit your app to the Varity App Store. Revenue split: 90% to you, 10% to Varity.
+
+The Developer Portal at developer.store.varity.so lets you submit apps, manage listings, and track revenue.
+
+Steps: deploy your app → submit via varity_submit_to_store or the Developer Portal → review (24h) → listed on store.varity.so.
+
+Pricing: set any monthly price. Free apps allowed. Example: $79/month → you earn $71.10/user.`,
+    keywords: ["app store", "store", "developer portal", "submit", "monetize", "revenue", "listing", "sell"],
   },
   {
     title: "Credit Card Payments",
@@ -927,10 +961,9 @@ export function registerSearchDocsTool(server: McpServer): void {
     {
       title: "Search Varity Docs",
       description:
-        "Search Varity documentation for guides, API references, and tutorials. " +
-        "Use this to help developers understand how to use Varity SDK, UI Kit, CLI, " +
-        "database, authentication, deployment, and monetization. " +
-        "Example queries: 'database setup', 'how to deploy', 'authentication', 'pricing'.",
+        "Search Varity tutorials, troubleshooting guides, and deployment docs. " +
+        "For SDK API references (database, auth, UI components), the varity://sdk/* resources provide complete coverage. " +
+        "Use this tool for how-to guides, getting started tutorials, FAQ, and troubleshooting.",
       inputSchema: {
         query: z
           .string()
@@ -949,7 +982,22 @@ export function registerSearchDocsTool(server: McpServer): void {
     },
     async ({ query, maxResults }) => {
       try {
-        const scored = DOCS_INDEX.map((entry) => ({
+        // Build searchable entries from hardcoded index
+        const allEntries = [...DOCS_INDEX];
+
+        // Supplement with live docs if available
+        const liveContent = await getLiveDocsContent();
+        if (liveContent) {
+          allEntries.push({
+            title: "Varity Documentation (Live)",
+            section: "Full Reference",
+            url: `${INFRASTRUCTURE.DOCS}`,
+            content: liveContent.substring(0, 5000),
+            keywords: ["docs", "reference", "guide", "tutorial", "api", "sdk", "database", "auth", "deploy"],
+          });
+        }
+
+        const scored = allEntries.map((entry) => ({
           ...entry,
           score: scoreResult(entry, query),
         }))

@@ -144,10 +144,10 @@ export function registerCostCalculatorTool(server: McpServer): void {
             vs_vercel_monthly: vercel.total - varity.total,
           },
           comparison_table: comparisonTable,
+          disclaimer: "These are estimates based on published pricing as of March 2026. Actual costs vary by usage, region, and plan. Use this for ballpark comparison only.",
           notes: [
-            "Varity includes authentication at no extra cost",
-            "Varity includes database at minimal cost (~$3/mo base)",
-            "Varity payment processing: 90% to developer, 10% platform fee (no Stripe needed)",
+            "Varity includes authentication and database at no extra cost",
+            "Varity payment processing: 90% to developer, 10% platform fee (coming soon)",
             "AWS/Vercel costs exclude Stripe payment processing fees (2.9% + $0.30/transaction)",
             "Estimates based on published pricing; actual costs may vary",
           ],
