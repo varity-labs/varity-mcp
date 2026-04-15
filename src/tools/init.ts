@@ -124,7 +124,7 @@ async function scaffoldFromLocal(
         // Add suppress array for optional peer deps
         nextConfig = nextConfig.replace(
           "'@react-native-async-storage/async-storage': false,\n    };",
-          `'@react-native-async-storage/async-storage': false };\n    // Varity SDK requires these fallbacks for unused optional sub-modules\n    ['@solana/kit', '@solana/sysvars', '@solana-program/token-2022', 'x402'].forEach(pkg => { config.resolve.alias[pkg] = false; });`
+          `'@react-native-async-storage/async-storage': false };\n    ['viem', 'viem/chains', '@solana/kit', '@solana/sysvars', '@solana-program/token-2022', 'x402', '@coinbase/wallet-sdk', '@walletconnect/ethereum-provider'].forEach(pkg => { config.resolve.alias[pkg] = false; });`
         );
         await writeFile(nextConfigPath, nextConfig, "utf-8");
       }
