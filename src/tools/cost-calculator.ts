@@ -129,7 +129,7 @@ export function registerCostCalculatorTool(server: McpServer): void {
         `| Hosting       | $${aws.hosting}/mo | $${vercel.hosting}/mo | $${varity.hosting}/mo |`,
         `| Database      | $${aws.database}/mo | $${vercel.database}/mo | $${varity.database}/mo |`,
         `| Auth          | $${aws.auth}/mo | $${vercel.auth}/mo | $${varity.auth}/mo (included) |`,
-        `| Payments      | Stripe fees | Stripe fees | Built-in (90/10 split) |`,
+        `| Payments      | Stripe fees | Stripe fees | Coming soon (90/10 split) |`,
         `| **Total**     | **$${aws.total}/mo** | **$${vercel.total}/mo** | **$${varity.total}/mo** |`,
       ].join("\n");
 
@@ -144,7 +144,7 @@ export function registerCostCalculatorTool(server: McpServer): void {
             vs_vercel_monthly: vercel.total - varity.total,
           },
           comparison_table: comparisonTable,
-          disclaimer: "These are estimates based on published pricing as of March 2026. Actual costs vary by usage, region, and plan. Use this for ballpark comparison only.",
+          disclaimer: "These are estimates based on published pricing as of April 2026. Actual costs vary by usage, region, and plan. Use this for ballpark comparison only.",
           notes: [
             "Varity includes authentication and database at no extra cost",
             "Varity payment processing: 90% to developer, 10% platform fee (coming soon)",

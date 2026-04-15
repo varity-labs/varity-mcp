@@ -16,7 +16,7 @@ export interface CLIResult {
 export async function execCLI(
   command: string,
   args: string[] = [],
-  options: { timeout?: number; cwd?: string } = {}
+  options: { timeout?: number; cwd?: string; env?: NodeJS.ProcessEnv } = {}
 ): Promise<CLIResult> {
   const timeout = options.timeout ?? 120_000; // 2 min default
 
@@ -24,7 +24,7 @@ export async function execCLI(
     const { stdout, stderr } = await execFileAsync(command, args, {
       timeout,
       cwd: options.cwd,
-      env: { ...process.env, FORCE_COLOR: "0" },
+      env: { ...process.env, FORCE_COLOR: "0", ...(options.env ?? {}) },
       maxBuffer: 10 * 1024 * 1024, // 10 MB
     });
 

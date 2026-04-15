@@ -98,7 +98,7 @@ Steps:
 1. Call varity_doctor to verify the environment
 2. Call varity_build to compile the project
 3. Call varity_deploy to deploy to production
-4. Call varity_submit_to_store with ${price ? `price $${price}/month` : "your chosen price"}
+4. Call varity_submit_to_store with ${price ? `price $${price}/month` : "your chosen price"} — this opens a browser page; tell the developer to click Submit to finalize the listing
 5. Call varity_open_browser to view the live app
 6. Share the App Store listing with your client
 

@@ -1,9 +1,21 @@
 import { z } from "zod";
-import { readdir, readFile, access } from "node:fs/promises";
+import { readdir, readFile, access, writeFile, mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { execCLI, execVaritykit, isCLIAvailable } from "../utils/cli-bridge.js";
 import { getDeploymentsDir } from "../utils/config.js";
+
+/** Save build output as a log file so varity_deploy_logs can show real content. */
+async function saveBuildLog(deploymentId: string, buildOutput: string): Promise<void> {
+  try {
+    const deploymentsDir = getDeploymentsDir();
+    await mkdir(deploymentsDir, { recursive: true });
+    await writeFile(join(deploymentsDir, `${deploymentId}.log`), buildOutput, "utf-8");
+  } catch {
+    // Non-critical — don't fail deploy if log write fails
+  }
+}
 
 export function registerDeployTool(server: McpServer): void {
   server.registerTool(
@@ -69,6 +81,41 @@ export function registerDeployTool(server: McpServer): void {
         }
       }
 
+      // Pre-check Python version — varitykit requires 3.10+. Fail fast with an
+      // actionable message rather than letting varitykit crash with a confusing
+      // traceback (ImportError / SyntaxError).
+      {
+        const pyCmd = process.platform === "win32" ? "python" : "python3";
+        const pyCheck = await execCLI(pyCmd, ["--version"], { timeout: 5_000 });
+        if (pyCheck.exitCode === 0 && pyCheck.stdout) {
+          const verMatch = pyCheck.stdout.trim().match(/Python\s+(\d+)\.(\d+)/i);
+          const pyMajor = verMatch ? parseInt(verMatch[1]!, 10) : null;
+          const pyMinor = verMatch ? parseInt(verMatch[2]!, 10) : null;
+          const meetsReq =
+            pyMajor !== null &&
+            pyMinor !== null &&
+            (pyMajor > 3 || (pyMajor === 3 && pyMinor >= 10));
+          if (!meetsReq) {
+            const detected = pyCheck.stdout.trim();
+            return errorResponse(
+              "PYTHON_VERSION_REQUIRED",
+              `Deployment requires Python 3.10+ but ${detected} was detected. varitykit (the Varity deploy CLI) requires Python 3.10 or higher.`,
+              `Fix: upgrade Python to 3.10+ using one of these methods:\n\n` +
+              `  Fastest (pyenv — works on any machine):\n` +
+              `    curl https://pyenv.run | bash\n` +
+              `    pyenv install 3.11\n` +
+              `    pyenv global 3.11\n\n` +
+              `  macOS (Homebrew):\n` +
+              `    brew install python@3.11\n\n` +
+              `  Windows / direct download:\n` +
+              `    https://python.org/downloads  (pick 3.11 or 3.12)\n\n` +
+              `After upgrading, run varity_doctor to confirm everything is ready, then try deploying again.`
+            );
+          }
+        }
+        // If Python is not detectable, let varitykit surface the error naturally
+      }
+
       const cwd = path || process.cwd();
 
       // Validate that the project directory exists before attempting deploy
@@ -84,17 +131,40 @@ export function registerDeployTool(server: McpServer): void {
 
       // Auto-build before deploying
       let buildSkipped = true;
+      // Capture build output so we can save it as a log after deploy succeeds
+      let capturedBuildOutput = "";
       try {
         const pkgRaw = await readFile(`${cwd}/package.json`, "utf-8");
         const pkg = JSON.parse(pkgRaw);
         if (pkg.scripts?.build) {
           buildSkipped = false;
-          const buildResult = await execCLI("npm", ["run", "build"], { cwd, timeout: 300_000 });
+          const buildResult = await execCLI("npm", ["run", "build"], {
+            cwd,
+            timeout: 300_000,
+            // Increase Node.js heap to 4 GB to avoid OOM kills on large dependency trees
+            env: { ...process.env, NODE_OPTIONS: "--max-old-space-size=4096" },
+          });
+          // Capture full build output for log saving regardless of success/failure
+          capturedBuildOutput = (buildResult.stdout || "") + "\n" + (buildResult.stderr || "");
+
           if (buildResult.exitCode !== 0) {
+            const rawTail = capturedBuildOutput.slice(-2000);
+            // Save failed build log so varity_deploy_logs can show it
+            await saveBuildLog(`build-failed-${Date.now()}`, capturedBuildOutput);
+            const fixHint =
+              capturedBuildOutput.includes("Killed") || capturedBuildOutput.includes("out of memory") || capturedBuildOutput.includes("heap out of memory")
+                ? "The build ran out of memory. Close other applications to free RAM, then try again."
+                : (capturedBuildOutput.includes("PageNotFoundError") || capturedBuildOutput.includes("Cannot find module for page"))
+                ? "Clear your Next.js build cache: rm -rf .next, then try deploying again. This happens when a previous build was interrupted. Also run varity_install_deps to ensure all dependencies are installed."
+                : (capturedBuildOutput.includes("Cannot find module") || capturedBuildOutput.includes("Module not found")) && !capturedBuildOutput.includes("for page")
+                ? "A required dependency is missing. Run: npm install --legacy-peer-deps in your project directory, then try deploying again. If your next.config.js is missing the resolve.alias stubs, recreate it from a fresh varity_init project."
+                : capturedBuildOutput.includes("Type error") || capturedBuildOutput.includes("TypeScript")
+                ? "Fix the TypeScript errors shown above, then try deploying again."
+                : "Check the build errors above, fix them, and try deploying again.";
             return errorResponse(
               "BUILD_FAILED",
-              `Build failed. Fix the errors before deploying:\n${(buildResult.stderr || buildResult.stdout).substring(0, 1000)}`,
-              "Check the build errors above, fix them, and try deploying again."
+              `Local build failed before deploy. Build output:\n${rawTail}`,
+              fixHint
             );
           }
         }
@@ -107,6 +177,32 @@ export function registerDeployTool(server: McpServer): void {
       }
 
       const args = ["deploy"];
+
+      // Pre-detect framework from package.json to avoid varitykit's internal detection failing.
+      // This ensures projects scaffolded by varity_init always deploy successfully.
+      let detectedHosting: "static" | "dynamic" | "unknown" = "unknown";
+      let orchestrationSummary = "Hosting: Auto-detected";
+      try {
+        const pkgForDeploy = JSON.parse(await readFile(`${cwd}/package.json`, "utf-8"));
+        const deps = { ...pkgForDeploy.dependencies, ...pkgForDeploy.devDependencies };
+        if ("next" in deps) {
+          // Check if static export (the Varity default) or dynamic
+          let isStatic = true;
+          try {
+            const nextCfg = await readFile(`${cwd}/next.config.js`, "utf-8");
+            isStatic = nextCfg.includes("output: 'export'") || nextCfg.includes('output: "export"');
+          } catch {
+            // No next.config.js — assume static
+          }
+          detectedHosting = isStatic ? "static" : "dynamic";
+          orchestrationSummary = isStatic
+            ? "Detected: Next.js static app → Hosting: Global CDN"
+            : "Detected: Dynamic app with API routes → Hosting: Cloud compute (auto-configured with database)";
+          args.push("--hosting", detectedHosting);
+        }
+      } catch {
+        // Can't read package.json — let varitykit detect
+      }
 
       if (submit_to_store) {
         args.push("--submit-to-store");
@@ -127,6 +223,7 @@ export function registerDeployTool(server: McpServer): void {
         let fileCount = "unknown";
         let deploymentId = "unknown";
 
+        let ipfsUrl: string | undefined;
         try {
           const deploymentsDir = getDeploymentsDir();
           const files = await readdir(deploymentsDir);
@@ -135,18 +232,56 @@ export function registerDeployTool(server: McpServer): void {
             const latest = JSON.parse(
               await readFile(`${deploymentsDir}/${jsonFiles[0]}`, "utf-8")
             );
-            deployUrl =
+            // Prefer the clean varity.app custom domain URL over raw IPFS/provider URLs
+            const rawUrl =
               latest.custom_domain?.url ||
-              latest.ipfs?.gateway_url ||
-              latest.ipfs?.thirdweb_url ||
               latest.akash?.url ||
               latest.url ||
+              latest.ipfs?.gateway_url ||
+              latest.ipfs?.thirdweb_url ||
               "unknown";
+
+            // If the resolved URL is a raw IPFS hash, construct a clean varity.app URL
+            const isRawIpfs =
+              rawUrl.includes("ipfs.io/ipfs/") ||
+              rawUrl.includes("ipfscdn.") ||
+              rawUrl.includes(".thirdwebcdn.");
+            if (isRawIpfs) {
+              ipfsUrl = rawUrl; // preserve as secondary
+              // Source the app slug from the deployment record first
+              const subdomain =
+                latest.custom_domain?.subdomain ||
+                latest.app_name ||
+                latest.project_name;
+              if (subdomain) {
+                deployUrl = `https://varity.app/${subdomain}/`;
+              } else {
+                // Fall back to reading the project's package.json name
+                try {
+                  const pkgJson = JSON.parse(await readFile(`${cwd}/package.json`, "utf-8"));
+                  const pkgName: string | undefined = pkgJson.name;
+                  if (pkgName) {
+                    deployUrl = `https://varity.app/${pkgName.toLowerCase().replace(/[^a-z0-9-]/g, "-")}/`;
+                  } else {
+                    deployUrl = rawUrl;
+                  }
+                } catch {
+                  deployUrl = rawUrl;
+                }
+              }
+            } else {
+              deployUrl = rawUrl;
+            }
+
             buildSize = latest.build?.size_mb
               ? `${latest.build.size_mb.toFixed(1)} MB`
               : "unknown";
             fileCount = String(latest.build?.files ?? latest.ipfs?.file_count ?? "unknown");
             deploymentId = latest.deployment_id || jsonFiles[0]!.replace(".json", "");
+            // Save the build log so varity_deploy_logs can show real output
+            if (capturedBuildOutput && deploymentId !== "unknown") {
+              await saveBuildLog(deploymentId, capturedBuildOutput);
+            }
           }
         } catch {
           // Fallback to regex parsing of CLI output
@@ -170,14 +305,18 @@ export function registerDeployTool(server: McpServer): void {
             status: "deployed",
             build_size: buildSize,
             files: fileCount,
-            submitted_to_store: submit_to_store,
+            store_listing: submit_to_store ? "submitted" : "not_submitted",
             share_card: cardUrl || undefined,
             share_image: cardUrl ? `${cardUrl}/image.png` : undefined,
+            orchestration: orchestrationSummary,
             infrastructure: {
-              hosting: "Varity (global)",
-              database: "Database (included)",
+              hosting: detectedHosting === "static" ? "Global CDN — served from 30+ edge locations worldwide (auto-selected)" : detectedHosting === "dynamic" ? "Cloud compute — dedicated CPU/RAM on distributed providers (auto-selected)" : "Varity (auto-selected)",
+              database: "Document database (included)",
               auth: "Authentication (included)",
             },
+            build_note: !buildSkipped
+              ? "Note: varity_deploy ran npm run build internally to produce the exact artifact uploaded to production. If you also ran varity_build separately, that earlier build was a local verification step — the deploy's own build is what's live."
+              : undefined,
             next_steps: submit_to_store
               ? [
                   `App live at: ${deployUrl}`,
@@ -192,7 +331,7 @@ export function registerDeployTool(server: McpServer): void {
                   `Or visit: https://developer.store.varity.so`,
                 ],
           },
-          `Deployed successfully! Live at: ${deployUrl}${cardUrl ? ` | Share: ${cardUrl}` : ""}`
+          `Deployed successfully! ${orchestrationSummary}. Live at: ${deployUrl}${cardUrl ? ` | Share: ${cardUrl}` : ""}`
         );
       }
 
@@ -201,13 +340,38 @@ export function registerDeployTool(server: McpServer): void {
 
       if (
         output.includes("No framework detected") ||
-        output.includes("not found") ||
         output.includes("Aborted")
       ) {
         return errorResponse(
           "NO_FRAMEWORK",
           `Could not detect a supported framework in: ${cwd}`,
           "Ensure you have a package.json with Next.js, React, or Vue. Run from the project root directory."
+        );
+      }
+
+      if (output.includes("PageNotFoundError") || output.includes("Cannot find module for page")) {
+        return errorResponse(
+          "NEXTJS_PAGE_ERROR",
+          `Deployment failed: Next.js could not find a required page module.\n\n${output.substring(0, 500)}`,
+          "Clear your Next.js build cache: rm -rf .next, then try deploying again. This happens when a previous build was interrupted. Steps to fix:\n1. Run: rm -rf .next\n2. Run varity_install_deps to ensure all dependencies are installed\n3. Ensure next.config.js has: output: 'export', images: { unoptimized: true }, trailingSlash: true\n4. Try deploying again"
+        );
+      }
+
+      // Detect broken Python CLI installation (ImportError, ModuleNotFoundError, etc.)
+      // This happens when varitykit is installed but the package itself is corrupt or
+      // its dependencies are missing. isCLIAvailable() returns true (the binary exists)
+      // but the CLI crashes on import with a Python traceback.
+      if (
+        output.includes("ImportError") ||
+        output.includes("ModuleNotFoundError") ||
+        output.includes("cannot import name") ||
+        output.includes("No module named") ||
+        output.includes("SyntaxError")
+      ) {
+        return errorResponse(
+          "CLI_BROKEN",
+          "The varitykit CLI is installed but not working — Python cannot load it. This usually means Python 3.10+ is not active.",
+          "1. Check Python version: python3 --version (need 3.10+)\n2. Run varity_doctor for detailed diagnosis and fix instructions\n3. After fixing Python, reinstall: pip install --upgrade varitykit"
         );
       }
 
@@ -230,7 +394,7 @@ export function registerDeployTool(server: McpServer): void {
       return errorResponse(
         "DEPLOY_FAILED",
         `Deployment failed: ${output.substring(0, 500)}`,
-        "Check the error above. Common fixes: ensure dependencies are installed (npm install), check for build errors (npm run build)."
+        "Check the error above. Common fixes: ensure dependencies are installed (run varity_install_deps), check for build errors (run varity_build for details)."
       );
     }
   );

@@ -213,9 +213,9 @@ One-command scaffold: npx create-varity-app my-app`,
     url: `${INFRASTRUCTURE.DOCS}/packages/sdk/overview`,
     content: `@varity-labs/sdk provides:
 
-- Zero-config database (PostgreSQL)
+- Zero-config database
 - Credential management
-- USDC utilities
+- App token management
 
 The core building block for all Varity apps.
 
@@ -254,17 +254,16 @@ Full type definitions included with @varity-labs/types.`,
   {
     title: "Infrastructure Configuration",
     section: "SDK",
-    url: `${INFRASTRUCTURE.DOCS}/packages/sdk/chains`,
+    url: `${INFRASTRUCTURE.DOCS}/packages/sdk/configuration`,
     content: `Varity SDK infrastructure configuration:
 
-USDC handling:
-- 6 decimals (not 18!)
-- formatUSDC() helper
-- parseUSDC() helper
-- Auto-configured network settings
+All infrastructure is configured automatically — no manual setup required.
 
-All infrastructure details are managed automatically.`,
-    keywords: ["config", "configuration", "infrastructure", "usdc", "network"],
+- Auto-configured database connection
+- Auto-configured auth credentials
+- Auto-configured hosting settings
+- Zero environment variables needed during development`,
+    keywords: ["config", "configuration", "infrastructure", "network", "environment"],
   },
 
   // ─── Packages: UI Kit ──────────────────────────────────────────────
@@ -357,7 +356,7 @@ import { PrivyStack } from '@varity-labs/ui-kit';
 </PrivyStack>
 
 Supports: Email magic links, Google, GitHub, Discord, Apple.
-Users see a normal login screen — zero crypto knowledge required.`,
+Users see a normal login screen — no special setup required.`,
     keywords: ["auth", "authentication", "login", "signup", "privy"],
   },
   {
@@ -601,7 +600,7 @@ varitykit app deploy
 Supports:
 - Static sites (Next.js, React, Vue)
 - Dynamic apps (Node.js backends)
-- IPFS and Akash hosting
+- CDN and cloud compute hosting
 - Automatic framework detection
 
 Options:
@@ -642,9 +641,9 @@ Your app gets production database, auth, and hosting automatically.`,
     keywords: ["deploy", "deployment", "publish", "production"],
   },
   {
-    title: "Deploy Your App (Varity L3)",
+    title: "Deploy Your App (Varity Infrastructure)",
     section: "Deploy",
-    url: `${INFRASTRUCTURE.DOCS}/deploy/varity-l3`,
+    url: `${INFRASTRUCTURE.DOCS}/deploy/varity-infrastructure`,
     content: `Deploy to Varity infrastructure:
 
 varitykit app deploy
@@ -655,7 +654,7 @@ Live in under 2 minutes with:
 - Zero config
 - Production database
 - Authentication included`,
-    keywords: ["deploy", "varity", "l3", "production"],
+    keywords: ["deploy", "varity", "infrastructure", "production"],
   },
   {
     title: "Environment Variables",
@@ -793,8 +792,8 @@ A: ~70% cheaper than AWS. Auth and database included.
 Q: What frameworks are supported?
 A: Next.js, React, Vue, Node.js. Auto-detected on deploy.
 
-Q: Do I need blockchain knowledge?
-A: No. Zero crypto knowledge required.
+Q: Do I need any special technical knowledge to use Varity?
+A: No. Build like you would any standard web app — no special setup required.
 
 Q: How do I monetize my app?
 A: Deploy with --submit-to-store. 90% revenue to you.`,
@@ -1022,6 +1021,39 @@ export function registerSearchDocsTool(server: McpServer): void {
           section: entry.section,
           url: entry.url,
           content: entry.content,
+          // Surface MCP tool equivalents so developers using the MCP server
+          // know which tool to call instead of running a CLI command.
+          ...(() => {
+            if (entry.content.includes("create-varity-app")) {
+              return {
+                mcp_note:
+                  "MCP equivalent: use the varity_init tool instead of `npx create-varity-app`. " +
+                  "It scaffolds the same project template directly in your workspace — no terminal required.",
+              };
+            }
+            if (
+              entry.content.includes("varitykit app deploy") ||
+              entry.content.includes("varitykit deploy") ||
+              entry.keywords.some((k) => k === "deploy" || k === "deployment")
+            ) {
+              return {
+                mcp_note:
+                  "MCP equivalent: use the varity_deploy tool to deploy without opening a terminal. " +
+                  "It runs the full deploy pipeline and returns a live URL automatically.",
+              };
+            }
+            if (
+              entry.content.includes("db.collection") ||
+              entry.keywords.some((k) => k === "database" || k === "crud" || k === "collection")
+            ) {
+              return {
+                mcp_note:
+                  "MCP equivalent: use the varity_add_collection tool to scaffold a new database collection " +
+                  "(TypeScript type, accessor, React hook, and dashboard page) in one step — no manual file editing required.",
+              };
+            }
+            return {};
+          })(),
         }));
 
         return successResponse(

@@ -47,12 +47,14 @@ export function registerOpenBrowserTool(server: McpServer): void {
         );
       }
 
-      return errorResponse(
-        "OPEN_FAILED",
-        `Failed to open browser: ${result.stderr || result.stdout || "unknown error"}`,
-        platform === "linux"
-          ? "Ensure xdg-open is installed (part of xdg-utils) or open the URL manually."
-          : "Try opening the URL manually in your browser."
+      // Still return success with the URL so the developer can open it manually
+      return successResponse(
+        {
+          opened: false,
+          url,
+          note: "Could not open browser automatically. Open this URL manually.",
+        },
+        `Could not open browser automatically. Open this URL manually: ${url}`
       );
     }
   );

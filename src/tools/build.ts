@@ -15,15 +15,82 @@ async function dirExists(dir: string): Promise<boolean> {
   }
 }
 
-/** Detect the output directory based on framework. */
-async function detectOutputDir(cwd: string): Promise<string | null> {
-  const candidates = [".next", "out", "dist", "build"];
+/** Return true if the project is a Next.js static export (output: 'export'). */
+async function isStaticExport(cwd: string): Promise<boolean> {
+  try {
+    const cfg = await readFile(resolve(cwd, "next.config.js"), "utf-8");
+    return cfg.includes("output: 'export'") || cfg.includes('output: "export"');
+  } catch {
+    try {
+      const cfg = await readFile(resolve(cwd, "next.config.ts"), "utf-8");
+      return cfg.includes("output: 'export'") || cfg.includes('output: "export"');
+    } catch {
+      return false;
+    }
+  }
+}
+
+/**
+ * Detect the deployable output directory based on framework and config.
+ * For Next.js static exports, `out/` is the deployable artifact.
+ * `.next/` is an intermediate build cache, not the deployable output.
+ */
+async function detectOutputDir(cwd: string): Promise<{ dir: string; isDeployable: boolean } | null> {
+  // For Next.js static export: deployable output is `out/`, not `.next/`
+  const staticExport = await isStaticExport(cwd);
+  if (staticExport) {
+    if (await dirExists(resolve(cwd, "out"))) {
+      return { dir: "out", isDeployable: true };
+    }
+    // Build ran but out/ not yet created — check .next/ as fallback
+    if (await dirExists(resolve(cwd, ".next"))) {
+      return { dir: ".next", isDeployable: false };
+    }
+  }
+
+  // Non-static-export: check common output dirs
+  const candidates = [".next", "dist", "build", "out"];
   for (const dir of candidates) {
     if (await dirExists(resolve(cwd, dir))) {
-      return dir;
+      return { dir, isDeployable: true };
     }
   }
   return null;
+}
+
+/**
+ * Parse Next.js build output for routes whose "First Load JS" exceeds
+ * the given threshold in KB (default 500 KB).
+ *
+ * Next.js route lines look like:
+ *   ┌ ○ /dashboard    5.18 kB    93.4 kB
+ * The SECOND size value is the "First Load JS" (total JS the browser downloads).
+ */
+function parseLargeBundles(
+  output: string,
+  thresholdKb = 500
+): Array<{ route: string; firstLoadKb: number; label: string }> {
+  const large: Array<{ route: string; firstLoadKb: number; label: string }> = [];
+  // Box-drawing chars used by Next.js: ┌ ├ └ │
+  const routeLineRe =
+    /^[┌├└│]\s+[○●◐λƒ✓✗]\s+(\S+)\s+[\d.]+\s+(?:B|kB|MB)\s+([\d.]+)\s+(B|kB|MB)/;
+  for (const line of output.split("\n")) {
+    const m = routeLineRe.exec(line);
+    if (!m) continue;
+    const route = m[1]!;
+    const size = parseFloat(m[2]!);
+    const unit = m[3]!;
+    const kb =
+      unit === "MB" ? size * 1024 : unit === "B" ? size / 1024 : size;
+    if (kb > thresholdKb) {
+      large.push({
+        route,
+        firstLoadKb: Math.round(kb),
+        label: `${size} ${unit}`,
+      });
+    }
+  }
+  return large;
 }
 
 /** Parse build errors from combined output. */
@@ -103,34 +170,88 @@ export function registerBuildTool(server: McpServer): void {
       const result = await execCLI("npm", ["run", "build"], {
         cwd,
         timeout: 300_000, // 5 minutes
+        // Increase Node.js heap to 4 GB to avoid OOM kills on large dependency trees
+        env: { ...process.env, NODE_OPTIONS: "--max-old-space-size=4096" },
       });
 
       const output = result.stdout + "\n" + result.stderr;
       const errors = parseBuildErrors(output);
 
       if (result.exitCode === 0) {
-        const outputDir = await detectOutputDir(cwd);
+        const outputInfo = await detectOutputDir(cwd);
+
+        // Check for large bundles (First Load JS > 500 KB)
+        const largeBundles = parseLargeBundles(output);
+        const bundleWarnings = largeBundles.map(
+          (b) =>
+            `ℹ ${b.route}: First Load JS is ${b.label}. For Varity dashboard apps, bundles up to ~700 kB are expected — the auth and UI framework account for most of this. Next.js code-splits per route so users only download what each page needs. No action required.`
+        );
+
+        // Determine the right message based on output type
+        let successMsg: string;
+        if (outputInfo?.dir === "out") {
+          successMsg = `Build succeeded! Deployable output in out/. Run varity_deploy to deploy.`;
+        } else if (outputInfo?.dir === ".next" && !outputInfo.isDeployable) {
+          successMsg = `TypeScript compilation succeeded (.next/ created). Static export (out/) was not produced — this may indicate an issue with output: 'export' configuration. Run varity_deploy to attempt a full deploy.`;
+        } else if (outputInfo) {
+          successMsg = `Build succeeded! Output in ${outputInfo.dir}/. Run varity_deploy to deploy.`;
+        } else {
+          successMsg = `Build compilation succeeded. Run varity_deploy to deploy.`;
+        }
+
+        if (bundleWarnings.length > 0) {
+          successMsg += `\n\nBundle size warnings (${bundleWarnings.length}):\n${bundleWarnings.join("\n")}`;
+        }
 
         return successResponse(
           {
             success: true,
-            output_dir: outputDir,
+            output_dir: outputInfo?.dir ?? null,
+            deployable_output: outputInfo?.isDeployable ?? false,
             errors: [],
+            bundle_warnings: bundleWarnings,
+            note: "This validates compilation locally and catches errors before deploying. varity_deploy also runs its own production build, so both tools call 'npm run build' — running varity_build first is recommended: it catches TypeScript and dependency errors quickly so you don't wait through a full deploy to discover them.",
           },
-          outputDir
-            ? `Build succeeded! Output in ${outputDir}/.`
-            : "Build succeeded!"
+          successMsg
         );
       }
 
-      // Build failed
-      return errorResponse(
-        "BUILD_FAILED",
+      // Build failed — always include the raw tail of output so the developer
+      // can see the actual failure reason (OOM kill, TypeScript error, missing import, etc.)
+      const rawTail = output.slice(-2000);
+      const errorSummary =
         errors.length > 0
-          ? `Build failed with ${errors.length} error${errors.length === 1 ? "" : "s"}:\n${errors.slice(0, 10).join("\n")}`
-          : `Build failed: ${output.substring(0, 500)}`,
-        "Fix the errors above and try building again. Common fixes: install missing dependencies (varity_install_deps), check for TypeScript errors."
-      );
+          ? `Build failed with ${errors.length} error${errors.length === 1 ? "" : "s"}:\n${errors.slice(0, 10).join("\n")}\n\nFull build output:\n${rawTail}`
+          : `Build failed:\n${rawTail}`;
+
+      // Context-aware fix suggestion based on error type
+      const fixSuggestion =
+        errors.some((e) => e.includes("Cannot find module") || e.includes("Module not found"))
+          ? "A required dependency is missing. Run: npm install --legacy-peer-deps in your project directory, then try building again. If the error persists, ensure your next.config.js has the resolve.alias stubs from the Varity template (run varity_init to get the correct config)."
+          : errors.some((e) => e.includes("Type error") || e.includes("TypeScript"))
+          ? (
+              // Detect the specific cast pattern generated by varity_add_collection for FK reference fields.
+              // TypeScript 5 rejects `(item as Record<string, string>)` when the item type has non-string fields.
+              // The fix is a one-liner: replace the cast with `(item as any)`.
+              errors.some((e) => e.includes("Conversion of type") || output.includes("Conversion of type") || output.includes("Record<string, string>"))
+                ? "TypeScript type error in a generated page. This is caused by a known codegen pattern in varity_add_collection. To fix:\n" +
+                  "  In the failing file, find any line with '(item as Record<string, string>)'\n" +
+                  "  Replace it with: (item as any)\n" +
+                  "  Example:\n" +
+                  "    Before: (item as Record<string, string>).name ?? ...\n" +
+                  "    After:  (item as any).name ?? ...\n" +
+                  "  The generated page should compile after this one-line fix."
+                : "Fix the TypeScript errors shown above, then try building again."
+            )
+          : output.includes("Permission denied") || output.includes("EACCES")
+          ? "A file permission error occurred — the Next.js binary may not be executable. Fix by running: rm -rf node_modules && npm install, then try building again."
+          : output.includes("ENOSPC") || output.includes("no space left")
+          ? "The build failed because the disk is full. Free up disk space (run `df -h` to check) and try again."
+          : output.includes("Killed") || output.includes("out of memory") || output.includes("heap out of memory")
+          ? "The build ran out of memory. Close other applications to free RAM, then try again."
+          : "Fix the errors above and try building again.";
+
+      return errorResponse("BUILD_FAILED", errorSummary, fixSuggestion);
     }
   );
 }

@@ -93,13 +93,25 @@ export function registerDoctorTool(server: McpServer): void {
       const hasVaritykit = await isCLIAvailable("varitykit");
       if (hasVaritykit) {
         const vkResult = await execCLI("varitykit", ["--version"], { timeout: 10_000 });
-        const version = vkResult.exitCode === 0 ? vkResult.stdout.trim() : "unknown";
-        checks.push({
-          name: "varitykit CLI",
-          status: "pass",
-          version,
-          message: `varitykit ${version} detected`,
-        });
+        if (vkResult.exitCode === 0 && vkResult.stdout.trim()) {
+          const version = vkResult.stdout.trim();
+          checks.push({
+            name: "varitykit CLI",
+            status: "pass",
+            version,
+            message: `varitykit ${version} detected`,
+          });
+        } else {
+          // Binary exists but won't run — almost always a Python version mismatch (< 3.10)
+          checks.push({
+            name: "varitykit CLI",
+            status: "fail",
+            version: "unknown",
+            message: "varitykit is installed but not working — likely a Python version mismatch (check the Python result above)",
+            fix: "Ensure Python 3.10+ is active, then reinstall: pip install --upgrade varitykit",
+          });
+          nextSteps.push("Ensure Python 3.10+ is active (check the Python result), then reinstall: pip install --upgrade varitykit");
+        }
       } else {
         checks.push({
           name: "varitykit CLI",
@@ -110,19 +122,36 @@ export function registerDoctorTool(server: McpServer): void {
         nextSteps.push("pip install varitykit");
       }
 
-      // 4. Python — required by varitykit
+      // 4. Python — varitykit requires 3.10+ for deploy
       try {
         const pyCmd = process.platform === "win32" ? "python" : "python3";
         const pyResult = await execCLI(pyCmd, ["--version"], { timeout: 5_000 });
-        if (pyResult.exitCode === 0) {
-          checks.push({ name: "Python", status: "pass", version: pyResult.stdout.trim(), message: `${pyResult.stdout.trim()} detected` });
+        if (pyResult.exitCode === 0 && pyResult.stdout) {
+          const version = pyResult.stdout.trim();
+          // Parse "Python 3.8.10" → major=3, minor=8
+          const verMatch = version.match(/Python\s+(\d+)\.(\d+)/i);
+          const major = verMatch ? parseInt(verMatch[1]!, 10) : null;
+          const minor = verMatch ? parseInt(verMatch[2]!, 10) : null;
+          const meetsRequirement = major !== null && minor !== null && (major > 3 || (major === 3 && minor >= 10));
+          if (meetsRequirement) {
+            checks.push({ name: "Python", status: "pass", version, message: `${version} detected` });
+          } else {
+            checks.push({
+              name: "Python",
+              status: "fail",
+              version,
+              message: `Python 3.10+ is required for deploy (found ${version})`,
+              fix: "Install Python 3.10+ from https://python.org",
+            });
+            nextSteps.push("Install Python 3.10+ from https://python.org (required for varitykit deploy)");
+          }
         } else {
-          checks.push({ name: "Python", status: "fail", message: "Python not found", fix: "Install Python 3.8+ from https://python.org" });
-          nextSteps.push("Install Python 3.8+ from https://python.org");
+          checks.push({ name: "Python", status: "fail", message: "Python not found", fix: "Install Python 3.10+ from https://python.org" });
+          nextSteps.push("Install Python 3.10+ from https://python.org");
         }
       } catch {
-        checks.push({ name: "Python", status: "fail", message: "Python not found", fix: "Install Python 3.8+ from https://python.org" });
-        nextSteps.push("Install Python 3.8+ from https://python.org");
+        checks.push({ name: "Python", status: "fail", message: "Python not found", fix: "Install Python 3.10+ from https://python.org" });
+        nextSteps.push("Install Python 3.10+ from https://python.org");
       }
 
       // 5. Authentication — check for deploy_key in config
@@ -143,26 +172,115 @@ export function registerDoctorTool(server: McpServer): void {
         nextSteps.push("varitykit auth login");
       }
 
-      // Determine overall readiness
-      const ready = checks.every((c) => c.status === "pass");
+      // 6. GitHub token — required specifically for varity_create_repo
+      // Treated as "warn" (not "fail") because deployment and all other tools work without it.
+      // Token resolution order (same as varity_create_repo):
+      //   1. GITHUB_TOKEN / GH_TOKEN env var
+      //   2. `gh auth token` (GitHub CLI) — succeeds if gh CLI is installed and authenticated
+      const githubToken = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+      if (githubToken) {
+        checks.push({
+          name: "GitHub Token",
+          status: "pass",
+          message: "GitHub token configured (varity_create_repo ready)",
+        });
+      } else {
+        // Mirror varity_create_repo's fallback: try gh auth token
+        let ghCliToken = false;
+        try {
+          const ghResult = await execCLI("gh", ["auth", "token"], { timeout: 5_000 });
+          ghCliToken = ghResult.exitCode === 0 && !!ghResult.stdout.trim();
+        } catch {
+          // gh CLI not available — that's fine
+        }
 
-      if (ready) {
+        if (ghCliToken) {
+          checks.push({
+            name: "GitHub Token",
+            status: "pass",
+            message: "GitHub CLI authenticated — varity_create_repo will use 'gh auth token' automatically",
+          });
+        } else {
+          checks.push({
+            name: "GitHub Token",
+            status: "warn" as any,
+            message: "No GitHub token found — varity_create_repo requires one. Options: (1) install gh CLI and run 'gh auth login', or (2) set GITHUB_TOKEN env var.",
+            fix: "Option 1 (easiest): Install GitHub CLI (https://cli.github.com) and run 'gh auth login'. Option 2: Create a token at https://github.com/settings/tokens (needs 'repo' scope), then set: export GITHUB_TOKEN=ghp_...",
+          });
+          // Not added to nextSteps — only blocks varity_create_repo, not deployment
+        }
+      }
+
+      // 7. RAM check — Next.js builds need ~2 GB
+      try {
+        const memInfo = await import("node:os").then(os => os.freemem());
+        const freeGB = memInfo / (1024 * 1024 * 1024);
+        if (freeGB < 2) {
+          checks.push({
+            name: "RAM",
+            status: "warn" as any,
+            message: `Low RAM (${freeGB.toFixed(1)} GB free). Next.js builds require ~2 GB and may be killed.`,
+            fix: "Close other applications or increase available memory before building.",
+          });
+        } else {
+          checks.push({
+            name: "RAM",
+            status: "pass",
+            message: `${freeGB.toFixed(1)} GB free (builds require ~2 GB)`,
+          });
+        }
+      } catch {
+        // Can't check RAM — skip
+      }
+
+      // Tiered readiness:
+      // - `ready` = Node.js + npm work → can use varity_init, varity_build, varity_deploy (MCP tools)
+      // - `cli_deploy_ready` = also Python + varitykit + auth → can use `varitykit app deploy` CLI directly
+      // Python / varitykit only block the CLI path, NOT the MCP-based varity_deploy tool.
+      const coreChecks = checks.filter((c) => c.name === "Node.js" || c.name === "npm");
+      const ready = coreChecks.every((c) => c.status === "pass");
+      const cliDeployReady = checks.every((c) => c.status === "pass" || (c.status as string) === "warn");
+
+      const coreIssues = checks.filter((c) => (c.name === "Node.js" || c.name === "npm") && c.status === "fail");
+      const cliIssues = checks.filter(
+        (c) => !["Node.js", "npm"].includes(c.name) && (c.status === "fail")
+      );
+
+      if (ready && cliDeployReady) {
         return successResponse(
           {
             ready: true,
+            cli_deploy_ready: true,
             checks,
           },
-          "Environment is ready! All prerequisites are met — you can build and deploy apps with Varity."
+          "Environment is ready! All prerequisites are met — you can build, develop, and deploy apps with Varity."
         );
       }
 
+      if (ready && !cliDeployReady) {
+        // Core tools work, but Python / varitykit / auth missing
+        const cliFixList = cliIssues.map((c) => c.fix || c.message).filter(Boolean);
+        return successResponse(
+          {
+            ready: true,
+            cli_deploy_ready: false,
+            checks,
+            note: `Development tools (varity_init, varity_build, varity_dev_server) are ready. Important: varity_deploy also requires Python 3.10+ and a working varitykit CLI — fix the following ${cliIssues.length} issue${cliIssues.length === 1 ? "" : "s"} before deploying:`,
+            cli_issues: cliFixList,
+          },
+          `Ready for development (init, build, dev server work). Fix ${cliIssues.length} issue${cliIssues.length === 1 ? "" : "s"} before deploying: ${cliFixList.join("; ")}`
+        );
+      }
+
+      // Core tools (Node.js / npm) are broken — nothing works
       return successResponse(
         {
           ready: false,
+          cli_deploy_ready: false,
           checks,
           next_steps: nextSteps,
         },
-        `Environment is not ready. ${nextSteps.length} issue${nextSteps.length === 1 ? "" : "s"} to fix before you can deploy.`
+        `Environment is not ready. Fix ${coreIssues.length} core issue${coreIssues.length === 1 ? "" : "s"} to begin development: ${coreIssues.map((c) => c.fix || c.message).join("; ")}`
       );
     }
   );

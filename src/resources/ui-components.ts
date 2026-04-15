@@ -3,6 +3,30 @@ export const UI_COMPONENTS_REFERENCE = `
 
 All imports: \`import { ComponentName } from '@varity-labs/ui-kit'\`
 
+## Visual Preview
+
+See what every component looks like before using it:
+
+- **Live component gallery:** https://varity.app/ui-kit/ — browse all components rendered in a live Next.js app, grouped by category
+- **Source examples:** https://github.com/varity-labs/varity-sdk/tree/main/templates/saas-starter — the SaaS template uses every component; search for any component name to see it in context
+
+### What key components look like
+
+| Component | Appearance |
+|-----------|-----------|
+| **KPICard** | Card with a bold metric number (e.g. "1,284"), a trend arrow (↑ +12% green / ↓ -3% red), a label below, and an optional icon in the top-right corner |
+| **DataTable** | Full-width table with sortable column headers (clicking toggles ↑/↓), alternating row shading, click-to-select rows, and built-in pagination controls at the bottom |
+| **EmptyState** | Centered panel with a large icon (e.g. folder outline), bold heading, a short description, and a primary action button — shown when a list has zero items |
+| **LoadingSkeleton** | Animated gray shimmer blocks that match the shape of the content being loaded (card = rounded rect, table = rows of bars, list = stacked lines) |
+| **Dialog** | Centered modal with a white card, title, body text, and footer action buttons — backdrop dims the page behind it; closes on Escape or backdrop click |
+| **Badge** | Small inline pill with colored background: green (active/success), blue (info), yellow (warning/pending), red (error/danger), gray (neutral/inactive) |
+| **Button** | Solid primary (blue), secondary (gray), outline (border only), ghost (no background), or danger (red) — sizes sm/md/lg, optional spinner when loading |
+| **ToastProvider + useToast** | Slide-in notifications from the bottom-right corner: green checkmark (success), red X (error), blue info icon — auto-dismiss after 4 seconds |
+| **DashboardLayout** | Full-page shell: collapsible left sidebar with nav links, top header with search bar and user avatar, main content area, optional footer |
+| **CommandPalette** | Full-width search overlay triggered by Cmd+K (Mac) / Ctrl+K (Windows) — searches across pages, team members, and data in real time |
+| **Avatar / AvatarGroup** | Circular image or fallback initials; AvatarGroup stacks overlapping circles with a "+N more" overflow count |
+| **ProgressBar** | Thin horizontal bar filling left to right with percentage — color variants: primary (blue), success (green), warning (yellow), danger (red) |
+
 ---
 
 ## FORM COMPONENTS
@@ -52,6 +76,11 @@ All imports: \`import { ComponentName } from '@varity-labs/ui-kit'\`
 | error | string? | - |
 | options | { value: string; label: string }[] | required |
 | ...rest | SelectHTMLAttributes | - |
+
+> **Note:** \`placeholder\` is **not** a valid attribute on \`<select>\` elements and will cause a TypeScript error. To show a prompt option, add a blank entry as the first item in \`options\` instead:
+> \`\`\`tsx
+> options={[{ value: '', label: 'Choose...' }, ...myOptions]}
+> \`\`\`
 
 ### Toggle
 \`\`\`tsx
@@ -297,7 +326,7 @@ Trigger with Cmd+K / Ctrl+K. Searches across navigation, projects, tasks, team.
     { label: 'Dashboard', icon: 'dashboard', path: '/', active: true },
     { label: 'Analytics', icon: 'analytics', path: '/analytics', children: [...] },
   ]}
-  user={{ name: 'John', address: 'john@example.com', avatarUrl: '/avatar.png' }}
+  user={{ name: 'John', email: 'john@example.com', avatarUrl: '/avatar.png' }}
   onLogout={handleLogout}
   onNavigate={(path) => router.push(path)}
   onSearchClick={() => setCommandPaletteOpen(true)}
@@ -309,7 +338,8 @@ Trigger with Cmd+K / Ctrl+K. Searches across navigation, projects, tasks, team.
 </DashboardLayout>
 \`\`\`
 Includes DashboardHeader, DashboardSidebar, DashboardFooter. NavigationItem supports nested \`children\`.
-UserInfo: \`{ name: string; address: string; avatarUrl?: string }\`.
+UserInfo: \`{ name: string; email: string; avatarUrl?: string }\`.
+> **Tip:** Populate from \`useCurrentUser()\`: \`const { name, email } = useCurrentUser(); // pass: user={{ name, email }}\`
 
 ### KPICard
 \`\`\`tsx
@@ -390,7 +420,169 @@ Also exported: \`AnalyticsCard\`, \`ChartContainer\`, \`MetricDisplay\`, \`Spark
 | useToast() | { success, error, info } | Show toast notifications (must be inside ToastProvider) |
 | useTheme() | theme context | Theme management (from Branding/ThemeProvider) |
 | usePrivy() | { ready, authenticated, user, login, logout } | Auth state (re-export from @privy-io/react-auth) |
-| useWallets() | { wallets } | Connected wallets (re-export) |
 | useLogin() | login helpers | Login utilities (re-export) |
 | useLogout() | logout helpers | Logout utilities (re-export) |
+
+---
+
+## COMPLETE PAGE EXAMPLE
+
+Full dashboard page combining \`useCustomers()\` (database layer) with \`DataTable\` and \`Dialog\` (UI kit).
+
+\`\`\`tsx
+// app/dashboard/customers/page.tsx
+"use client";
+
+import { useState } from "react";
+import {
+  DataTable,
+  Dialog,
+  Button,
+  Badge,
+  Input,
+  useToast,
+  LoadingSkeleton,
+  EmptyState,
+} from "@varity-labs/ui-kit";
+import { useCustomers } from "@/lib/hooks"; // generated database hook
+
+interface Customer {
+  id: string;
+  name: string;
+  email: string;
+  plan: string;
+  status: "active" | "inactive" | "trial";
+  mrr: number;
+  joinedAt: string;
+}
+
+export default function CustomersPage() {
+  const toast = useToast();
+  const { data: customers, loading, error, refresh, create, update, remove } = useCustomers();
+
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
+
+  const columns = [
+    {
+      key: "name",
+      header: "Customer",
+      sortable: true,
+      render: (_: unknown, row: Customer) => (
+        <div className="flex flex-col">
+          <span className="font-medium">{row.name}</span>
+          <span className="text-sm text-gray-500">{row.email}</span>
+        </div>
+      ),
+    },
+    {
+      key: "plan",
+      header: "Plan",
+      render: (val: string) => (
+        <Badge variant={val === "Business Pro" ? "blue" : "gray"}>{val}</Badge>
+      ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      render: (val: string) => (
+        <Badge
+          variant={val === "active" ? "green" : val === "trial" ? "yellow" : "gray"}
+          dot
+        >
+          {val.charAt(0).toUpperCase() + val.slice(1)}
+        </Badge>
+      ),
+    },
+    {
+      key: "mrr",
+      header: "MRR",
+      align: "right" as const,
+      sortable: true,
+      render: (val: number) => \`$\${val.toLocaleString()}\`,
+    },
+    {
+      key: "joinedAt",
+      header: "Joined",
+      render: (val: string) => new Date(val).toLocaleDateString(),
+    },
+  ];
+
+  if (loading) return <LoadingSkeleton type="table" items={8} />;
+
+  if (error) {
+    toast.error("Failed to load customers");
+    return (
+      <EmptyState
+        title="Could not load customers"
+        description="There was a problem fetching customer data."
+        action={{ label: "Try again", onClick: refresh }}
+      />
+    );
+  }
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Customers</h1>
+        <Button variant="primary" onClick={() => toast.info("Coming soon")}>
+          Add Customer
+        </Button>
+      </div>
+
+      <DataTable
+        columns={columns}
+        data={customers ?? []}
+        pagination
+        pageSize={10}
+        hoverable
+        striped
+        loading={loading}
+        emptyMessage="No customers yet"
+        onRowClick={(row) => {
+          setSelectedCustomer(row as Customer);
+          setIsDetailOpen(true);
+        }}
+      />
+
+      {/* Customer detail dialog */}
+      <Dialog
+        open={isDetailOpen}
+        onClose={() => setIsDetailOpen(false)}
+        title={selectedCustomer?.name ?? "Customer"}
+        description="Customer details and account information"
+      >
+        {selectedCustomer && (
+          <div className="space-y-4">
+            <Input label="Email" value={selectedCustomer.email} readOnly />
+            <Input label="Plan" value={selectedCustomer.plan} readOnly />
+            <Input label="Monthly Revenue" value={\`$\${selectedCustomer.mrr}\`} readOnly />
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setIsDetailOpen(false)}>
+                Close
+              </Button>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  toast.success(\`Viewing \${selectedCustomer.name}'s full profile\`);
+                  setIsDetailOpen(false);
+                }}
+              >
+                View Full Profile
+              </Button>
+            </div>
+          </div>
+        )}
+      </Dialog>
+    </div>
+  );
+}
+\`\`\`
+
+**Key patterns shown:**
+- \`useCustomers()\` returns \`{ data, loading, error, create, update, remove, refresh }\` — same shape as all generated data hooks
+- \`DataTable\` \`onRowClick\` feeds directly into \`Dialog\` open state
+- \`LoadingSkeleton type="table"\` replaces the whole page while data loads
+- \`EmptyState\` with \`action\` handles error recovery
+- \`useToast()\` for non-blocking user feedback throughout
 `;

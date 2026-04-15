@@ -9,7 +9,7 @@ const RESERVED_WORDS = new Set([
   "delete", "do", "else", "export", "extends", "finally", "for", "function",
   "if", "import", "in", "instanceof", "let", "new", "return", "super",
   "switch", "this", "throw", "try", "typeof", "var", "void", "while", "with", "yield",
-  "id", "created_at", "updated_at",
+  "id", "createdAt", "updatedAt",
 ]);
 
 /**
@@ -63,6 +63,87 @@ function toTSType(type: string): string {
   return map[type] ?? type;
 }
 
+/**
+ * Module-level per-project serialization lock.
+ *
+ * Prevents two concurrent varity_add_collection calls from interleaving file
+ * writes, which would produce duplicate TypeScript interfaces and cause
+ * compilation errors (BUG-003).
+ */
+const projectMutexes = new Map<string, Promise<void>>();
+
+async function withProjectLock<T>(projectPath: string, fn: () => Promise<T>): Promise<T> {
+  const prev = projectMutexes.get(projectPath) ?? Promise.resolve();
+  let unlock!: () => void;
+  const slot = new Promise<void>((res) => { unlock = res; });
+  // Future callers wait for this slot; even if fn() throws we release the lock
+  projectMutexes.set(projectPath, prev.then(() => slot).catch(() => slot));
+  await prev;
+  try {
+    return await fn();
+  } finally {
+    unlock();
+  }
+}
+
+/**
+ * Convert a raw field name (camelCase or snake_case) to a readable label.
+ * e.g. "clientId" → "Client", "firstName" → "First Name", "due_date" → "Due Date"
+ *
+ * Rules:
+ * - camelCase and snake_case are split into words
+ * - Standalone "id" / "Id" word is uppercased to "ID"
+ * - Trailing "ID" is stripped from foreign-key reference fields
+ *   (e.g. "clientId" → "Client", "userId" → "User")
+ */
+function humanizeFieldName(name: string): string {
+  // Replace snake_case underscores with spaces
+  const withSpaces = name.replace(/_/g, " ");
+  // Split camelCase: insert space before uppercase letters preceded by lowercase
+  const camelSplit = withSpaces.replace(/([a-z])([A-Z])/g, "$1 $2");
+  // Capitalize each word; normalize "id" / "Id" → "ID"
+  const words = camelSplit
+    .split(" ")
+    .map((word) =>
+      word.toLowerCase() === "id" ? "ID" : word.charAt(0).toUpperCase() + word.slice(1)
+    );
+  // Strip trailing "ID" from reference fields (clientId → "Client", not "Client ID")
+  if (words.length > 1 && words[words.length - 1] === "ID") {
+    words.pop();
+  }
+  return words.join(" ");
+}
+
+/** Returns true if the error is a disk-full I/O error. */
+function isDiskFullError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const code = (err as NodeJS.ErrnoException).code;
+  return code === "ENOSPC" || err.message.includes("ENOSPC") || err.message.includes("no space left");
+}
+
+/**
+ * Pick a semantic Material icon name based on common collection names.
+ * Falls back to 'list' for unknown names.
+ */
+function getIconForCollection(name: string): string {
+  const iconMap: Record<string, string> = {
+    // "people" reserved for team/user-type collections so it doesn't clash with
+    // business-entity collections like clients/contacts (which get 'tag').
+    users: 'people', members: 'people', staff: 'people', team: 'people', employees: 'people',
+    clients: 'tag', customers: 'tag', contacts: 'tag', partners: 'tag', vendors: 'tag',
+    deals: 'trending_up', opportunities: 'trending_up', leads: 'trending_up', sales: 'trending_up', pipeline: 'trending_up',
+    invoices: 'receipt', payments: 'receipt', bills: 'receipt', transactions: 'receipt', charges: 'receipt',
+    products: 'inventory', items: 'inventory', inventory: 'inventory', catalog: 'inventory', listings: 'inventory',
+    orders: 'shopping_cart', purchases: 'shopping_cart', subscriptions: 'shopping_cart',
+    events: 'event', appointments: 'event', meetings: 'event', bookings: 'event', reservations: 'event',
+    reports: 'bar_chart', analytics: 'bar_chart', metrics: 'bar_chart', stats: 'bar_chart',
+    documents: 'description', files: 'description', notes: 'description', articles: 'description',
+    tickets: 'confirmation_number', support: 'confirmation_number', issues: 'confirmation_number', bugs: 'confirmation_number',
+    campaigns: 'campaign', announcements: 'campaign', notifications: 'notifications',
+  };
+  return iconMap[name.toLowerCase()] ?? 'list';
+}
+
 export function registerAddCollectionTool(server: McpServer): void {
   server.registerTool(
     "varity_add_collection",
@@ -105,8 +186,6 @@ export function registerAddCollectionTool(server: McpServer): void {
     },
     async ({ path, name, fields, add_page }) => {
       const projectPath = resolve(path || process.cwd());
-      const filesModified: string[] = [];
-      const filesCreated: string[] = [];
 
       const pascalSingular = toPascalSingular(name);
       const pascalPlural = toPascalPlural(name);
@@ -119,136 +198,180 @@ export function registerAddCollectionTool(server: McpServer): void {
         return errorResponse(
           "INVALID_FIELD_NAME",
           `Field name "${invalidField.name}" is a reserved word and cannot be used.`,
-          "Choose a different field name. Reserved: id, created_at, updated_at, and JavaScript keywords like class, delete, return, etc."
+          "Choose a different field name. Reserved: id, createdAt, updatedAt, and JavaScript keywords like class, delete, return, etc."
         );
       }
 
-      // ── 1. Append interface to src/types/index.ts ──
+      // Serialize all file operations per project path.
+      // This prevents two simultaneous calls from interleaving writes and
+      // producing duplicate interfaces in types/index.ts (BUG-003).
+      return withProjectLock(projectPath, async () => {
+        const filesModified: string[] = [];
+        const filesCreated: string[] = [];
 
-      const typesPath = resolve(projectPath, "src/types/index.ts");
-      let typesContent: string;
-      try {
-        typesContent = await readFile(typesPath, "utf-8");
-      } catch {
-        return errorResponse(
-          "FILE_NOT_FOUND",
-          `Could not read ${typesPath}`,
-          "Ensure the project was created with varity_init and has src/types/index.ts."
-        );
-      }
+        // ── Read all source files up front before writing anything ──
+        // This allows us to do collision checks and rollback atomically (BUG-002).
 
-      // Build the interface
-      const fieldLines = fields
-        .map((f) => `  ${f.name}: ${toTSType(f.type)};`)
-        .join("\n");
-      const interfaceBlock = [
-        "",
-        `export interface ${pascalSingular} {`,
-        "  id: string;",
-        fieldLines,
-        "  created_at: string;",
-        "  updated_at: string;",
-        "}",
-        "",
-      ].join("\n");
+        const typesPath = resolve(projectPath, "src/types/index.ts");
+        const dbPath = resolve(projectPath, "src/lib/database.ts");
+        const hooksPath = resolve(projectPath, "src/lib/hooks.ts");
 
-      typesContent = typesContent.trimEnd() + "\n" + interfaceBlock;
-      await writeFile(typesPath, typesContent, "utf-8");
-      filesModified.push("src/types/index.ts");
-
-      // ── 2. Add collection accessor to src/lib/database.ts ──
-
-      const dbPath = resolve(projectPath, "src/lib/database.ts");
-      let dbContent: string;
-      try {
-        dbContent = await readFile(dbPath, "utf-8");
-      } catch {
-        return errorResponse(
-          "FILE_NOT_FOUND",
-          `Could not read ${dbPath}`,
-          "This project may not have been created with varity_init. Run varity_init first to scaffold the project."
-        );
-      }
-
-      // Check if this collection already exists
-      if (dbContent.includes(`export const ${camelPlural} =`)) {
-        return errorResponse(
-          "COLLECTION_EXISTS",
-          `Collection '${name}' already exists in this project.`
-        );
-      }
-
-      // Add the import for the new type if not already present
-      const importRegex = /import\s+type\s*\{([^}]+)\}\s*from\s*['"]\.\.\/types['"]/;
-      const importMatch = dbContent.match(importRegex);
-      if (importMatch) {
-        const existingTypes = importMatch[1]!;
-        if (!existingTypes.includes(pascalSingular)) {
-          const updatedTypes = existingTypes.trimEnd() + `, ${pascalSingular}`;
-          dbContent = dbContent.replace(importRegex, `import type {${updatedTypes}} from '../types'`);
-        }
-      } else {
-        // No existing type import — add one at the top after other imports
-        const lastImportIdx = dbContent.lastIndexOf("import ");
-        if (lastImportIdx !== -1) {
-          const lineEnd = dbContent.indexOf("\n", lastImportIdx);
-          dbContent =
-            dbContent.slice(0, lineEnd + 1) +
-            `import type { ${pascalSingular} } from '../types';\n` +
-            dbContent.slice(lineEnd + 1);
-        }
-      }
-
-      // Append the accessor
-      const accessorLine = `export const ${camelPlural} = () => db.collection<${pascalSingular}>('${name}');`;
-      dbContent = dbContent.trimEnd() + "\n" + accessorLine + "\n";
-      await writeFile(dbPath, dbContent, "utf-8");
-      filesModified.push("src/lib/database.ts");
-
-      // ── 3. Add React hook to src/lib/hooks.ts ──
-
-      const hooksPath = resolve(projectPath, "src/lib/hooks.ts");
-      let hooksContent: string;
-      try {
-        hooksContent = await readFile(hooksPath, "utf-8");
-      } catch {
-        return errorResponse(
-          "FILE_NOT_FOUND",
-          `Could not read ${hooksPath}`,
-          "This project may not have been created with varity_init. Run varity_init first to scaffold the project."
-        );
-      }
-
-      // Add import for the new accessor in the database import
-      const dbImportRegex = /import\s*\{([^}]+)\}\s*from\s*['"]\.\/database['"]/;
-      const dbImportMatch = hooksContent.match(dbImportRegex);
-      if (dbImportMatch) {
-        const existingImports = dbImportMatch[1]!;
-        if (!existingImports.includes(camelPlural)) {
-          const updatedImports = existingImports.trimEnd() + `, ${camelPlural}`;
-          hooksContent = hooksContent.replace(
-            dbImportRegex,
-            `import {${updatedImports}} from './database'`
+        let typesOriginal: string;
+        try {
+          typesOriginal = await readFile(typesPath, "utf-8");
+        } catch {
+          return errorResponse(
+            "FILE_NOT_FOUND",
+            `Could not read ${typesPath}`,
+            "Ensure the project was created with varity_init and has src/types/index.ts."
           );
         }
-      }
 
-      // Add import for the new type
-      const typeImportRegex = /import\s+type\s*\{([^}]+)\}\s*from\s*['"]\.\.\/types['"]/;
-      const typeImportMatch = hooksContent.match(typeImportRegex);
-      if (typeImportMatch) {
-        const existingTypes = typeImportMatch[1]!;
-        if (!existingTypes.includes(pascalSingular)) {
-          const updatedTypes = existingTypes.trimEnd() + `, ${pascalSingular}`;
-          hooksContent = hooksContent.replace(
-            typeImportRegex,
-            `import type {${updatedTypes}} from '../types'`
+        let dbOriginal: string;
+        try {
+          dbOriginal = await readFile(dbPath, "utf-8");
+        } catch {
+          return errorResponse(
+            "FILE_NOT_FOUND",
+            `Could not read ${dbPath}`,
+            "This project may not have been created with varity_init. Run varity_init first to scaffold the project."
           );
         }
-      }
 
-      // Append the hook
-      const hookBlock = `
+        let hooksOriginal: string;
+        try {
+          hooksOriginal = await readFile(hooksPath, "utf-8");
+        } catch {
+          return errorResponse(
+            "FILE_NOT_FOUND",
+            `Could not read ${hooksPath}`,
+            "This project may not have been created with varity_init. Run varity_init first to scaffold the project."
+          );
+        }
+
+        // ── Check for existing or partially-added collection ──
+
+        const alreadyInTypes = typesOriginal.includes(`export interface ${pascalSingular}`);
+        const alreadyInDb = dbOriginal.includes(`export const ${camelPlural} =`);
+
+        if (alreadyInDb && alreadyInTypes) {
+          // Produce a diff of existing fields vs. requested fields so the developer
+          // knows what they already have and what options they have.
+          const existingFieldsMatch = typesOriginal.match(
+            new RegExp(`export interface ${pascalSingular}[^{]*\\{([^}]*)\\}`, "s")
+          );
+          const existingFieldsSummary = existingFieldsMatch
+            ? existingFieldsMatch[1]!
+                .split("\n")
+                .map((l) => l.trim())
+                .filter((l) => l && !l.startsWith("//"))
+                .join(", ")
+            : "unknown fields";
+          const requestedFieldsSummary = fields
+            .map((f: { name: string; type: string }) => `${f.name}: ${f.type}`)
+            .join(", ");
+          const suggestedName = `${name.replace(/s$/, "")}_records`;
+          return errorResponse(
+            "COLLECTION_EXISTS",
+            `Collection '${name}' already exists in this project with different fields.\n` +
+              `  Existing fields: ${existingFieldsSummary}\n` +
+              `  You requested:   ${requestedFieldsSummary}`,
+            `Options:\n` +
+              `  1. Use the existing collection — import the hook: import { ${hookName} } from '@/lib/hooks'\n` +
+              `  2. Use a different name — e.g. run: varity_add_collection({ name: "${suggestedName}", fields: [...] })\n` +
+              `  3. Extend the existing type — manually add your fields to src/types/index.ts and src/lib/database.ts`
+          );
+        }
+
+        if (alreadyInDb || alreadyInTypes) {
+          // Partial state — a previous run was interrupted. Report exactly what exists.
+          return errorResponse(
+            "COLLECTION_PARTIAL_STATE",
+            `Collection '${name}' is in a partial state: ${
+              alreadyInTypes
+                ? `'${pascalSingular}' interface found in src/types/index.ts`
+                : "type interface missing from src/types/index.ts"
+            } but ${
+              alreadyInDb
+                ? `'${camelPlural}()' accessor found in src/lib/database.ts`
+                : "accessor missing from src/lib/database.ts"
+            }.`,
+            `To recover: remove any incomplete '${name}' entries from src/types/index.ts and src/lib/database.ts, then run varity_add_collection again.`
+          );
+        }
+
+        // ── Build all new file contents in memory before writing ──
+
+        // 1. New types/index.ts — append interface
+        const fieldLines = fields
+          .map((f) => `  ${f.name}: ${toTSType(f.type)};`)
+          .join("\n");
+        const interfaceBlock = [
+          "",
+          `export interface ${pascalSingular} {`,
+          "  id: string;",
+          fieldLines,
+          "  createdAt: string;",
+          "  updatedAt: string;",
+          "}",
+          "",
+        ].join("\n");
+
+        const newTypesContent = typesOriginal.trimEnd() + "\n" + interfaceBlock;
+
+        // 2. New database.ts — add type import + accessor
+        let dbContent = dbOriginal;
+        const importRegex = /import\s+type\s*\{([^}]+)\}\s*from\s*['"]\.\.\/types['"]/;
+        const importMatch = dbContent.match(importRegex);
+        if (importMatch) {
+          const existingTypes = importMatch[1]!;
+          if (!existingTypes.includes(pascalSingular)) {
+            const updatedTypes = existingTypes.trimEnd() + `, ${pascalSingular}`;
+            dbContent = dbContent.replace(importRegex, `import type {${updatedTypes}} from '../types'`);
+          }
+        } else {
+          // No existing type import — add one after the last import line
+          const lastImportIdx = dbContent.lastIndexOf("import ");
+          if (lastImportIdx !== -1) {
+            const lineEnd = dbContent.indexOf("\n", lastImportIdx);
+            dbContent =
+              dbContent.slice(0, lineEnd + 1) +
+              `import type { ${pascalSingular} } from '../types';\n` +
+              dbContent.slice(lineEnd + 1);
+          }
+        }
+        const accessorLine = `export const ${camelPlural} = () => db.collection<${pascalSingular}>('${name}');`;
+        const newDbContent = dbContent.trimEnd() + "\n" + accessorLine + "\n";
+
+        // 3. New hooks.ts — add accessor import + type import + hook function
+        let hooksContent = hooksOriginal;
+        const dbImportRegex = /import\s*\{([^}]+)\}\s*from\s*['"]\.\/database['"]/;
+        const dbImportMatch = hooksContent.match(dbImportRegex);
+        if (dbImportMatch) {
+          const existingImports = dbImportMatch[1]!;
+          if (!existingImports.includes(camelPlural)) {
+            const updatedImports = existingImports.trimEnd() + `, ${camelPlural}`;
+            hooksContent = hooksContent.replace(
+              dbImportRegex,
+              `import {${updatedImports}} from './database'`
+            );
+          }
+        }
+
+        const typeImportRegex = /import\s+type\s*\{([^}]+)\}\s*from\s*['"]\.\.\/types['"]/;
+        const typeImportMatch = hooksContent.match(typeImportRegex);
+        if (typeImportMatch) {
+          const existingTypes = typeImportMatch[1]!;
+          if (!existingTypes.includes(pascalSingular)) {
+            const updatedTypes = existingTypes.trimEnd() + `, ${pascalSingular}`;
+            hooksContent = hooksContent.replace(
+              typeImportRegex,
+              `import type {${updatedTypes}} from '../types'`
+            );
+          }
+        }
+
+        const hookBlock = `
 export function ${hookName}(): UseCollectionReturn<${pascalSingular}> {
   const [data, setData] = useState<${pascalSingular}[]>([]);
   const [loading, setLoading] = useState(true);
@@ -269,11 +392,11 @@ export function ${hookName}(): UseCollectionReturn<${pascalSingular}> {
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  const create = async (input: Omit<${pascalSingular}, 'id' | 'created_at' | 'updated_at'>) => {
-    const optimistic: ${pascalSingular} = { ...input, id: crypto.randomUUID(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() } as ${pascalSingular};
+  const create = async (input: Omit<${pascalSingular}, 'id' | 'createdAt' | 'updatedAt'>) => {
+    const optimistic: ${pascalSingular} = { ...input, id: crypto.randomUUID(), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() } as ${pascalSingular};
     setData(prev => [optimistic, ...prev]);
     try {
-      await ${camelPlural}().add({ ...input, created_at: optimistic.created_at });
+      await ${camelPlural}().add({ ...input, createdAt: optimistic.createdAt });
       await refresh();
     } catch (err) {
       setData(prev => prev.filter(p => p.id !== optimistic.id));
@@ -306,60 +429,192 @@ export function ${hookName}(): UseCollectionReturn<${pascalSingular}> {
   return { data, loading, error, create, update, remove, refresh };
 }
 `;
-      hooksContent = hooksContent.trimEnd() + "\n" + hookBlock;
-      await writeFile(hooksPath, hooksContent, "utf-8");
-      filesModified.push("src/lib/hooks.ts");
+        const newHooksContent = hooksContent.trimEnd() + "\n" + hookBlock;
 
-      // ── 4. Optionally scaffold a dashboard page ──
+        // ── Write all three files. Rollback all on any failure (BUG-002). ──
 
-      if (add_page) {
-        const pagePath = resolve(
-          projectPath,
-          `src/app/dashboard/${name}/page.tsx`
-        );
-        const pageDir = dirname(pagePath);
-        await mkdir(pageDir, { recursive: true });
+        /** Restore all three files to their pre-call content. Best-effort. */
+        async function rollbackAll(): Promise<void> {
+          await Promise.allSettled([
+            writeFile(typesPath, typesOriginal, "utf-8"),
+            writeFile(dbPath, dbOriginal, "utf-8"),
+            writeFile(hooksPath, hooksOriginal, "utf-8"),
+          ]);
+        }
 
-        // Build column definitions from fields
-        const columnDefs = fields
-          .map(
-            (f) =>
-              `    { key: '${f.name}', header: '${f.name.charAt(0).toUpperCase() + f.name.slice(1)}', sortable: true },`
-          )
-          .join("\n");
+        try {
+          await writeFile(typesPath, newTypesContent, "utf-8");
+        } catch (err) {
+          if (isDiskFullError(err)) {
+            return errorResponse(
+              "DISK_FULL",
+              "Could not write src/types/index.ts — disk is full. No files were modified.",
+              "Free up disk space and try again. Run `df -h` to see available space."
+            );
+          }
+          throw err;
+        }
+        filesModified.push("src/types/index.ts");
 
-        // Build form field state defaults
-        const formDefaults = fields
-          .map((f) => {
-            const tsType = toTSType(f.type);
-            if (tsType === "number") return `${f.name}: 0`;
-            if (tsType === "boolean") return `${f.name}: false`;
-            return `${f.name}: ''`;
-          })
-          .join(", ");
+        try {
+          await writeFile(dbPath, newDbContent, "utf-8");
+        } catch (err) {
+          await rollbackAll();
+          if (isDiskFullError(err)) {
+            return errorResponse(
+              "DISK_FULL",
+              "Could not write src/lib/database.ts — disk is full. All changes have been rolled back.",
+              "Free up disk space and try again. Run `df -h` to see available space."
+            );
+          }
+          throw err;
+        }
+        filesModified.push("src/lib/database.ts");
 
-        // Build form inputs
-        const formInputs = fields
-          .map((f) => {
-            const tsType = toTSType(f.type);
-            const label =
-              f.name.charAt(0).toUpperCase() + f.name.slice(1);
-            if (tsType === "number") {
-              return `          <Input label="${label}" type="number" value={String(form.${f.name})} onChange={(e) => setForm(prev => ({ ...prev, ${f.name}: Number(e.target.value) }))} />`;
-            }
-            if (tsType === "boolean") {
-              return `          <label className="flex items-center gap-2"><input type="checkbox" checked={form.${f.name}} onChange={(e) => setForm(prev => ({ ...prev, ${f.name}: e.target.checked }))} /> ${label}</label>`;
-            }
-            return `          <Input label="${label}" value={form.${f.name}} onChange={(e) => setForm(prev => ({ ...prev, ${f.name}: e.target.value }))} />`;
-          })
-          .join("\n");
+        try {
+          await writeFile(hooksPath, newHooksContent, "utf-8");
+        } catch (err) {
+          await rollbackAll();
+          if (isDiskFullError(err)) {
+            return errorResponse(
+              "DISK_FULL",
+              "Could not write src/lib/hooks.ts — disk is full. All changes have been rolled back.",
+              "Free up disk space and try again. Run `df -h` to see available space."
+            );
+          }
+          throw err;
+        }
+        filesModified.push("src/lib/hooks.ts");
 
-        const pageContent = `'use client';
+        // ── 4. Optionally scaffold a dashboard page ──
+
+        if (add_page) {
+          const pagePath = resolve(
+            projectPath,
+            `src/app/dashboard/${name}/page.tsx`
+          );
+          const pageDir = dirname(pagePath);
+
+          // Detect foreign-key reference fields (*Id naming convention).
+          // These render as a <Select> populated by the related collection's
+          // hook so the developer picks from real items rather than typing raw IDs.
+          // Computed before columnDefs so FK columns can use a render function.
+          const refFields = fields
+            .map((f) => {
+              if (!f.name.endsWith("Id") || f.name.length <= 2) return null;
+              const base = f.name.slice(0, -2); // "client" from "clientId"
+              const basePlural = base + "s";     // naive plural: "clients"
+              const pascalPluralRel =
+                basePlural.charAt(0).toUpperCase() + basePlural.slice(1);
+              return {
+                fieldName: f.name,
+                dataVar: basePlural,                       // "clients"
+                relatedHookName: `use${pascalPluralRel}`,  // "useClients"
+                label: humanizeFieldName(f.name),
+              };
+            })
+            .filter((r): r is NonNullable<typeof r> => r !== null);
+
+          // Deduplicate (two fields could reference the same collection)
+          const uniqueRefHooks = [
+            ...new Map(refFields.map((r) => [r.relatedHookName, r])).values(),
+          ];
+
+          // Build column definitions from fields.
+          // FK fields (*Id) get a render fn that resolves the stored UUID to a
+          // display name using the related collection's already-loaded data,
+          // so the table shows "Acme Corp" instead of a raw UUID (DX-004).
+          const columnDefs = fields
+            .map((f) => {
+              const ref = refFields.find((r) => r.fieldName === f.name);
+              if (ref) {
+                const mapVar = `${ref.dataVar.replace(/s$/, "")}Map`;
+                return `    { key: '${f.name}', header: '${humanizeFieldName(f.name)}', sortable: true, render: (v: string) => ${mapVar}[v] ?? v },`;
+              }
+              return `    { key: '${f.name}', header: '${humanizeFieldName(f.name)}', sortable: true },`;
+            })
+            .join("\n");
+
+          // Build form field state defaults
+          const formDefaults = fields
+            .map((f) => {
+              const tsType = toTSType(f.type);
+              if (tsType === "number") return `${f.name}: 0`;
+              if (tsType === "boolean") return `${f.name}: false`;
+              return `${f.name}: ''`;
+            })
+            .join(", ");
+
+          // Build form inputs
+          const formInputs = fields
+            .map((f) => {
+              const tsType = toTSType(f.type);
+              const label = humanizeFieldName(f.name);
+
+              // Reference field → <Select> populated by the related collection hook
+              const ref = refFields.find((r) => r.fieldName === f.name);
+              if (ref) {
+                return `          <Select label="${label}" value={form.${f.name}} onChange={(e) => setForm(prev => ({ ...prev, ${f.name}: e.target.value }))} options={[{ value: '', label: 'Select ${ref.label}...' }, ...${ref.dataVar}.map((item: { id: string; name?: string; email?: string }) => ({ value: item.id, label: item.name ?? item.email ?? item.id }))]} />`;
+              }
+              if (tsType === "number") {
+                return `          <Input label="${label}" type="number" value={String(form.${f.name})} onChange={(e) => setForm(prev => ({ ...prev, ${f.name}: Number(e.target.value) }))} />`;
+              }
+              if (tsType === "boolean") {
+                return `          <label className="flex items-center gap-2"><input type="checkbox" checked={form.${f.name}} onChange={(e) => setForm(prev => ({ ...prev, ${f.name}: e.target.checked }))} /> ${label}</label>`;
+              }
+              return `          <Input label="${label}" value={form.${f.name}} onChange={(e) => setForm(prev => ({ ...prev, ${f.name}: e.target.value }))} />`;
+            })
+            .join("\n");
+
+          // Build dynamic import strings for reference-field hooks
+          const needsSelect = refFields.length > 0;
+          const refHookImportStr = uniqueRefHooks.length > 0
+            ? `, ${uniqueRefHooks.map((r) => r.relatedHookName).join(", ")}`
+            : "";
+          const refHookUsageLines = uniqueRefHooks.length > 0
+            ? "\n" + uniqueRefHooks
+                .map((r) => `  const { data: ${r.dataVar} } = ${r.relatedHookName}();`)
+                .join("\n")
+            : "";
+
+          // Build lookup maps for FK fields so DataTable columns can resolve
+          // stored UUIDs to human-readable display names (DX-004 fix).
+          // e.g. clientId "a1b2…" → "Acme Corp" using the already-loaded clients array.
+          const refMapLines = uniqueRefHooks.length > 0
+            ? "\n" + uniqueRefHooks
+                .map((r) => {
+                  const mapVar = `${r.dataVar.replace(/s$/, "")}Map`;
+                  return [
+                    `  const ${mapVar}: Record<string, string> = Object.fromEntries(`,
+                    `    ${r.dataVar}.map((item: { id: string; name?: string; email?: string }) => [item.id, item.name ?? item.email ?? item.id])`,
+                    `  );`,
+                  ].join("\n");
+                })
+                .join("\n")
+            : "";
+
+          // Build validation guard lines for required fields in handleCreate.
+          // String fields must be non-empty; reference (select) fields must have a selection.
+          const validationLines = fields
+            .map((f) => {
+              const tsType = toTSType(f.type);
+              if (tsType !== "string") return null;
+              const ref = refFields.find((r) => r.fieldName === f.name);
+              const label = humanizeFieldName(f.name);
+              if (ref) {
+                return `    if (!form.${f.name}) { toast.error('Select a ${label}'); return; }`;
+              }
+              return `    if (!form.${f.name}.trim()) { toast.error('${label} is required'); return; }`;
+            })
+            .filter(Boolean)
+            .join("\n");
+
+          const pageContent = `'use client';
 
 import { useState } from 'react';
 import { DataTable, EmptyState } from '@varity-labs/ui-kit';
-import { Button, Input, Dialog, useToast } from '@varity-labs/ui-kit';
-import { ${hookName} } from '@/lib/hooks';
+import { Button, Input, ${needsSelect ? "Select, " : ""}Dialog, useToast } from '@varity-labs/ui-kit';
+import { ${hookName}${refHookImportStr} } from '@/lib/hooks';
 import type { ${pascalSingular} } from '@/types';
 import { Plus } from 'lucide-react';
 
@@ -367,16 +622,16 @@ const EMPTY_FORM = { ${formDefaults} };
 
 export default function ${pascalPlural}Page() {
   const toast = useToast();
-  const { data: items, loading, error, create, remove, refresh } = ${hookName}();
+  const { data: items, loading, error, create, remove, refresh } = ${hookName}();${refHookUsageLines}${refMapLines}
 
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [submitting, setSubmitting] = useState(false);
 
   async function handleCreate() {
-    setSubmitting(true);
+${validationLines ? validationLines + "\n" : ""}    setSubmitting(true);
     try {
-      await create(form as any);
+      await create(form as Omit<${pascalSingular}, 'id' | 'createdAt' | 'updatedAt'>);
       toast.success('${pascalSingular} created');
       setCreateOpen(false);
       setForm(EMPTY_FORM);
@@ -451,34 +706,114 @@ ${formInputs}
 }
 `;
 
-        await writeFile(pagePath, pageContent, "utf-8");
-        filesCreated.push(`src/app/dashboard/${name}/page.tsx`);
-      }
+          try {
+            await mkdir(pageDir, { recursive: true });
+          } catch (err) {
+            await rollbackAll();
+            if (isDiskFullError(err)) {
+              return errorResponse(
+                "DISK_FULL",
+                `Could not create page directory — disk is full. All changes have been rolled back.`,
+                "Free up disk space and try again. Run `df -h` to see available space."
+              );
+            }
+            return errorResponse(
+              "PAGE_CREATE_FAILED",
+              `Could not create directory: ${pageDir}`,
+              "Check directory permissions and try again. All collection files (type, accessor, hook) have been rolled back."
+            );
+          }
 
-      return successResponse(
-        {
-          collection_name: name,
-          type_name: pascalSingular,
-          hook_name: hookName,
-          accessor_name: camelPlural,
-          files_modified: filesModified,
-          files_created: filesCreated,
-          next_steps: [
-            `Import { ${hookName} } from '@/lib/hooks' in your components`,
-            `Use the ${camelPlural}() accessor for direct database access`,
-            ...(add_page
-              ? [`Navigate to /dashboard/${name} to see the new page`]
-              : [
-                  `Run with add_page=true to scaffold a dashboard page at /dashboard/${name}`,
-                ]),
-          ],
-        },
-        `Added "${name}" collection: ${pascalSingular} type, ${camelPlural}() accessor, and ${hookName}() hook.${
-          add_page
-            ? ` Dashboard page created at src/app/dashboard/${name}/page.tsx.`
-            : ""
-        }`
-      );
+          try {
+            await writeFile(pagePath, pageContent, "utf-8");
+          } catch (err) {
+            await rollbackAll();
+            if (isDiskFullError(err)) {
+              return errorResponse(
+                "DISK_FULL",
+                `Could not write page file — disk is full. All changes have been rolled back.`,
+                "Free up disk space and try again. Run `df -h` to see available space."
+              );
+            }
+            return errorResponse(
+              "PAGE_CREATE_FAILED",
+              `Could not write dashboard page: ${pagePath}`,
+              "Check file permissions and try again. All collection files (type, accessor, hook) have been rolled back."
+            );
+          }
+          filesCreated.push(`src/app/dashboard/${name}/page.tsx`);
+
+          // Auto-add navigation item to sidebar so the page is reachable
+          const constantsPath = resolve(projectPath, "src/lib/constants.ts");
+          try {
+            const constantsContent = await readFile(constantsPath, "utf-8");
+            if (!constantsContent.includes(`/dashboard/${name}`)) {
+              // Insert before the Settings nav item (last functional item)
+              const settingsLine = `  { label: 'Settings'`;
+              const navIcon = getIconForCollection(name);
+              const newNavItem = `  { label: '${pascalPlural}', icon: '${navIcon}', path: '/dashboard/${name}' },\n`;
+              const updatedConstants = constantsContent.includes(settingsLine)
+                ? constantsContent.replace(settingsLine, newNavItem + settingsLine)
+                : constantsContent.replace(
+                    // Fallback: insert before the closing ]; of NAVIGATION_ITEMS
+                    // followed by the next export const (e.g. PRIORITY_OPTIONS)
+                    /(\];)\s*\nexport const/,
+                    `${newNavItem}$1\n\nexport const`
+                  );
+              if (updatedConstants !== constantsContent) {
+                await writeFile(constantsPath, updatedConstants, "utf-8");
+                filesModified.push("src/lib/constants.ts");
+              }
+            }
+          } catch {
+            // constants.ts may not exist in all templates — skip silently
+          }
+        }
+
+        // Update varity.config.json collections array
+        try {
+          const configPath = resolve(projectPath, "varity.config.json");
+          const configContent = await readFile(configPath, "utf-8");
+          const config = JSON.parse(configContent);
+          if (config.database?.collections && !config.database.collections.includes(name)) {
+            config.database.collections.push(name);
+            await writeFile(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
+            filesModified.push("varity.config.json");
+          }
+        } catch {
+          // Config file may not exist — skip silently
+        }
+
+        return successResponse(
+          {
+            collection_name: name,
+            type_name: pascalSingular,
+            hook_name: hookName,
+            accessor_name: camelPlural,
+            files_modified: filesModified,
+            files_created: filesCreated,
+            next_steps: [
+              `Import { ${hookName} } from '@/lib/hooks' in your components`,
+              `Use the ${camelPlural}() accessor for direct database access`,
+              ...(add_page
+                ? [
+                    `Navigate to /dashboard/${name} to see the new page`,
+                    filesModified.includes("src/lib/constants.ts")
+                      ? `✅ Sidebar navigation updated — "${pascalPlural}" menu item added automatically`
+                      : `Add a navigation entry to src/lib/constants.ts: { label: '${pascalPlural}', icon: '${getIconForCollection(name)}', path: '/dashboard/${name}' }`,
+                  ]
+                : [
+                    `Run with add_page=true to scaffold a dashboard page at /dashboard/${name}`,
+                  ]),
+            ],
+          },
+          `Added "${name}" collection: ${pascalSingular} type, ${camelPlural}() accessor, and ${hookName}() hook.${
+            add_page
+              ? ` Dashboard page created at src/app/dashboard/${name}/page.tsx.${filesModified.includes("src/lib/constants.ts") ? " Sidebar navigation updated." : ""}`
+              : ""
+          }`
+        );
+      }); // end withProjectLock
     }
   );
 }
