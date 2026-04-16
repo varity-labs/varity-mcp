@@ -33,6 +33,78 @@ async function getLocalTemplatePath(): Promise<string | null> {
 }
 
 /**
+ * Patch project files that create-varity-app may ship with placeholder values:
+ *  1. varity.config.json — set `name` to the actual project name
+ *  2. src/lib/constants.ts — replace 'TaskFlow' with the display-friendly title
+ *  3. next.config.js — ensure all optional-peer-dep webpack stubs are present
+ *
+ * Safe to call on both local-scaffold and npx-scaffolded projects.
+ * All operations are best-effort (failures are silently ignored).
+ */
+async function patchProjectFiles(projectPath: string, name: string): Promise<void> {
+  // 1. varity.config.json
+  {
+    const configPath = resolve(projectPath, "varity.config.json");
+    let config: Record<string, unknown>;
+    try {
+      const configContent = await readFile(configPath, "utf-8");
+      config = JSON.parse(configContent);
+    } catch {
+      config = {
+        version: "1.0.0",
+        framework: "nextjs",
+        hosting: "static",
+        build: { command: "npm run build", output: "out" },
+        database: { provider: "varity", collections: [] },
+      };
+    }
+    config.name = name;
+    if (config.hosting === "ipfs") config.hosting = "static";
+    try {
+      await writeFile(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
+    } catch {
+      // Non-critical
+    }
+  }
+
+  // 2. constants.ts — replace placeholder app name with display-friendly title
+  try {
+    const constantsPath = resolve(projectPath, "src/lib/constants.ts");
+    const constantsContent = await readFile(constantsPath, "utf-8");
+    const updated = constantsContent.replace("'TaskFlow'", `'${toDisplayName(name)}'`);
+    await writeFile(constantsPath, updated, "utf-8");
+  } catch {
+    // Constants may not exist
+  }
+
+  // 3. next.config.js — add webpack stubs for optional peer deps if not already present
+  try {
+    const nextConfigPath = resolve(projectPath, "next.config.js");
+    let nextConfig = await readFile(nextConfigPath, "utf-8");
+    let changed = false;
+    if (!nextConfig.includes("@solana/kit")) {
+      nextConfig = nextConfig.replace(
+        "'@react-native-async-storage/async-storage': false,\n    };",
+        `'@react-native-async-storage/async-storage': false };\n    ['viem', 'viem/chains', '@solana/kit', '@solana/sysvars', '@solana-program/token-2022', 'x402', '@coinbase/wallet-sdk', '@walletconnect/ethereum-provider'].forEach(pkg => { config.resolve.alias[pkg] = false; });`
+      );
+      changed = true;
+    }
+    if (!nextConfig.includes("outputFileTracingRoot")) {
+      nextConfig = nextConfig.replace(
+        "const nextConfig = {",
+        `const nextConfig = {\n  outputFileTracingRoot: __dirname,`
+      );
+      changed = true;
+    }
+    if (changed) {
+      await writeFile(nextConfigPath, nextConfig, "utf-8");
+    }
+  } catch {
+    // next.config.js may not exist
+  }
+}
+
+/**
  * Scaffold a project from a local template directory (no npm needed).
  */
 async function scaffoldFromLocal(
@@ -76,71 +148,8 @@ async function scaffoldFromLocal(
     delete pkg.scripts?.prepare; // Remove husky hook
     await writeFile(pkgPath, JSON.stringify(pkg, null, 2) + "\n", "utf-8");
 
-    // Update varity.config.json — parse + reserialize for robustness.
-    // Uses a fallback fresh config if the file is missing or corrupt so that
-    // the app name is ALWAYS set correctly (BUG-003 fix).
-    {
-      const configPath = resolve(projectPath, "varity.config.json");
-      let config: Record<string, unknown>;
-      try {
-        const configContent = await readFile(configPath, "utf-8");
-        config = JSON.parse(configContent);
-      } catch {
-        // Config missing or unparseable — start fresh so name is always correct
-        config = {
-          version: "1.0.0",
-          framework: "nextjs",
-          hosting: "static",
-          build: { command: "npm run build", output: "out" },
-          database: { provider: "varity", collections: [] },
-        };
-      }
-      config.name = projectName;
-      // Normalize hosting value: "ipfs" is legacy; "static" is the canonical value
-      if (config.hosting === "ipfs") config.hosting = "static";
-      try {
-        await writeFile(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
-      } catch {
-        // Non-critical: deploy will fall back to package.json name
-      }
-    }
-
-    // Update APP_NAME in constants.ts — use a display-friendly title, not the raw slug.
-    // e.g. "dx-final-test" → "DX Final Test" (short words uppercased, rest title-cased)
-    try {
-      const constantsPath = resolve(projectPath, "src/lib/constants.ts");
-      const constantsContent = await readFile(constantsPath, "utf-8");
-      const updated = constantsContent.replace("'TaskFlow'", `'${toDisplayName(projectName)}'`);
-      await writeFile(constantsPath, updated, "utf-8");
-    } catch {
-      // Constants may not exist
-    }
-
-    // Patch next.config.js: suppress unused optional sub-modules from UI Kit
-    try {
-      const nextConfigPath = resolve(projectPath, "next.config.js");
-      let nextConfig = await readFile(nextConfigPath, "utf-8");
-      if (!nextConfig.includes("@solana/kit")) {
-        // Add suppress array for optional peer deps
-        nextConfig = nextConfig.replace(
-          "'@react-native-async-storage/async-storage': false,\n    };",
-          `'@react-native-async-storage/async-storage': false };\n    ['viem', 'viem/chains', '@solana/kit', '@solana/sysvars', '@solana-program/token-2022', 'x402', '@coinbase/wallet-sdk', '@walletconnect/ethereum-provider'].forEach(pkg => { config.resolve.alias[pkg] = false; });`
-        );
-      }
-      // Suppress "Next.js inferred your workspace root" warning that appears when
-      // the project lives inside a larger monorepo/workspace (e.g. the parent has
-      // its own package-lock.json).  outputFileTracingRoot scopes tracing to the
-      // project directory, preventing Next.js from walking up to the workspace root.
-      if (!nextConfig.includes("outputFileTracingRoot")) {
-        nextConfig = nextConfig.replace(
-          "const nextConfig = {",
-          `const nextConfig = {\n  outputFileTracingRoot: __dirname,`
-        );
-      }
-      await writeFile(nextConfigPath, nextConfig, "utf-8");
-    } catch {
-      // next.config.js may not exist
-    }
+    // Patch project files: varity.config.json, constants.ts, next.config.js
+    await patchProjectFiles(projectPath, projectName);
 
     return { success: true };
   } catch (err) {
@@ -341,44 +350,8 @@ export function registerInitTool(server: McpServer): void {
           );
         }
 
-        // Update varity.config.json — parse + reserialize for robustness.
-        // Uses a fallback fresh config if the file is missing or corrupt so that
-        // the app name is ALWAYS set correctly (BUG-003 fix).
-        {
-          const configPath = resolve(projectPath, "varity.config.json");
-          let config: Record<string, unknown>;
-          try {
-            const configContent = await readFile(configPath, "utf-8");
-            config = JSON.parse(configContent);
-          } catch {
-            // Config missing or unparseable — start fresh so name is always correct
-            config = {
-              version: "1.0.0",
-              framework: "nextjs",
-              hosting: "static",
-              build: { command: "npm run build", output: "out" },
-              database: { provider: "varity", collections: [] },
-            };
-          }
-          config.name = name;
-          if (config.hosting === "ipfs") config.hosting = "static";
-          try {
-            await writeFile(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
-          } catch {
-            // Non-critical: deploy will fall back to package.json name
-          }
-        }
-
-        // Update APP_NAME in constants.ts — use a display-friendly title, not the raw slug.
-        // e.g. "dx-final-test" → "DX Final Test" (short words uppercased, rest title-cased)
-        try {
-          const constantsPath = resolve(projectPath, "src/lib/constants.ts");
-          const constantsContent = await readFile(constantsPath, "utf-8");
-          const updated = constantsContent.replace("'TaskFlow'", `'${toDisplayName(name)}'`);
-          await writeFile(constantsPath, updated, "utf-8");
-        } catch {
-          // Constants may not exist
-        }
+        // Patch project files: varity.config.json name, constants.ts APP_NAME, next.config.js webpack stubs
+        await patchProjectFiles(projectPath, name);
 
         const install = await runNpmInstall(projectPath);
 
@@ -414,13 +387,15 @@ export function registerInitTool(server: McpServer): void {
           },
           install.success
             ? `Created "${name}" at ${projectPath} with dependencies installed. Ready to develop.`
-            : `Created "${name}" at ${projectPath}. Run "npm install" to finish setup.`
+            : `Created "${name}" at ${projectPath}. Run varity_install_deps to finish setup.`
         );
       }
 
       // npx exited non-zero — but the project may have been partially created
       // (template copied, npm install timed out or failed). Check before falling back.
       if (await dirExists(projectPath)) {
+        // Patch even in the partial-install path — the template files are present
+        await patchProjectFiles(projectPath, name);
         const install = await runNpmInstall(projectPath);
         return successResponse(
           {
@@ -437,7 +412,7 @@ export function registerInitTool(server: McpServer): void {
           },
           install.success
             ? `Created "${name}" at ${projectPath} with dependencies installed. Ready to develop.`
-            : `Created "${name}" at ${projectPath}. Run "npm install" to finish setup.`
+            : `Created "${name}" at ${projectPath}. Run varity_install_deps to finish setup.`
         );
       }
 
@@ -451,6 +426,7 @@ export function registerInitTool(server: McpServer): void {
         });
 
         if (await dirExists(projectPath)) {
+          await patchProjectFiles(projectPath, name);
           const install = await runNpmInstall(projectPath);
           return successResponse(
             {
@@ -461,11 +437,11 @@ export function registerInitTool(server: McpServer): void {
               deps_installed: install.success,
               next_steps: install.success
                 ? [`cd ${projectPath}`, "npm run dev", "# When ready: use varity_deploy"]
-                : [`cd ${projectPath}`, "npm install", "npm run dev", "# When ready: use varity_deploy"],
+                : ["Run varity_install_deps to install dependencies", `cd ${projectPath}`, "npm run dev", "# When ready: use varity_deploy"],
             },
             install.success
               ? `Created "${name}" at ${projectPath} with dependencies installed. Ready to develop.`
-              : `Created "${name}" at ${projectPath}. Run "npm install" to finish setup.`
+              : `Created "${name}" at ${projectPath}. Run varity_install_deps to finish setup.`
           );
         }
 
