@@ -2,7 +2,7 @@ import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { execVaritykit, execCLI } from "../utils/cli-bridge.js";
-import { INFRASTRUCTURE } from "../utils/config.js";
+import { INFRASTRUCTURE, isAuthenticated } from "../utils/config.js";
 
 export function registerLoginTool(server: McpServer): void {
   server.registerTool(
@@ -45,6 +45,19 @@ export function registerLoginTool(server: McpServer): void {
           "LOGIN_FAILED",
           `Login failed: ${output || "Invalid deploy key or authentication error."}`,
           "Check that your deploy key is correct. Get your key from: developer.store.varity.so/dashboard/settings"
+        );
+      }
+
+      // No key provided — check if already authenticated
+      const alreadyAuthenticated = await isAuthenticated();
+      if (alreadyAuthenticated) {
+        return successResponse(
+          {
+            authenticated: true,
+            already_logged_in: true,
+            next_step: "You are already logged in. Call varity_deploy when ready, or call varity_doctor to verify your full setup.",
+          },
+          "Already logged in to Varity. Your deploy key is configured — call varity_deploy when ready."
         );
       }
 

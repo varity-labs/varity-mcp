@@ -411,20 +411,33 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   { label: 'Settings',  icon: 'settings',  path: '/dashboard/settings' },
 ];
 
-// Valid icon values for NavigationItem.icon (from DashboardLayout's icon set):
-// 'dashboard'   → grid/home icon
-// 'folder'      → folder icon (projects, files, categories)
-// 'list'        → list/lines icon (tasks, items, records)
-// 'people'      → group/team icon (users, clients, members, contacts)
-// 'settings'    → gear icon (settings, configuration, preferences)
-// 'trending_up' → upward chart icon (deals, revenue, metrics, growth)
-// 'chart'       → bar chart icon (analytics, reports, statistics)
-// 'calendar'    → calendar icon (events, schedules, appointments)
-// 'inbox'       → inbox icon (messages, notifications, requests)
-// 'star'        → star icon (favorites, featured, highlights)
-// 'search'      → magnifier icon (search, discovery, lookup)
-// 'tag'         → tag icon (labels, categories, types)
+// Valid icon values for NavigationItem.icon (Material Design icon names):
+// Core set (used in the default template):
+// 'dashboard'           → grid/home icon
+// 'folder'              → folder icon (projects, files, categories)
+// 'list'                → list/lines icon (tasks, items, records)
+// 'people'              → group/team icon (users, members, staff)
+// 'settings'            → gear icon (settings, configuration, preferences)
+// 'trending_up'         → upward chart icon (deals, revenue, pipeline, growth)
+// 'tag'                 → tag icon (clients, contacts, customers, labels)
 //
+// Auto-selected by varity_add_collection (also fully supported):
+// 'receipt'             → receipt/invoice icon (invoices, payments, bills, transactions)
+// 'inventory'           → box/inventory icon (products, items, catalog, listings)
+// 'shopping_cart'       → cart icon (orders, purchases, subscriptions)
+// 'event'               → calendar-event icon (events, appointments, meetings, bookings)
+// 'bar_chart'           → bar chart icon (reports, analytics, metrics, stats)
+// 'description'         → document icon (documents, files, notes, articles)
+// 'confirmation_number' → ticket icon (tickets, support issues, bugs)
+// 'campaign'            → megaphone icon (campaigns, announcements)
+// 'notifications'       → bell icon (notifications, alerts)
+// 'calendar'            → calendar icon (schedules, dates, deadlines)
+// 'inbox'               → inbox icon (messages, requests)
+// 'chart'               → chart icon (data, visualizations)
+// 'star'                → star icon (favorites, featured, highlights)
+// 'search'              → magnifier icon (search, discovery, lookup)
+//
+// Any other Material Design icon name also works — see https://fonts.google.com/icons
 // varity_add_collection auto-selects an icon based on the collection name.
 // To customize, edit the generated entry in NAVIGATION_ITEMS above.
 

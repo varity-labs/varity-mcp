@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { mkdir, access, rm, readFile, writeFile, cp } from "node:fs/promises";
+import { mkdir, access, rm, readFile, writeFile, cp, readdir } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
@@ -245,9 +245,21 @@ async function runNpmInstall(projectPath: string): Promise<{ success: boolean; e
       cwd: projectPath,
       timeout: 180_000,
     });
-    return result.exitCode === 0
-      ? { success: true }
-      : { success: false, error: result.stderr || "npm install failed" };
+    if (result.exitCode === 0) {
+      return { success: true };
+    }
+    // Non-zero exit — but check if packages were actually installed.
+    // npm 10+ can exit non-zero due to peer dep warnings even when all packages install successfully.
+    try {
+      const binDir = resolve(projectPath, "node_modules", ".bin");
+      const binFiles = await readdir(binDir);
+      if (binFiles.length > 0) {
+        return { success: true }; // packages installed despite non-zero exit code
+      }
+    } catch {
+      // .bin doesn't exist — install genuinely failed
+    }
+    return { success: false, error: result.stderr || "npm install failed" };
   } catch (err) {
     return { success: false, error: String(err) };
   }
@@ -353,6 +365,34 @@ export function registerInitTool(server: McpServer): void {
         // Patch project files: varity.config.json name, constants.ts APP_NAME, next.config.js webpack stubs
         await patchProjectFiles(projectPath, name);
 
+        // Ensure package.json uses current published versions (create-varity-app on npm may ship older pinned versions)
+        try {
+          const pkgPath = resolve(projectPath, "package.json");
+          const pkgRaw = await readFile(pkgPath, "utf-8");
+          const pkg = JSON.parse(pkgRaw) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+          const LATEST_VERSIONS: Record<string, string> = {
+            "@varity-labs/sdk": "^2.0.0-beta.7",
+            "@varity-labs/ui-kit": "^2.0.0-beta.7",
+            "@varity-labs/types": "^2.0.0-beta.4",
+          };
+          let pkgChanged = false;
+          for (const depKey of ["dependencies", "devDependencies"] as const) {
+            const deps = pkg[depKey];
+            if (!deps) continue;
+            for (const [pkgName, latestVer] of Object.entries(LATEST_VERSIONS)) {
+              if (deps[pkgName] !== undefined && deps[pkgName] !== latestVer) {
+                deps[pkgName] = latestVer;
+                pkgChanged = true;
+              }
+            }
+          }
+          if (pkgChanged) {
+            await writeFile(pkgPath, JSON.stringify(pkg, null, 2) + "\n", "utf-8");
+          }
+        } catch {
+          // Non-critical — package.json versioning is cosmetic
+        }
+
         const install = await runNpmInstall(projectPath);
 
         return successResponse(
@@ -396,6 +436,35 @@ export function registerInitTool(server: McpServer): void {
       if (await dirExists(projectPath)) {
         // Patch even in the partial-install path — the template files are present
         await patchProjectFiles(projectPath, name);
+
+        // Ensure package.json uses current published versions (create-varity-app on npm may ship older pinned versions)
+        try {
+          const pkgPath = resolve(projectPath, "package.json");
+          const pkgRaw = await readFile(pkgPath, "utf-8");
+          const pkg = JSON.parse(pkgRaw) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+          const LATEST_VERSIONS: Record<string, string> = {
+            "@varity-labs/sdk": "^2.0.0-beta.7",
+            "@varity-labs/ui-kit": "^2.0.0-beta.7",
+            "@varity-labs/types": "^2.0.0-beta.4",
+          };
+          let pkgChanged = false;
+          for (const depKey of ["dependencies", "devDependencies"] as const) {
+            const deps = pkg[depKey];
+            if (!deps) continue;
+            for (const [pkgName, latestVer] of Object.entries(LATEST_VERSIONS)) {
+              if (deps[pkgName] !== undefined && deps[pkgName] !== latestVer) {
+                deps[pkgName] = latestVer;
+                pkgChanged = true;
+              }
+            }
+          }
+          if (pkgChanged) {
+            await writeFile(pkgPath, JSON.stringify(pkg, null, 2) + "\n", "utf-8");
+          }
+        } catch {
+          // Non-critical — package.json versioning is cosmetic
+        }
+
         const install = await runNpmInstall(projectPath);
         return successResponse(
           {

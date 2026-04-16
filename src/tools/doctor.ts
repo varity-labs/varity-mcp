@@ -221,22 +221,22 @@ export function registerDoctorTool(server: McpServer): void {
         }
       }
 
-      // 7. RAM check — Next.js builds need ~2 GB
+      // 7. RAM check — Next.js 15 builds peak at ~3 GB
       try {
-        const memInfo = await import("node:os").then(os => os.freemem());
-        const freeGB = memInfo / (1024 * 1024 * 1024);
-        if (freeGB < 2) {
+        const { freemem } = await import("node:os");
+        const freeGB = freemem() / (1024 * 1024 * 1024);
+        if (freeGB < 3) {
           checks.push({
             name: "RAM",
             status: "warn" as any,
-            message: `Low RAM (${freeGB.toFixed(1)} GB free). Next.js builds require ~2 GB and may be killed.`,
-            fix: "Close other applications or increase available memory before building.",
+            message: `Low RAM: ${freeGB.toFixed(1)} GB free. Next.js 15 builds peak at ~3 GB — varity_build/varity_deploy may be killed by the OS.`,
+            fix: "Close other applications to free memory, or use a machine with more RAM before building.",
           });
         } else {
           checks.push({
             name: "RAM",
             status: "pass",
-            message: `${freeGB.toFixed(1)} GB free (builds require ~2 GB)`,
+            message: `${freeGB.toFixed(1)} GB free (Next.js 15 builds peak at ~3 GB — you're good)`,
           });
         }
       } catch {
