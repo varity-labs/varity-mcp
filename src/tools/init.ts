@@ -85,7 +85,7 @@ async function patchProjectFiles(projectPath: string, name: string): Promise<voi
     if (!nextConfig.includes("@solana/kit")) {
       nextConfig = nextConfig.replace(
         "'@react-native-async-storage/async-storage': false,\n    };",
-        `'@react-native-async-storage/async-storage': false };\n    ['viem', 'viem/chains', '@solana/kit', '@solana/sysvars', '@solana-program/token-2022', 'x402', '@coinbase/wallet-sdk', '@walletconnect/ethereum-provider'].forEach(pkg => { config.resolve.alias[pkg] = false; });`
+        `'@react-native-async-storage/async-storage': false };\n    ['viem', 'viem/chains', 'thirdweb/chains', 'thirdweb/react', '@solana/kit', '@solana/sysvars', '@solana-program/token-2022', 'x402', '@coinbase/wallet-sdk', '@walletconnect/ethereum-provider'].forEach(pkg => { config.resolve.alias[pkg] = false; });`
       );
       changed = true;
     }
