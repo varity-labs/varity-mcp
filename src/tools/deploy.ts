@@ -215,6 +215,30 @@ export function registerDeployTool(server: McpServer): void {
         args.push("--skip-build");
       }
 
+      // For dynamic hosting (Akash): push the locally-built output to the GitHub repo
+      // so the Akash container can git clone and run `npm start` without rebuilding.
+      // This is critical — building inside the Akash container is slow and fragile.
+      if (detectedHosting === "dynamic" && !buildSkipped) {
+        try {
+          // Check if this is a git repo with a remote
+          const gitRemote = await execCLI("git", ["remote", "get-url", "origin"], { cwd, timeout: 5000 });
+          if (gitRemote.exitCode === 0 && gitRemote.stdout.trim()) {
+            // Add the build output (.next/) and commit
+            await execCLI("git", ["add", "-A"], { cwd, timeout: 10000 });
+            const commitResult = await execCLI("git", ["commit", "-m", "Build output for deployment", "--allow-empty"], { cwd, timeout: 10000 });
+            if (commitResult.exitCode === 0) {
+              const pushResult = await execCLI("git", ["push", "origin", "main"], { cwd, timeout: 30000 });
+              if (pushResult.exitCode !== 0) {
+                // Try pushing to master if main doesn't exist
+                await execCLI("git", ["push", "origin", "master"], { cwd, timeout: 30000 });
+              }
+            }
+          }
+        } catch {
+          // Git push failed — continue with deploy anyway, Akash will build from source
+        }
+      }
+
       if (submit_to_store) {
         args.push("--submit-to-store");
       }
