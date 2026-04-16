@@ -82,10 +82,10 @@ async function patchProjectFiles(projectPath: string, name: string): Promise<voi
     const nextConfigPath = resolve(projectPath, "next.config.js");
     let nextConfig = await readFile(nextConfigPath, "utf-8");
     let changed = false;
-    if (!nextConfig.includes("@solana/kit")) {
+    if (!nextConfig.includes("@solana/kit") || !nextConfig.includes("'wagmi'")) {
       nextConfig = nextConfig.replace(
         "'@react-native-async-storage/async-storage': false,\n    };",
-        `'@react-native-async-storage/async-storage': false };\n    ['viem', 'viem/chains', 'thirdweb/chains', 'thirdweb/react', '@solana/kit', '@solana/sysvars', '@solana-program/token-2022', 'x402', '@coinbase/wallet-sdk', '@walletconnect/ethereum-provider'].forEach(pkg => { config.resolve.alias[pkg] = false; });`
+        `'@react-native-async-storage/async-storage': false };\n    ['viem', 'viem/chains', 'thirdweb/chains', 'thirdweb/react', 'wagmi', '@solana/kit', '@solana/sysvars', '@solana-program/token-2022', 'x402', '@coinbase/wallet-sdk', '@walletconnect/ethereum-provider'].forEach(pkg => { config.resolve.alias[pkg] = false; });`
       );
       changed = true;
     }
@@ -146,9 +146,10 @@ async function scaffoldFromLocal(
     // Replace workspace:* deps with published npm registry versions.
     // Never use local file:// paths — developers need reproducible installs from npm.
     const PUBLISHED_VERSIONS: Record<string, string> = {
-      "@varity-labs/sdk": "^2.0.0-beta.7",
-      "@varity-labs/ui-kit": "^2.0.0-beta.7",
-      "@varity-labs/types": "^2.0.0-beta.4",
+      "@tanstack/react-query": "^5.0.0",
+      "@varity-labs/sdk": "^2.0.0-beta.10",
+      "@varity-labs/ui-kit": "^2.0.0-beta.10",
+      "@varity-labs/types": "^2.0.0-beta.5",
     };
 
     for (const depKey of ["dependencies", "devDependencies"] as const) {
@@ -394,9 +395,10 @@ export function registerInitTool(server: McpServer): void {
           const pkgRaw = await readFile(pkgPath, "utf-8");
           const pkg = JSON.parse(pkgRaw) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
           const LATEST_VERSIONS: Record<string, string> = {
-            "@varity-labs/sdk": "^2.0.0-beta.7",
-            "@varity-labs/ui-kit": "^2.0.0-beta.7",
-            "@varity-labs/types": "^2.0.0-beta.4",
+            "@tanstack/react-query": "^5.0.0",
+            "@varity-labs/sdk": "^2.0.0-beta.10",
+            "@varity-labs/ui-kit": "^2.0.0-beta.10",
+            "@varity-labs/types": "^2.0.0-beta.5",
           };
           let pkgChanged = false;
           for (const depKey of ["dependencies", "devDependencies"] as const) {
@@ -466,9 +468,10 @@ export function registerInitTool(server: McpServer): void {
           const pkgRaw = await readFile(pkgPath, "utf-8");
           const pkg = JSON.parse(pkgRaw) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
           const LATEST_VERSIONS: Record<string, string> = {
-            "@varity-labs/sdk": "^2.0.0-beta.7",
-            "@varity-labs/ui-kit": "^2.0.0-beta.7",
-            "@varity-labs/types": "^2.0.0-beta.4",
+            "@tanstack/react-query": "^5.0.0",
+            "@varity-labs/sdk": "^2.0.0-beta.10",
+            "@varity-labs/ui-kit": "^2.0.0-beta.10",
+            "@varity-labs/types": "^2.0.0-beta.5",
           };
           let pkgChanged = false;
           for (const depKey of ["dependencies", "devDependencies"] as const) {
