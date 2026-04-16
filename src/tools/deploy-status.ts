@@ -27,23 +27,22 @@ async function readDeployments(): Promise<DeploymentRecord[]> {
       try {
         const content = await readFile(join(deploymentsDir, file), "utf-8");
         const data = JSON.parse(content);
-        // Resolve the live URL — always prefer clean varity.app custom domain over raw IPFS/provider URLs
+        // Resolve the live URL — always prefer clean varity.app custom domain over raw provider URLs
         const rawUrl =
           data.custom_domain?.url ||   // clean varity.app URL registered at deploy time
           data.url ||
           data.deployment_url ||
           data.akash?.url ||
           data.ipfs?.gateway_url ||
-          data.ipfs?.thirdweb_url ||
           "unknown";
-        // Convert raw IPFS URLs to clean varity.app/{app-name}/ — use app name slug, never the deployment ID
+        // Convert raw storage URLs to clean varity.app/{app-name}/ — use app name slug, never the deployment ID
         const appSlug =
           data.custom_domain?.subdomain ||   // most reliable: registered subdomain
           data.app_name ||
           data.project_name ||
           data.project?.name ||
           (data.path ? data.path.split("/").pop() : null);  // last dir segment as fallback
-        // Always construct a clean varity.app URL — never expose raw IPFS/provider URLs
+        // Always construct a clean varity.app URL — never expose raw provider URLs
         const cleanUrl = appSlug
           ? `https://varity.app/${appSlug}/`
           : (rawUrl.includes("ipfs.io/ipfs/") ? `https://varity.app/${file.replace(".json", "")}/` : rawUrl);

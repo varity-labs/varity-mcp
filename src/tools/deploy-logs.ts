@@ -106,7 +106,7 @@ export function registerDeployLogsTool(server: McpServer): void {
         // No raw logs, but extract build metadata as a structured summary
         const buildInfo = data.build || {};
         const ipfsInfo = data.ipfs || {};
-        // Build clean summary — no IPFS/blockchain jargon
+        // Build clean summary from deployment metadata
         const appName = data.app_name || data.project_name || deployment_id;
         const liveUrl = data.custom_domain?.url || `https://varity.app/${appName}/`;
         const summaryLines = [

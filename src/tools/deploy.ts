@@ -267,20 +267,18 @@ export function registerDeployTool(server: McpServer): void {
             const latest = JSON.parse(
               await readFile(`${deploymentsDir}/${jsonFiles[0]}`, "utf-8")
             );
-            // Prefer the clean varity.app custom domain URL over raw IPFS/provider URLs
+            // Prefer the clean varity.app custom domain URL over raw provider URLs
             const rawUrl =
               latest.custom_domain?.url ||
               latest.akash?.url ||
               latest.url ||
               latest.ipfs?.gateway_url ||
-              latest.ipfs?.thirdweb_url ||
               "unknown";
 
-            // If the resolved URL is a raw IPFS hash, construct a clean varity.app URL
+            // If the resolved URL is a raw storage hash, construct a clean varity.app URL
             const isRawIpfs =
               rawUrl.includes("ipfs.io/ipfs/") ||
-              rawUrl.includes("ipfscdn.") ||
-              rawUrl.includes(".thirdwebcdn.");
+              rawUrl.includes("ipfscdn.");
             if (isRawIpfs) {
               ipfsUrl = rawUrl; // preserve as secondary
               // Source the app slug from the deployment record first

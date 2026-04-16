@@ -122,7 +122,7 @@ export function registerDoctorTool(server: McpServer): void {
         nextSteps.push("pip install varitykit");
       }
 
-      // 4. Python — varitykit requires 3.10+ for deploy
+      // 4. Python — only required for varitykit CLI deploys, NOT for MCP tool usage
       try {
         const pyCmd = process.platform === "win32" ? "python" : "python3";
         const pyResult = await execCLI(pyCmd, ["--version"], { timeout: 5_000 });
@@ -134,24 +134,34 @@ export function registerDoctorTool(server: McpServer): void {
           const minor = verMatch ? parseInt(verMatch[2]!, 10) : null;
           const meetsRequirement = major !== null && minor !== null && (major > 3 || (major === 3 && minor >= 10));
           if (meetsRequirement) {
-            checks.push({ name: "Python", status: "pass", version, message: `${version} detected` });
+            checks.push({ name: "Python", status: "pass", version, message: `${version} detected (used by varitykit CLI deploys)` });
           } else {
             checks.push({
               name: "Python",
-              status: "fail",
+              status: "warn" as any,
               version,
-              message: `Python 3.10+ is required for deploy (found ${version})`,
-              fix: "Install Python 3.10+ from https://python.org",
+              message: `Python: Not required for MCP tools (only needed for CLI deploys). Found ${version} — upgrade to 3.10+ if you use varitykit directly.`,
+              fix: "Install Python 3.10+ from https://python.org (only needed for direct CLI usage)",
             });
-            nextSteps.push("Install Python 3.10+ from https://python.org (required for varitykit deploy)");
+            // Not added to nextSteps — Python is not required for MCP-based deployment
           }
         } else {
-          checks.push({ name: "Python", status: "fail", message: "Python not found", fix: "Install Python 3.10+ from https://python.org" });
-          nextSteps.push("Install Python 3.10+ from https://python.org");
+          checks.push({
+            name: "Python",
+            status: "warn" as any,
+            message: "Python: Not required for MCP tools (only needed for CLI deploys)",
+            fix: "Install Python 3.10+ from https://python.org if you plan to use varitykit CLI directly",
+          });
+          // Not added to nextSteps — Python is not required for MCP-based deployment
         }
       } catch {
-        checks.push({ name: "Python", status: "fail", message: "Python not found", fix: "Install Python 3.10+ from https://python.org" });
-        nextSteps.push("Install Python 3.10+ from https://python.org");
+        checks.push({
+          name: "Python",
+          status: "warn" as any,
+          message: "Python: Not required for MCP tools (only needed for CLI deploys)",
+          fix: "Install Python 3.10+ from https://python.org if you plan to use varitykit CLI directly",
+        });
+        // Not added to nextSteps — Python is not required for MCP-based deployment
       }
 
       // 5. Authentication — check for deploy_key in config

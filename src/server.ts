@@ -15,9 +15,10 @@ import { registerBuildTool } from "./tools/build.js";
 import { registerOpenBrowserTool } from "./tools/open-browser.js";
 import { registerDevServerTool } from "./tools/dev-server.js";
 import { registerAddCollectionTool } from "./tools/add-collection.js";
+import { registerLoginTool } from "./tools/login.js";
 import { createOAuthProvider } from "./auth/provider.js";
 
-export const VERSION = "2.0.0-beta.2";
+export const VERSION = "2.0.0-beta.8";
 
 export type TransportMode = "stdio" | "http";
 
@@ -52,6 +53,7 @@ export function createVarityServer(mode: TransportMode = "stdio"): McpServer {
 
   // ── Development tools (stdio only — requires local filesystem) ──
   if (mode === "stdio") {
+    registerLoginTool(server);
     registerInitTool(server);
     registerInstallDepsTool(server);
     registerBuildTool(server);

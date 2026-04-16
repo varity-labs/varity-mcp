@@ -68,8 +68,7 @@ export function registerInstallDepsTool(server: McpServer): void {
         // node_modules doesn't exist — that's fine, npm install will create it
       }
 
-      // Use --legacy-peer-deps to handle transitive dependency conflicts
-      // (e.g., @walletconnect, @metamask from thirdweb) that cause npm to exit
+      // Use --legacy-peer-deps to handle transitive dependency conflicts that cause npm to exit
       // non-zero even though packages install successfully.
       const baseArgs = packages && packages.length > 0
         ? ["install", ...packages]
