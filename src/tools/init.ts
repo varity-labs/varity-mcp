@@ -122,6 +122,21 @@ async function scaffoldFromLocal(
       },
     });
 
+    // Verify that essential source files were actually copied.
+    // If the template has issues (large node_modules causing cp to abort, broken
+    // symlinks, etc.), the copy may produce only a partial directory.
+    // Fail fast here so the caller can clean up and fall through to npx.
+    try {
+      await access(resolve(projectPath, "src"));
+      await access(resolve(projectPath, "package.json"));
+    } catch {
+      return {
+        success: false,
+        error:
+          "Template copy appears incomplete — 'src/' or 'package.json' not found after copy. Falling back to npx create-varity-app.",
+      };
+    }
+
     // Update package.json with project name and real package versions
     const pkgPath = resolve(projectPath, "package.json");
     const pkgContent = await readFile(pkgPath, "utf-8");
@@ -337,7 +352,15 @@ export function registerInitTool(server: McpServer): void {
               : `Created "${name}" at ${projectPath}. Run varity_install_deps to finish setup.`
           );
         }
-        // Local scaffold failed — fall through to npx
+        // Local scaffold failed — clean up any partial directory so npx has a clean slate.
+        // Without this cleanup, npx create-varity-app refuses to init into an existing
+        // directory and the fallback silently returns the partial directory as "success".
+        try {
+          await rm(projectPath, { recursive: true, force: true });
+        } catch {
+          // Cleanup failure is non-critical — npx will fail with a clear error if needed
+        }
+        // Fall through to npx
       }
 
       // Fallback: npx create-varity-app (uses published package from npm)
