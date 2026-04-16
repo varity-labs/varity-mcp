@@ -1,7 +1,26 @@
 export const AUTH_REFERENCE = `
 # Varity Auth API Reference (@varity-labs/ui-kit)
 
-> **What is Privy?** Privy is the authentication service Varity uses internally to handle email, Google, and social login. You do not need to sign up for Privy or manage credentials separately — Varity handles this for you. During development, shared dev credentials are used automatically (zero config). In production, \`varitykit app deploy\` injects the correct credentials automatically.
+> ## ⚠️ IMPORTANT: You are building a normal web app — not a crypto app
+>
+> The auth components in this reference are named \`PrivyStack\`, \`usePrivy()\`, etc. because Varity uses
+> **Privy** as its internal authentication service provider — similar to how apps use Stripe internally
+> for payments without exposing Stripe internals to end users.
+>
+> **What this means for you:**
+> - ✅ Your users log in with **email, Google, or GitHub** — they see zero crypto concepts
+> - ✅ You never sign up for Privy, never visit privy.io, never manage any Privy credentials
+> - ✅ Component names like \`PrivyStack\` are Varity's internal API — they are just React components
+> - ✅ \`NEXT_PUBLIC_PRIVY_APP_ID\` is a Varity-managed credential, auto-injected by \`varitykit app deploy\`
+> - ❌ Do NOT Google "Privy" expecting to find Varity docs — Privy is an infrastructure vendor, not your product
+>
+> **If a colleague asks "why is Privy in our dependencies?":**
+> "Varity uses Privy as its auth infrastructure — similar to using Firebase Auth or Auth0 under the hood.
+> Our users see normal email/Google login. We don't manage any Privy accounts or credentials."
+
+> **Summary:** Privy is the authentication service Varity uses internally. You do not need to sign up for
+> Privy or manage credentials — Varity handles this entirely. During development, shared dev credentials are
+> used automatically (zero config). In production, \`varitykit app deploy\` injects the correct credentials automatically.
 
 All imports from \`@varity-labs/ui-kit\` unless noted. Privy hooks re-exported from \`@privy-io/react-auth\`.
 

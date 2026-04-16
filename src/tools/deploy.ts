@@ -34,7 +34,11 @@ export function registerDeployTool(server: McpServer): void {
           .string()
           .optional()
           .describe(
-            "Path to the project directory (default: current workspace root)"
+            "Absolute path to the project directory (e.g. '/home/user/my-app'). " +
+            "IMPORTANT: always pass the full absolute path to the project root — the directory " +
+            "that contains package.json and varity.config.json. " +
+            "If omitted, the MCP server's working directory is used (which is rarely the correct project root). " +
+            "Use the project_path returned by varity_init as the value here."
           ),
         submit_to_store: z
           .boolean()
@@ -153,7 +157,7 @@ export function registerDeployTool(server: McpServer): void {
             await saveBuildLog(`build-failed-${Date.now()}`, capturedBuildOutput);
             const fixHint =
               capturedBuildOutput.includes("Killed") || capturedBuildOutput.includes("out of memory") || capturedBuildOutput.includes("heap out of memory")
-                ? "The build ran out of memory. Close other applications to free RAM, then try again."
+                ? "The build ran out of memory. To fix:\n1. Close other applications to free RAM and try again.\n2. Set NODE_OPTIONS=--max-old-space-size=2048 in your terminal environment before deploying.\n3. In a cloud IDE or container: upgrade to a larger instance type (Next.js builds need ~2 GB free RAM)."
                 : (capturedBuildOutput.includes("PageNotFoundError") || capturedBuildOutput.includes("Cannot find module for page"))
                 ? "Clear your Next.js build cache: rm -rf .next, then try deploying again. This happens when a previous build was interrupted. Also run varity_install_deps to ensure all dependencies are installed."
                 : (capturedBuildOutput.includes("Cannot find module") || capturedBuildOutput.includes("Module not found")) && !capturedBuildOutput.includes("for page")
@@ -204,13 +208,20 @@ export function registerDeployTool(server: McpServer): void {
         // Can't read package.json — let varitykit detect
       }
 
+      // If the MCP already ran a successful build above, tell varitykit to skip its own build.
+      // This prevents a redundant second build (which can OOM on memory-constrained machines)
+      // and speeds up deploys significantly. varitykit uploads the existing build output directly.
+      if (!buildSkipped) {
+        args.push("--skip-build");
+      }
+
       if (submit_to_store) {
         args.push("--submit-to-store");
       }
 
       const result = await execVaritykit("app", args, {
         cwd,
-        timeout: 300_000, // 5 minutes for build + deploy
+        timeout: 300_000, // 5 minutes for upload + deploy (no rebuild needed)
       });
 
       if (result.exitCode === 0) {
@@ -338,14 +349,33 @@ export function registerDeployTool(server: McpServer): void {
       // Deploy failed — parse error for helpful suggestion
       const output = result.stderr || result.stdout;
 
-      if (
-        output.includes("No framework detected") ||
-        output.includes("Aborted")
-      ) {
+      if (output.includes("No framework detected")) {
         return errorResponse(
           "NO_FRAMEWORK",
           `Could not detect a supported framework in: ${cwd}`,
-          "Ensure you have a package.json with Next.js, React, or Vue. Run from the project root directory."
+          "Ensure you have a package.json with Next.js, React, or Vue. Pass the absolute path to your project root via the 'path' parameter (the directory that contains package.json and varity.config.json)."
+        );
+      }
+
+      // "Aborted" means the varitykit process crashed — NOT a framework detection failure.
+      // Common causes: OOM during build, Python error, missing dep. Give a specific hint.
+      if (output.includes("Aborted") || result.exitCode === 137) {
+        const isOom =
+          output.includes("Killed") ||
+          output.includes("out of memory") ||
+          output.includes("heap out of memory") ||
+          result.exitCode === 137;
+        return errorResponse(
+          isOom ? "BUILD_OOM" : "DEPLOY_CRASHED",
+          isOom
+            ? `The deploy process was killed due to insufficient memory (exit code ${result.exitCode}). Build output:\n${output.slice(-500)}`
+            : `The deploy process crashed unexpectedly. Output:\n${output.slice(-500)}`,
+          isOom
+            ? "Not enough free RAM for the deploy process. To fix:\n" +
+              "1. Free up RAM by closing other applications.\n" +
+              "2. Or upgrade to a larger machine/instance type (Next.js builds need ~2 GB free RAM).\n" +
+              "3. If running in a cloud IDE or CI: set NODE_OPTIONS=--max-old-space-size=2048 in your environment before deploying."
+            : "Run varity_doctor to check your environment. If varitykit is broken, reinstall with: pip install --upgrade varitykit"
         );
       }
 

@@ -49,11 +49,13 @@ export function registerSubmitToStoreTool(server: McpServer): void {
           .optional()
           .default(false)
           .describe(
-            "Set to true to submit directly via the Varity API without requiring a browser click. " +
-            "When confirm: true, the tool calls the developer portal API to complete the listing " +
-            "programmatically — no browser is opened and no manual click is needed. " +
-            "Ideal for CI/CD pipelines, automated testing, and headless environments. " +
-            "If the API call fails (e.g. network issue), the tool falls back to returning the submission URL."
+            "Set to true to attempt direct API submission without a browser click. " +
+            "The tool calls the developer portal API and retries 3 times before giving up. " +
+            "If the API is unavailable (e.g. HTTP 405 or network error), the tool returns " +
+            "submission_status: 'api_unavailable' with confirm_failed: true and a pre-filled " +
+            "submission URL — it does NOT silently open a browser. " +
+            "On api_unavailable: open the returned submission_url to complete listing manually (takes under a minute). " +
+            "Recommended for CI/CD pipelines; falls back gracefully when the API is down."
           ),
       },
       annotations: {
@@ -162,6 +164,8 @@ export function registerSubmitToStoreTool(server: McpServer): void {
               ? "Authentication failed — run `varitykit login` to refresh your credentials, then retry."
               : lastApiStatus === 404
               ? "Submission endpoint not found — the API may be temporarily unavailable. Use Option 2 below to submit manually."
+              : lastApiStatus === 405
+              ? "The submission API is not accepting requests at this time (HTTP 405). Use Option 2 below to complete your listing manually via the developer portal — it takes under a minute."
               : lastApiStatus >= 500
               ? "Server error on the submission endpoint — check https://status.varity.so and retry in a few minutes."
               : "Check https://status.varity.so for platform status, then retry.";

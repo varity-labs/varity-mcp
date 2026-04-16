@@ -8,6 +8,15 @@ export const PATTERNS_REFERENCE = `
 > 3. **Brief nav flash on dashboard hard refresh** — the dashboard layout mounts auth after hydration; a quick redirect flash is visible on hard refresh. This is expected and does not affect normal navigation or the user experience in production.
 > 4. **First Load JS ~690 kB on dashboard routes** — this is expected. The auth and UI framework account for most of the bundle. Next.js code-splits per route so users only download what each page needs; the total is not loaded at once.
 > 5. **Build logs show \`[Varity Database] Using shared development database\`** — this is normal in dev and during \`varity_build\`. Your data is isolated from other developers. After deploying with \`varitykit app deploy\`, your app gets a private dedicated database.
+> 6. **Build shows \`⚠ Next.js inferred your workspace root\`** — appears when your project lives inside a larger directory that has its own \`package-lock.json\` (e.g. a monorepo or cloud IDE workspace). It does not affect your build output. To suppress it, add \`outputFileTracingRoot: __dirname\` to \`next.config.js\`:
+>    \`\`\`js
+>    const nextConfig = {
+>      outputFileTracingRoot: __dirname,  // ← add this line
+>      output: 'export',
+>      // ...rest of config
+>    };
+>    \`\`\`
+>    Projects created with \`varity_init\` have this set automatically.
 
 ## Project File Structure
 

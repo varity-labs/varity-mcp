@@ -88,7 +88,31 @@ Varity automatically picks the right infrastructure for your app:
 \`\`\`
 "orchestration": "Detected: Next.js static app → Hosting: Global CDN"
 \`\`\`
-You can also confirm by running \`varity_deploy_logs\` — the Next.js route table in the build output shows \`○ (Static)\` next to each page for static apps, or \`ƒ (Dynamic)\` for server-rendered pages in dynamic deployments.
+You can also confirm by running \`varity_deploy_logs\` — when full build logs were captured, the Next.js route table shows \`○ (Static)\` next to each page for static apps, or \`ƒ (Dynamic)\` for server-rendered pages. If only a deployment record exists (no log file), \`varity_deploy_logs\` returns a structured summary receipt instead — see the note below about log availability.
+
+### The \`path\` Parameter
+
+\`varity_deploy\` accepts an optional \`path\` parameter — the **absolute path** to your project root (the directory containing \`package.json\` and \`varity.config.json\`):
+
+\`\`\`
+varity_deploy({ path: "/home/user/projects/my-app" })
+\`\`\`
+
+- **Always pass \`path\` explicitly** — if omitted, the MCP server's own working directory is used, which is rarely the user's project directory.
+- Use the \`project_path\` value returned by \`varity_init\` as the \`path\` value for \`varity_deploy\`.
+- The \`path\` parameter works the same way for \`varity_build\`, \`varity_dev_server\`, and \`varity_add_collection\`.
+
+### Log Availability (what varity_deploy_logs returns)
+
+\`varity_deploy_logs\` has two modes depending on what was stored during deployment:
+
+| Scenario | What varity_deploy_logs returns |
+|----------|--------------------------------|
+| Deployment made with \`varity_deploy\` MCP tool | **Full build log** — all npm build output with exact file/line numbers |
+| Deployment made with \`varitykit app deploy\` CLI | **Summary receipt** — URL, status, build size, timestamp |
+| Deployment made with \`varitykit app deploy\` CLI | Includes \`debug_tip\` pointing to \`varity_build\` for detailed output |
+
+**For debugging a failed deploy:** Use \`varity_build\` — it always captures the full compilation log and shows TypeScript errors with exact file/line numbers.
 
 ### Full Deploy Response Fields
 

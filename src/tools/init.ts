@@ -126,8 +126,18 @@ async function scaffoldFromLocal(
           "'@react-native-async-storage/async-storage': false,\n    };",
           `'@react-native-async-storage/async-storage': false };\n    ['viem', 'viem/chains', '@solana/kit', '@solana/sysvars', '@solana-program/token-2022', 'x402', '@coinbase/wallet-sdk', '@walletconnect/ethereum-provider'].forEach(pkg => { config.resolve.alias[pkg] = false; });`
         );
-        await writeFile(nextConfigPath, nextConfig, "utf-8");
       }
+      // Suppress "Next.js inferred your workspace root" warning that appears when
+      // the project lives inside a larger monorepo/workspace (e.g. the parent has
+      // its own package-lock.json).  outputFileTracingRoot scopes tracing to the
+      // project directory, preventing Next.js from walking up to the workspace root.
+      if (!nextConfig.includes("outputFileTracingRoot")) {
+        nextConfig = nextConfig.replace(
+          "const nextConfig = {",
+          `const nextConfig = {\n  outputFileTracingRoot: __dirname,`
+        );
+      }
+      await writeFile(nextConfigPath, nextConfig, "utf-8");
     } catch {
       // next.config.js may not exist
     }
@@ -140,16 +150,17 @@ async function scaffoldFromLocal(
 
 /**
  * Convert a hyphenated project slug to a display-friendly title for APP_NAME.
- * e.g. "my-saas-app" → "My Saas App", "dx-final-test" → "DX Final Test"
- * Short words (≤3 chars) are fully uppercased to handle abbreviations/acronyms.
+ * e.g. "my-saas-app" → "My Saas App", "vc-demo-app" → "VC Demo App"
+ * Only very short words (≤2 chars) are fully uppercased for acronyms like "vc", "ai", "dx".
+ * Words of 3+ chars are title-cased: "app" → "App", "demo" → "Demo".
  */
 function toDisplayName(slug: string): string {
   return slug
     .split("-")
     .map((word) =>
-      word.length <= 3
+      word.length <= 2
         ? word.toUpperCase()
-        : word.charAt(0).toUpperCase() + word.slice(1)
+        : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
     )
     .join(" ");
 }
@@ -260,7 +271,11 @@ export function registerInitTool(server: McpServer): void {
           .string()
           .optional()
           .describe(
-            "Directory to create the project in (default: current directory)"
+            "Absolute path to the parent directory where the project folder will be created. " +
+            "Example: if path='/home/user/projects' and name='my-app', the project is created at '/home/user/projects/my-app'. " +
+            "IMPORTANT: always pass an explicit absolute path (e.g. the user's home directory or workspace folder). " +
+            "If omitted, the project is created inside the MCP server's working directory, which is rarely " +
+            "the user's workspace root. Ask the user where they want the project if unsure."
           ),
       },
     },

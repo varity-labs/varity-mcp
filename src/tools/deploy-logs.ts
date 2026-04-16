@@ -16,12 +16,15 @@ export function registerDeployLogsTool(server: McpServer): void {
   server.registerTool(
     "varity_deploy_logs",
     {
-      title: "Deployment Logs",
+      title: "Deployment Info & Logs",
       description:
-        "Get build and deployment logs for a specific deployment. " +
-        "Useful for debugging failed deployments or checking build output. " +
-        "Use this when a developer asks why a deployment failed, wants to see build logs, " +
-        "or needs to debug an issue.",
+        "Get build logs or deployment summary for a specific deployment. " +
+        "When full build logs exist (captured during varity_deploy or varity_build), returns the actual log lines. " +
+        "When only the deployment record exists, returns a structured summary receipt: " +
+        "URL, status, build size, build time, and a debug_tip pointing to varity_build for detailed output. " +
+        "Use this to get the live URL, check status, or confirm build metrics for a deployment. " +
+        "For detailed build error output (TypeScript errors, module-not-found, etc.), use varity_build — " +
+        "it captures the full compilation log with exact file/line numbers.",
       inputSchema: {
         deployment_id: z
           .string()
