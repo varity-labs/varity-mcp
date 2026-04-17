@@ -387,7 +387,8 @@ export function registerAddCollectionTool(server: McpServer): void {
         if (importMatch) {
           const existingTypes = importMatch[1]!;
           if (!existingTypes.includes(pascalSingular)) {
-            const updatedTypes = existingTypes.trimEnd() + `, ${pascalSingular}`;
+            const trimmed = existingTypes.trim();
+            const updatedTypes = trimmed ? `${trimmed}, ${pascalSingular}` : ` ${pascalSingular}`;
             dbContent = dbContent.replace(importRegex, `import type {${updatedTypes}} from '../types'`);
           }
         } else {
@@ -413,7 +414,8 @@ export function registerAddCollectionTool(server: McpServer): void {
         if (dbImportMatch) {
           const existingImports = dbImportMatch[1]!;
           if (!existingImports.includes(camelPlural)) {
-            const updatedImports = existingImports.trimEnd() + `, ${camelPlural}`;
+            const trimmedImports = existingImports.trim();
+            const updatedImports = trimmedImports ? `${trimmedImports}, ${camelPlural}` : ` ${camelPlural}`;
             hooksContent = hooksContent.replace(
               dbImportRegex,
               `import {${updatedImports}} from './database'`
@@ -429,7 +431,8 @@ export function registerAddCollectionTool(server: McpServer): void {
         if (typeImportMatch) {
           const existingTypes = typeImportMatch[1]!;
           if (!existingTypes.includes(pascalSingular)) {
-            const updatedTypes = existingTypes.trimEnd() + `, ${pascalSingular}`;
+            const trimmed = existingTypes.trim();
+            const updatedTypes = trimmed ? `${trimmed}, ${pascalSingular}` : ` ${pascalSingular}`;
             hooksContent = hooksContent.replace(
               typeImportRegex,
               `import type {${updatedTypes}} from '../types'`
