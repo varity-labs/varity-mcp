@@ -179,11 +179,24 @@ export function registerBuildTool(server: McpServer): void {
         const raw = await readFile(packageJsonPath, "utf-8");
         const pkg = JSON.parse(raw);
         if (!pkg.scripts?.build) {
-          return errorResponse(
-            "NO_BUILD_SCRIPT",
-            'No "build" script found in package.json.',
-            'Add a build script to package.json (e.g., "build": "next build") or check that you are in the correct directory.'
-          );
+          // For server apps (Express, Fastify, etc.) no build step is needed — just verify the entry point exists
+          const mainFile = pkg.main || "server.js";
+          try {
+            await access(`${cwd}/${mainFile}`);
+            return successResponse({
+              success: true,
+              message: `Server app detected (${mainFile}) — no build step needed. Ready to deploy.`,
+              deployable_output: true,
+              framework: "nodejs",
+              note: "This is a server application. Use varity_deploy to deploy it directly."
+            });
+          } catch {
+            return errorResponse(
+              "NO_BUILD_SCRIPT",
+              'No "build" script found in package.json and no server entry point detected.',
+              'Add a build script (e.g., "build": "next build") or ensure server.js/index.js exists.'
+            );
+          }
         }
       } catch {
         return errorResponse(

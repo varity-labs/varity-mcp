@@ -197,8 +197,16 @@ export function registerDeployTool(server: McpServer): void {
       try {
         const pkgForDeploy = JSON.parse(await readFile(`${cwd}/package.json`, "utf-8"));
         const deps = { ...pkgForDeploy.dependencies, ...pkgForDeploy.devDependencies };
-        if ("next" in deps) {
-          // Check if static export (the Varity default) or dynamic
+        // Detect server frameworks → dynamic (Akash)
+        const dynamicFrameworks = ["express", "fastify", "@nestjs/core", "koa", "hapi", "hono"];
+        const hasDynamicFramework = dynamicFrameworks.some(f => f in deps);
+
+        if (hasDynamicFramework) {
+          // Server framework detected — always dynamic (Akash)
+          detectedHosting = "dynamic";
+          orchestrationSummary = "Detected: Dynamic app → Hosting: Cloud compute (Akash — auto-configured with database)";
+        } else if ("next" in deps) {
+          // Next.js — check if static export or dynamic
           let isStatic = false;
           try {
             const nextCfg = await readFile(`${cwd}/next.config.js`, "utf-8");
@@ -209,7 +217,11 @@ export function registerDeployTool(server: McpServer): void {
           detectedHosting = isStatic ? "static" : "dynamic";
           orchestrationSummary = isStatic
             ? "Detected: Next.js static app → Hosting: Global CDN"
-            : "Detected: Dynamic app → Hosting: Cloud compute (Akash — auto-configured with database)";
+            : "Detected: Dynamic Next.js app → Hosting: Cloud compute (Akash — auto-configured with database)";
+        } else {
+          // Unknown framework — default to dynamic (Akash) for custom apps
+          detectedHosting = "dynamic";
+          orchestrationSummary = "Detected: Custom app → Hosting: Cloud compute (Akash — auto-configured with database)";
           args.push("--hosting", detectedHosting);
           // For dynamic (Akash) deployments, resolve and pass the GitHub repo URL
           if (detectedHosting === "dynamic") {
