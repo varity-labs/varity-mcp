@@ -222,16 +222,15 @@ export function registerDeployTool(server: McpServer): void {
               }
             }
             if (resolvedRepoUrl) {
-              // Write to varity.config.json so the CLI's deployment orchestrator can read it.
-              // The CLI reads config.github_repo in _resolve_github_url() — this works even
-              // in published CLI versions that don't have the --repo-url flag.
+              // Pass repo URL to CLI AND write to config as fallback
+              args.push("--repo-url", resolvedRepoUrl);
               try {
                 const configPath = `${cwd}/varity.config.json`;
                 let config: Record<string, unknown> = {};
                 try { config = JSON.parse(await readFile(configPath, "utf-8")); } catch { /* new config */ }
                 config.github_repo = resolvedRepoUrl;
                 await writeFile(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
-              } catch { /* non-critical — deploy will still attempt */ }
+              } catch { /* non-critical */ }
             } else {
               orchestrationSummary += " | ⚠️ No GitHub repo detected — create one first with varity_create_repo";
             }
