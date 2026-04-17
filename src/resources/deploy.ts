@@ -145,27 +145,19 @@ varitykit app submit --app-id app_abc123def456
 
 In AI coding tools (Cursor, Windsurf, Claude Code), use the MCP tool:
 \`\`\`
-varity_submit_to_store({ deployment_id: "dep_789xyz", name: "My App", description: "...", price: 49, confirm: true })
+varity_submit_to_store({ deployment_id: "dep_789xyz", name: "My App", description: "...", price: 49 })
 \`\`\`
 
 ### Submission Paths
 
-**One-step (confirm: true) — preferred for AI tools and CI/CD:**
-1. Call \`varity_submit_to_store({ ..., confirm: true })\`
-2. The tool calls the developer portal API to submit directly — no browser needed. It retries up to 3 times automatically before giving up.
-3. If the API is still unavailable after retries, the tool returns \`submission_status: "api_unavailable"\` with \`confirm_failed: true\` — it does NOT silently open a browser
-4. On \`api_unavailable\`: retry after a few minutes, or use the two-step flow below
-5. **API availability:** The submission endpoint targets >99% uptime. \`api_unavailable\` should be rare — if it occurs, check https://status.varity.so for platform status. Persistent failures can be reported in [Discord](https://discord.gg/7vWsdwa2Bg).
-
-**Two-step (default, without confirm) — works in any environment:**
-1. Call \`varity_submit_to_store\` → browser opens with a pre-filled form (or URL returned if headless)
+**Default (browser-based) — works in any environment:**
+1. Call \`varity_submit_to_store\` → browser opens with a pre-filled form
 2. Review app details on the submission page, then click **Submit**
 3. Returns \`submission_status: "pending_confirmation"\` until the form is submitted
 
 **Headless / CI/CD environments:**
-- Pass \`skip_browser: true\` to suppress browser open and return only the URL
-- Or pass \`confirm: true\` for full API submission (if the API is available)
-- If \`confirm: true\` fails: check \`submission_status === "api_unavailable"\` and retry
+- Pass \`skip_browser: true\` to suppress browser open and return only the submission URL
+- Open the returned URL manually to complete the submission
 
 ### After Submission — Review Timeline
 

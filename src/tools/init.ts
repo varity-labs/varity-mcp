@@ -82,11 +82,20 @@ async function patchProjectFiles(projectPath: string, name: string): Promise<voi
     const nextConfigPath = resolve(projectPath, "next.config.js");
     let nextConfig = await readFile(nextConfigPath, "utf-8");
     let changed = false;
-    if (!nextConfig.includes("@solana/kit") || !nextConfig.includes("'wagmi'")) {
-      nextConfig = nextConfig.replace(
-        "'@react-native-async-storage/async-storage': false,\n    };",
-        `'@react-native-async-storage/async-storage': false };\n    ['viem', 'viem/chains', 'thirdweb/chains', 'thirdweb/react', 'wagmi', '@solana/kit', '@solana/sysvars', '@solana-program/token-2022', 'x402', '@coinbase/wallet-sdk', '@walletconnect/ethereum-provider'].forEach(pkg => { config.resolve.alias[pkg] = false; });`
-      );
+    const allStubsPresent = nextConfig.includes("'thirdweb'") && nextConfig.includes("thirdweb/extensions/erc20") && nextConfig.includes("@solana/kit");
+    if (!allStubsPresent) {
+      // Replace the old stub list with the complete one (covers every thirdweb subpath)
+      const oldStubPattern = /\[(['"][^'"]*['"],?\s*)*\]\.forEach\(pkg => \{ config\.resolve\.alias\[pkg\] = false; \}\);/;
+      const newStubs = `['@react-native-async-storage/async-storage', 'viem', 'viem/chains', 'thirdweb', 'thirdweb/chains', 'thirdweb/react', 'thirdweb/deploys', 'thirdweb/storage', 'thirdweb/wallets', 'thirdweb/wallets/in-app', 'thirdweb/extensions/erc20', 'wagmi', '@solana/kit', '@solana/sysvars', '@solana-program/token-2022', 'x402', '@coinbase/wallet-sdk', '@walletconnect/ethereum-provider'].forEach(pkg => { config.resolve.alias[pkg] = false; });`;
+      if (oldStubPattern.test(nextConfig)) {
+        nextConfig = nextConfig.replace(oldStubPattern, newStubs);
+      } else {
+        // Fallback: inject after webpack function open
+        nextConfig = nextConfig.replace(
+          "webpack: (config, { isServer, dev }) => {",
+          `webpack: (config, { isServer, dev }) => {\n    // Suppress unused optional peer dependencies from UI Kit internals\n    ${newStubs}`
+        );
+      }
       changed = true;
     }
     if (!nextConfig.includes("outputFileTracingRoot")) {
@@ -173,20 +182,29 @@ async function scaffoldFromLocal(
   }
 }
 
+/** Business acronyms that should always appear fully uppercased in display names. */
+const DISPLAY_NAME_ACRONYMS = new Set([
+  'crm', 'api', 'saas', 'ui', 'ux', 'db', 'id', 'hr',
+  'b2b', 'b2c', 'ai', 'ml', 'sdk', 'url', 'seo', 'kpi', 'cms', 'erp',
+]);
+
 /**
  * Convert a hyphenated project slug to a display-friendly title for APP_NAME.
- * e.g. "my-saas-app" → "My Saas App", "vc-demo-app" → "VC Demo App"
- * Only very short words (≤2 chars) are fully uppercased for acronyms like "vc", "ai", "dx".
- * Words of 3+ chars are title-cased: "app" → "App", "demo" → "Demo".
+ * e.g. "my-saas-app" → "My SaaS App", "custom-crm" → "Custom CRM"
+ * Recognizes common business acronyms (crm, api, saas, etc.) and uppercases them.
+ * Very short words (≤2 chars) are also fully uppercased (e.g. "vc" → "VC").
+ * Words of 3+ chars with no acronym match are title-cased: "app" → "App".
  */
 function toDisplayName(slug: string): string {
   return slug
     .split("-")
-    .map((word) =>
-      word.length <= 2
-        ? word.toUpperCase()
-        : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
-    )
+    .map((word) => {
+      const lower = word.toLowerCase();
+      if (DISPLAY_NAME_ACRONYMS.has(lower)) {
+        return word.toUpperCase();
+      }
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    })
     .join(" ");
 }
 
@@ -344,6 +362,10 @@ export function registerInitTool(server: McpServer): void {
               source: "local",
               deps_installed: install.success,
               ...(install.success ? {} : { note: "Dependencies not installed — run varity_install_deps to install them in one step." }),
+              template_collections: {
+                built_in: ["projects", "tasks", "team_members", "user_settings"],
+                note: "These names are already in the template. Use different names with varity_add_collection to avoid conflicts.",
+              },
               next_steps: install.success
                 ? [`cd ${projectPath}`, "npm run dev", "# Use varity_dev_server to start the dev server — it auto-selects an available port", "# When ready: use varity_deploy"]
                 : ["Run varity_install_deps to install dependencies", `cd ${projectPath}`, "npm run dev", "# When ready: use varity_deploy"],
@@ -427,6 +449,10 @@ export function registerInitTool(server: McpServer): void {
             template,
             deps_installed: install.success,
             ...(install.success ? {} : { note: "Dependencies not installed — run varity_install_deps to install them in one step." }),
+            template_collections: {
+              built_in: ["projects", "tasks", "team_members", "user_settings"],
+              note: "These names are already in the template. Use different names with varity_add_collection to avoid conflicts.",
+            },
             next_steps: install.success
               ? [
                   `cd ${projectPath}`,
@@ -501,6 +527,10 @@ export function registerInitTool(server: McpServer): void {
             note: install.success
               ? "Project created and dependencies installed."
               : "Project created but dependencies could not be installed automatically. Run varity_install_deps to install them.",
+            template_collections: {
+              built_in: ["projects", "tasks", "team_members", "user_settings"],
+              note: "These names are already in the template. Use different names with varity_add_collection to avoid conflicts.",
+            },
             next_steps: install.success
               ? [`cd ${projectPath}`, "npm run dev", "# When ready: use varity_deploy"]
               : ["Run varity_install_deps to install dependencies", `cd ${projectPath}`, "npm run dev", "# When ready: use varity_deploy"],
@@ -530,6 +560,10 @@ export function registerInitTool(server: McpServer): void {
               template,
               method: "varitykit",
               deps_installed: install.success,
+              template_collections: {
+                built_in: ["projects", "tasks", "team_members", "user_settings"],
+                note: "These names are already in the template. Use different names with varity_add_collection to avoid conflicts.",
+              },
               next_steps: install.success
                 ? [`cd ${projectPath}`, "npm run dev", "# When ready: use varity_deploy"]
                 : ["Run varity_install_deps to install dependencies", `cd ${projectPath}`, "npm run dev", "# When ready: use varity_deploy"],

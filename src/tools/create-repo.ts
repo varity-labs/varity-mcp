@@ -1,33 +1,17 @@
 /**
- * varity_create_repo - Create GitHub repo with Varity template
+ * varity_create_repo - Create GitHub repo and push current project to it
  *
- * Enables true 60-second browser workflow by scaffolding templates via GitHub API
+ * For custom apps (the primary use case): creates an empty repo and pushes
+ * the local project directory to GitHub. This is required for Akash dynamic
+ * deployments which git clone the repo at runtime.
+ *
+ * For template-only usage (secondary): creates a repo from the SaaS template.
  */
 
 import { z } from "zod";
 import { execSync } from "node:child_process";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
-
-const CreateRepoInputSchema = z.object({
-  name: z
-    .string()
-    .min(1)
-    .max(100)
-    .regex(
-      /^[a-z0-9-]+$/,
-      "Repository name must be lowercase letters, numbers, and hyphens only"
-    ),
-  description: z.string().optional(),
-  template: z.enum(["saas-starter"]).default("saas-starter"),
-  visibility: z.enum(["public", "private"]).default("public"),
-  github_token: z
-    .string()
-    .optional()
-    .describe("GitHub personal access token (classic) with repo scope"),
-});
-
-type CreateRepoInput = z.infer<typeof CreateRepoInputSchema>;
 
 interface GitHubRepo {
   full_name: string;
@@ -37,16 +21,49 @@ interface GitHubRepo {
 }
 
 /**
- * Create GitHub repository via API
+ * Create empty GitHub repository via API (no template).
  */
-async function createGitHubRepo(
+async function createEmptyGitHubRepo(
   name: string,
   description: string | undefined,
   visibility: "public" | "private",
   token: string
 ): Promise<GitHubRepo> {
-  // Use GitHub's template repository API — creates a full copy of the template
-  // including all files, in one API call. No manual tree copying needed.
+  const response = await fetch("https://api.github.com/user/repos", {
+    method: "POST",
+    headers: {
+      Authorization: `token ${token}`,
+      Accept: "application/vnd.github.v3+json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      name,
+      description: description || `Varity app - ${name}`,
+      private: visibility === "private",
+      auto_init: false,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: response.statusText }));
+    if (response.status === 422 && (error as any).message?.includes("already exists")) {
+      throw new Error(`Repository '${name}' already exists`);
+    }
+    throw new Error((error as any).message || `GitHub API error: ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+/**
+ * Create GitHub repository from template (legacy — used when no local path provided).
+ */
+async function createRepoFromTemplate(
+  name: string,
+  description: string | undefined,
+  visibility: "public" | "private",
+  token: string
+): Promise<GitHubRepo> {
   const templateRepo = "varity-labs/varity-saas-template";
   const response = await fetch(
     `https://api.github.com/repos/${templateRepo}/generate`,
@@ -68,367 +85,243 @@ async function createGitHubRepo(
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ message: response.statusText }));
-    if (response.status === 422 && error.message?.includes("already exists")) {
+    if (response.status === 422 && (error as any).message?.includes("already exists")) {
       throw new Error(`Repository '${name}' already exists`);
     }
-    throw new Error(
-      error.message || `GitHub API error: ${response.statusText}`
-    );
+    throw new Error((error as any).message || `GitHub API error: ${response.statusText}`);
   }
 
   return response.json();
 }
 
 /**
- * Push template files to repo via GitHub API
+ * Push local project directory to GitHub repo.
+ * Handles: git init, remote setup, initial commit, push.
  */
-async function pushTemplateFiles(
-  repoFullName: string,
-  template: string,
-  token: string
-): Promise<void> {
-  // Get template files from varity-saas-template repo
-  const templateRepo = "varity-labs/varity-saas-template";
+function pushLocalProject(projectPath: string, cloneUrl: string, token: string): void {
+  // Embed token in URL for authentication (HTTPS push)
+  const authUrl = cloneUrl.replace("https://", `https://${token}@`);
+  const opts = { cwd: projectPath, stdio: "pipe" as const };
 
-  // Get default branch SHA
-  const refResponse = await fetch(
-    `https://api.github.com/repos/${repoFullName}/git/refs/heads/main`,
-    {
-      headers: {
-        Authorization: `token ${token}`,
-        Accept: "application/vnd.github.v3+json",
-      },
-    }
-  );
+  // Init git if not already
+  try { execSync("git init", opts); } catch { /* already init */ }
 
-  if (!refResponse.ok) {
-    throw new Error("Failed to get repository ref");
-  }
+  // Set git user config for automated environment (needed if no global config)
+  try { execSync('git config user.email "varity-mcp@varity.so"', opts); } catch { /* ok */ }
+  try { execSync('git config user.name "Varity MCP"', opts); } catch { /* ok */ }
 
-  const refData = await refResponse.json();
-  const latestCommitSha = refData.object.sha;
-
-  // Get latest commit
-  const commitResponse = await fetch(
-    `https://api.github.com/repos/${repoFullName}/git/commits/${latestCommitSha}`,
-    {
-      headers: {
-        Authorization: `token ${token}`,
-        Accept: "application/vnd.github.v3+json",
-      },
-    }
-  );
-
-  if (!commitResponse.ok) {
-    throw new Error("Failed to get commit");
-  }
-
-  const commitData = await commitResponse.json();
-  const baseTreeSha = commitData.tree.sha;
-
-  // Get template tree from varity-saas-template
-  const templateTreeResponse = await fetch(
-    `https://api.github.com/repos/${templateRepo}/git/trees/main?recursive=1`,
-    {
-      headers: {
-        Accept: "application/vnd.github.v3+json",
-      },
-    }
-  );
-
-  if (!templateTreeResponse.ok) {
-    throw new Error("Failed to fetch template files");
-  }
-
-  const templateTree = await templateTreeResponse.json();
-
-  // Filter out .git directory and create new tree
-  const filteredTree = templateTree.tree
-    .filter((item: any) => !item.path.startsWith(".git"))
-    .map((item: any) => ({
-      path: item.path,
-      mode: item.mode,
-      type: item.type,
-      sha: item.sha,
-    }));
-
-  // Create new tree
-  const newTreeResponse = await fetch(
-    `https://api.github.com/repos/${repoFullName}/git/trees`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `token ${token}`,
-        Accept: "application/vnd.github.v3+json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        base_tree: baseTreeSha,
-        tree: filteredTree,
-      }),
-    }
-  );
-
-  if (!newTreeResponse.ok) {
-    const errBody = await newTreeResponse.text().catch(() => "");
-    throw new Error(
-      newTreeResponse.status === 422
-        ? `Template sync error — the Varity SaaS template needs to be updated. This is a known issue. As a workaround, use varity_init to scaffold locally, then push to GitHub manually with: git init && git remote add origin https://github.com/YOUR_USER/${repoFullName.split("/").pop()}.git && git push -u origin main`
-        : `Failed to create repository: ${newTreeResponse.status} ${errBody.slice(0, 200)}. Ensure your GitHub token has the 'repo' scope.`
-    );
-  }
-
-  const newTree = await newTreeResponse.json();
-
-  // Create new commit
-  const newCommitResponse = await fetch(
-    `https://api.github.com/repos/${repoFullName}/git/commits`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `token ${token}`,
-        Accept: "application/vnd.github.v3+json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        message: "Initialize Varity SaaS template",
-        tree: newTree.sha,
-        parents: [latestCommitSha],
-      }),
-    }
-  );
-
-  if (!newCommitResponse.ok) {
-    throw new Error("Failed to create commit");
-  }
-
-  const newCommit = await newCommitResponse.json();
-
-  // Update main branch to point to new commit
-  const updateRefResponse = await fetch(
-    `https://api.github.com/repos/${repoFullName}/git/refs/heads/main`,
-    {
-      method: "PATCH",
-      headers: {
-        Authorization: `token ${token}`,
-        Accept: "application/vnd.github.v3+json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        sha: newCommit.sha,
-        force: false,
-      }),
-    }
-  );
-
-  if (!updateRefResponse.ok) {
-    throw new Error("Failed to update branch");
-  }
-}
-
-/**
- * Tool handler
- */
-async function handleCreateRepo(input: CreateRepoInput) {
-  // Resolve token BEFORE the outer try/catch so MISSING_TOKEN is never
-  // accidentally wrapped in the generic "CREATE_FAILED" error message.
-  let token = input.github_token || process.env.GITHUB_TOKEN;
-
-  if (!token) {
-    // Try to get token from the GitHub CLI if it's installed and authenticated
-    try {
-      const ghToken = execSync("gh auth token", { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
-      if (ghToken) {
-        token = ghToken;
-      }
-    } catch {
-      // gh CLI not available or not authenticated — fall through to error
-    }
-  }
-
-  if (!token) {
-    return errorResponse(
-      "MISSING_TOKEN",
-      "GitHub token required. Either pass github_token parameter or set GITHUB_TOKEN environment variable.",
-      "Get a token from https://github.com/settings/tokens (needs 'repo' scope). Tip: Install the GitHub CLI (gh) and run 'gh auth login' for automatic token detection."
-    );
-  }
-
+  // Set or update remote origin
   try {
-    // Create repository
-    const repo = await createGitHubRepo(
-      input.name,
-      input.description,
-      input.visibility,
-      token
-    );
-
-    // Template files are already in the repo — GitHub's template API copies everything.
-    // No manual pushTemplateFiles needed.
-
-    // Generate quick-start URLs
-    const gitpodUrl = `https://gitpod.io/#${repo.html_url}`;
-    const stackblitzUrl = `https://stackblitz.com/github/${repo.full_name}`;
-    const codespaceUrl = `https://github.com/codespaces/new?hide_repo_select=true&ref=main&repo=${repo.full_name}`;
-
-    return successResponse({
-      repository: {
-        name: repo.full_name,
-        url: repo.html_url,
-        clone_url: repo.clone_url,
-        ssh_url: repo.ssh_url,
-      },
-      template: input.template,
-      quick_start: {
-        gitpod: gitpodUrl,
-        stackblitz: stackblitzUrl,
-        codespace: codespaceUrl,
-      },
-      next_steps: [
-        `Option A — Local development: (1) Clone the repo: git clone ${repo.clone_url}, (2) Call varity_install_deps to install dependencies, (3) Call varity_dev_server to start the local server`,
-        `Option B — Browser IDE (no local setup): Open ${gitpodUrl} — dependencies install automatically`,
-        "Then deploy: Call varity_deploy to go live in ~60 seconds",
-      ],
-    }, `Repository created: ${repo.html_url}\n\nQuick start: ${gitpodUrl}`);
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return errorResponse(
-        "INVALID_INPUT",
-        error.errors.map((e) => `${e.path.join(".")}: ${e.message}`).join(", ")
-      );
-    }
-
-    const message = error instanceof Error ? error.message : String(error);
-
-    if (message.includes("already exists")) {
-      // Auto-retry with sequential suffixes (name-2, name-3, ... name-9) so the
-      // renamed repo looks intentional rather than random. Fall back to a random
-      // suffix only if all sequential names are also taken.
-      let altRepo: GitHubRepo | null = null;
-      let altName = "";
-
-      let takenCount = 1; // original name already exists
-      for (let i = 2; i <= 99; i++) {
-        altName = `${input.name}-${i}`;
-        try {
-          altRepo = await createGitHubRepo(altName, input.description, input.visibility, token!);
-          break; // success — stop trying
-        } catch (retryErr) {
-          const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
-          if (!retryMsg.includes("already exists")) {
-            // Unexpected error — surface it immediately
-            return errorResponse("CREATE_FAILED", `Failed to create repository: ${retryMsg}`);
-          }
-          // name-N is also taken — try the next number
-          takenCount++;
-        }
-      }
-
-      if (!altRepo) {
-        // All sequential names taken — last resort: random suffix
-        const suffix = Math.random().toString(36).substring(2, 6);
-        altName = `${input.name}-${suffix}`;
-        try {
-          altRepo = await createGitHubRepo(altName, input.description, input.visibility, token!);
-        } catch {
-          return errorResponse(
-            "REPO_EXISTS",
-            `Repository '${input.name}' already exists and all auto-rename attempts failed.`,
-            `Try a different name or delete the existing repo at https://github.com/settings/repositories`
-          );
-        }
-      }
-
-      const gitpodUrl = `https://gitpod.io/#${altRepo.html_url}`;
-      const countNote = takenCount === 1
-        ? `'${input.name}' already exists in your account`
-        : `${takenCount} repos named '${input.name}' (and variants) already exist in your account`;
-      return successResponse({
-        created_name: altName,
-        requested_name: input.name,
-        repository: { name: altRepo.full_name, url: altRepo.html_url, clone_url: altRepo.clone_url, ssh_url: altRepo.ssh_url },
-        template: input.template,
-        name_collision_note: `⚠️ '${input.name}' was already taken — your repository was created as '${altName}'. Use '${altName}' everywhere: when cloning, sharing links, or referencing this repo. ${countNote}.`,
-        quick_start: { gitpod: gitpodUrl, stackblitz: `https://stackblitz.com/github/${altRepo.full_name}`, codespace: `https://github.com/codespaces/new?hide_repo_select=true&ref=main&repo=${altRepo.full_name}` },
-        next_steps: [
-          `⚠️ Your repo was created as '${altName}' (not '${input.name}') — use this name when cloning or sharing`,
-          `Option A — Local: (1) Clone: git clone ${altRepo.clone_url}, (2) Call varity_install_deps, (3) Call varity_dev_server`,
-          `Option B — Browser IDE: Open ${gitpodUrl} — dependencies install automatically`,
-          "Then deploy: Call varity_deploy to go live in ~60 seconds",
-        ],
-      }, `Repository created as '${altName}' (your requested name '${input.name}' was already taken).\n\nOpen to start building: ${gitpodUrl}`);
-    }
-
-    if (message.includes("401") || message.includes("Bad credentials")) {
-      return errorResponse(
-        "INVALID_TOKEN",
-        "GitHub token is invalid or expired",
-        "Create a new token at https://github.com/settings/tokens with 'repo' scope"
-      );
-    }
-
-    if (message.includes("403") || message.includes("rate limit")) {
-      return errorResponse(
-        "RATE_LIMITED",
-        "GitHub API rate limit exceeded",
-        "Wait a few minutes or use an authenticated token"
-      );
-    }
-
-    // Template sync / 422 errors already contain a specific, actionable message — surface directly.
-    if (message.startsWith("Template sync error") || message.includes("422")) {
-      return errorResponse("TEMPLATE_SYNC_ERROR", message);
-    }
-
-    return errorResponse("CREATE_FAILED", `Failed to create repository: ${message}`);
+    execSync(`git remote add origin ${authUrl}`, opts);
+  } catch {
+    execSync(`git remote set-url origin ${authUrl}`, opts);
   }
+
+  // Stage all files (respects .gitignore)
+  execSync("git add -A", opts);
+
+  // Commit (skip if nothing to commit)
+  try {
+    execSync('git commit -m "Initial commit"', opts);
+  } catch {
+    // Nothing to commit or already committed — ok
+  }
+
+  // Push to main branch (rename if needed)
+  try {
+    execSync("git branch -M main", opts);
+  } catch { /* ok */ }
+
+  execSync("git push -u origin main --force", opts);
 }
 
 /**
- * Register tool with MCP server
+ * Auto-retry with sequential suffixes if name is taken.
  */
+async function createRepoWithRetry(
+  createFn: (name: string) => Promise<GitHubRepo>,
+  baseName: string
+): Promise<{ repo: GitHubRepo; usedName: string; wasTaken: boolean }> {
+  try {
+    return { repo: await createFn(baseName), usedName: baseName, wasTaken: false };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!msg.includes("already exists")) throw err;
+
+    // Try sequential suffixes
+    for (let i = 2; i <= 99; i++) {
+      const altName = `${baseName}-${i}`;
+      try {
+        return { repo: await createFn(altName), usedName: altName, wasTaken: true };
+      } catch (retryErr) {
+        const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+        if (!retryMsg.includes("already exists")) throw retryErr;
+      }
+    }
+    throw new Error(`All names taken for '${baseName}'`);
+  }
+}
+
 export function registerCreateRepoTool(server: McpServer): void {
   server.registerTool(
     "varity_create_repo",
     {
       title: "Create GitHub Repository",
       description:
-        "Create a new GitHub repository with Varity SaaS template. Enables 60-second app creation from browser - creates repo with full template code, ready to open in Gitpod/StackBlitz and deploy via varity_deploy. Requires GitHub personal access token (classic) with repo scope from https://github.com/settings/tokens. Note: if the requested name is already taken, the tool automatically tries sequential suffixes (my-app-2, my-app-3, … my-app-N) until it finds an available one. If you have many test repos, the suffix could be a larger number (e.g., my-app-10). The actual repo name created is always returned in the response — check it before sharing or cloning.",
+        "Create a new GitHub repository and push the current project to it. " +
+        "For custom apps (the primary use case): pass the 'path' parameter with the local project directory — " +
+        "this creates an empty repo and pushes your actual code to GitHub. " +
+        "The GitHub URL is required for dynamic (Akash) deployments — always call this before varity_deploy. " +
+        "For template-based quick-start: omit 'path' to create from the Varity SaaS template. " +
+        "Requires a GitHub personal access token (classic) with repo scope from https://github.com/settings/tokens.",
       inputSchema: {
         name: z
           .string()
           .min(1)
           .max(100)
-          .regex(
-            /^[a-z0-9-]+$/,
-            "Repository name must be lowercase letters, numbers, and hyphens only"
-          )
-          .describe("Repository name (lowercase, hyphens allowed, e.g. 'my-saas-app')"),
-        description: z
-          .string()
-          .optional()
-          .describe("Short description of your app (optional)"),
-        template: z
-          .enum(["saas-starter"])
-          .default("saas-starter")
-          .describe("Template to use (currently only saas-starter available)"),
-        visibility: z
-          .enum(["public", "private"])
-          .default("public")
-          .describe("Repository visibility"),
-        github_token: z
+          .regex(/^[a-z0-9-]+$/, "Repository name must be lowercase letters, numbers, and hyphens only")
+          .describe("Repository name (lowercase, hyphens allowed, e.g. 'my-app')"),
+        description: z.string().optional().describe("Short description of your app (optional)"),
+        path: z
           .string()
           .optional()
           .describe(
-            "GitHub personal access token (optional if GITHUB_TOKEN env var is set). Get from https://github.com/settings/tokens - needs 'repo' scope."
+            "Absolute path to the local project directory to push to GitHub " +
+            "(e.g. '/home/user/my-app'). When provided, pushes the actual project code. " +
+            "Required for custom apps that will use varity_deploy with dynamic hosting. " +
+            "If omitted, creates a repo from the Varity SaaS template instead."
           ),
+        visibility: z.enum(["public", "private"]).default("public").describe("Repository visibility"),
+        github_token: z
+          .string()
+          .optional()
+          .describe("GitHub personal access token (optional if GITHUB_TOKEN env var is set). Needs 'repo' scope."),
       },
       annotations: {
-        destructiveHint: true, // Creates external resource (GitHub repo)
+        destructiveHint: true,
       },
     },
-    async ({ name, description, template, visibility, github_token }) => {
-      return handleCreateRepo({ name, description, template, visibility, github_token });
+    async ({ name, description, path: projectPath, visibility, github_token }) => {
+      // Resolve token
+      let token = github_token || process.env.GITHUB_TOKEN;
+      if (!token) {
+        try {
+          const ghToken = execSync("gh auth token", { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
+          if (ghToken) token = ghToken;
+        } catch { /* gh CLI not available */ }
+      }
+      if (!token) {
+        return errorResponse(
+          "MISSING_TOKEN",
+          "GitHub token required. Either pass github_token parameter or set GITHUB_TOKEN environment variable.",
+          "Get a token from https://github.com/settings/tokens (needs 'repo' scope). Tip: Install the GitHub CLI (gh) and run 'gh auth login' for automatic token detection."
+        );
+      }
+
+      try {
+        if (projectPath) {
+          // === PRIMARY FLOW: Push local project to empty GitHub repo ===
+          const { repo, usedName, wasTaken } = await createRepoWithRetry(
+            (n) => createEmptyGitHubRepo(n, description, visibility, token!),
+            name
+          );
+
+          // Push local project to the new repo
+          try {
+            pushLocalProject(projectPath, repo.clone_url, token!);
+          } catch (pushErr) {
+            const pushMsg = pushErr instanceof Error ? pushErr.message : String(pushErr);
+            return errorResponse(
+              "PUSH_FAILED",
+              `Repository created at ${repo.html_url} but failed to push local files: ${pushMsg}`,
+              "Push manually: git init && git remote add origin " + repo.clone_url + " && git add -A && git commit -m 'Initial commit' && git push -u origin main"
+            );
+          }
+
+          const gitpodUrl = `https://gitpod.io/#${repo.html_url}`;
+          const nameNote = wasTaken
+            ? `⚠️ '${name}' was already taken — repository created as '${usedName}'.`
+            : undefined;
+
+          return successResponse(
+            {
+              repository: {
+                name: repo.full_name,
+                url: repo.html_url,
+                clone_url: repo.clone_url,
+                ssh_url: repo.ssh_url,
+              },
+              repo_url: repo.clone_url,
+              pushed_from: projectPath,
+              ...(nameNote ? { name_collision_note: nameNote } : {}),
+              next_steps: [
+                `Repository: ${repo.html_url}`,
+                "Code pushed successfully — ready to deploy",
+                "Next: call varity_deploy to go live (the GitHub URL is now auto-configured)",
+              ],
+            },
+            `Repository created and code pushed: ${repo.html_url}${nameNote ? ` (${nameNote})` : ""}`
+          );
+
+        } else {
+          // === SECONDARY FLOW: Create from SaaS template (no local project) ===
+          const { repo, usedName, wasTaken } = await createRepoWithRetry(
+            (n) => createRepoFromTemplate(n, description, visibility, token!),
+            name
+          );
+
+          const gitpodUrl = `https://gitpod.io/#${repo.html_url}`;
+          const stackblitzUrl = `https://stackblitz.com/github/${repo.full_name}`;
+          const codespaceUrl = `https://github.com/codespaces/new?hide_repo_select=true&ref=main&repo=${repo.full_name}`;
+          const nameNote = wasTaken
+            ? `⚠️ '${name}' was already taken — repository created as '${usedName}'.`
+            : undefined;
+
+          return successResponse(
+            {
+              repository: {
+                name: repo.full_name,
+                url: repo.html_url,
+                clone_url: repo.clone_url,
+                ssh_url: repo.ssh_url,
+              },
+              template: "saas-starter",
+              ...(nameNote ? { name_collision_note: nameNote } : {}),
+              quick_start: {
+                gitpod: gitpodUrl,
+                stackblitz: stackblitzUrl,
+                codespace: codespaceUrl,
+              },
+              next_steps: [
+                ...(nameNote ? [`⚠️ Repo created as '${usedName}' — use this name everywhere`] : []),
+                `Option A — Local: (1) Clone: git clone ${repo.clone_url}, (2) varity_install_deps, (3) varity_dev_server`,
+                `Option B — Browser IDE: Open ${gitpodUrl}`,
+                "Then deploy: varity_deploy",
+              ],
+            },
+            `Repository created: ${repo.html_url}${nameNote ? ` — ${nameNote}` : ""}`
+          );
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+
+        if (message.includes("401") || message.includes("Bad credentials")) {
+          return errorResponse(
+            "INVALID_TOKEN",
+            "GitHub token is invalid or expired",
+            "Create a new token at https://github.com/settings/tokens with 'repo' scope"
+          );
+        }
+        if (message.includes("403") || message.includes("rate limit")) {
+          return errorResponse(
+            "RATE_LIMITED",
+            "GitHub API rate limit exceeded",
+            "Wait a few minutes or use an authenticated token"
+          );
+        }
+
+        return errorResponse("CREATE_FAILED", `Failed to create repository: ${message}`);
+      }
     }
   );
 }

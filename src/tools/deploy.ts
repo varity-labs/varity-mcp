@@ -47,12 +47,20 @@ export function registerDeployTool(server: McpServer): void {
           .describe(
             "Also submit the app to the Varity App Store for monetization (90% revenue to developer)"
           ),
+        repo_url: z
+          .string()
+          .optional()
+          .describe(
+            "GitHub repository URL for the app (e.g. 'https://github.com/user/my-app'). " +
+            "Required for dynamic (Akash) deployments. If omitted, auto-detected from .git/config. " +
+            "Use the repo_url returned by varity_create_repo as the value here."
+          ),
       },
       annotations: {
         destructiveHint: true, // Deploys real infrastructure
       },
     },
-    async ({ path, submit_to_store }) => {
+    async ({ path, submit_to_store, repo_url }) => {
       // Check if varitykit is installed — auto-install if missing
       let hasVaritykit = await isCLIAvailable("varitykit");
       if (!hasVaritykit) {
@@ -180,7 +188,7 @@ export function registerDeployTool(server: McpServer): void {
         }
       }
 
-      const args = ["deploy"];
+      const args = ["deploy", "--mode", "auto"];
 
       // Pre-detect framework from package.json to avoid varitykit's internal detection failing.
       // This ensures projects scaffolded by varity_init always deploy successfully.
@@ -191,18 +199,43 @@ export function registerDeployTool(server: McpServer): void {
         const deps = { ...pkgForDeploy.dependencies, ...pkgForDeploy.devDependencies };
         if ("next" in deps) {
           // Check if static export (the Varity default) or dynamic
-          let isStatic = true;
+          let isStatic = false;
           try {
             const nextCfg = await readFile(`${cwd}/next.config.js`, "utf-8");
             isStatic = nextCfg.includes("output: 'export'") || nextCfg.includes('output: "export"');
           } catch {
-            // No next.config.js — assume static
+            // No next.config.js — assume dynamic (Akash)
           }
           detectedHosting = isStatic ? "static" : "dynamic";
           orchestrationSummary = isStatic
             ? "Detected: Next.js static app → Hosting: Global CDN"
-            : "Detected: Dynamic app with API routes → Hosting: Cloud compute (auto-configured with database)";
+            : "Detected: Dynamic app → Hosting: Cloud compute (Akash — auto-configured with database)";
           args.push("--hosting", detectedHosting);
+          // For dynamic (Akash) deployments, resolve and pass the GitHub repo URL
+          if (detectedHosting === "dynamic") {
+            // Resolve repo URL: explicit param > .git/config auto-detect
+            let resolvedRepoUrl = repo_url || "";
+            if (!resolvedRepoUrl) {
+              const gitRemoteResult = await execCLI("git", ["remote", "get-url", "origin"], { cwd, timeout: 5000 });
+              if (gitRemoteResult.exitCode === 0 && gitRemoteResult.stdout.trim()) {
+                resolvedRepoUrl = gitRemoteResult.stdout.trim();
+              }
+            }
+            if (resolvedRepoUrl) {
+              // Write to varity.config.json so the CLI's deployment orchestrator can read it.
+              // The CLI reads config.github_repo in _resolve_github_url() — this works even
+              // in published CLI versions that don't have the --repo-url flag.
+              try {
+                const configPath = `${cwd}/varity.config.json`;
+                let config: Record<string, unknown> = {};
+                try { config = JSON.parse(await readFile(configPath, "utf-8")); } catch { /* new config */ }
+                config.github_repo = resolvedRepoUrl;
+                await writeFile(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
+              } catch { /* non-critical — deploy will still attempt */ }
+            } else {
+              orchestrationSummary += " | ⚠️ No GitHub repo detected — create one first with varity_create_repo";
+            }
+          }
         }
       } catch {
         // Can't read package.json — let varitykit detect
@@ -241,6 +274,7 @@ export function registerDeployTool(server: McpServer): void {
 
       if (submit_to_store) {
         args.push("--submit-to-store");
+        args.push("--tier", "free");
       }
 
       const result = await execVaritykit("app", args, {
@@ -356,12 +390,14 @@ export function registerDeployTool(server: McpServer): void {
                   "App submitted to Varity App Store",
                   "Revenue split: 90% to you, 10% platform fee",
                   ...(cardUrl ? [`Share your deployment: ${cardUrl}`] : []),
+                  "Note: your deployed app uses local project files. If you created a GitHub repo with varity_create_repo, push your code to sync it: git push origin main",
                 ]
               : [
                   `App live at: ${deployUrl}`,
                   ...(cardUrl ? [`Share your deployment: ${cardUrl}`] : []),
                   "To monetize: run deploy again with submit_to_store=true",
                   `Or visit: https://developer.store.varity.so`,
+                  "Note: your deployed app uses local project files. If you created a GitHub repo with varity_create_repo, push your code to sync it: git push origin main",
                 ],
           },
           `Deployed successfully! ${orchestrationSummary}. Live at: ${deployUrl}${cardUrl ? ` | Share: ${cardUrl}` : ""}`

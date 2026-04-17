@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { access, readdir, rm } from "node:fs/promises";
+import { access, readdir, rm, writeFile, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
@@ -98,6 +98,21 @@ export function registerInstallDepsTool(server: McpServer): void {
 
       // Check 1: exit code
       if (result.exitCode === 0) {
+        // Create .gitignore if it doesn't exist — prevents node_modules from being committed
+        try {
+          const gitignorePath = resolve(cwd, ".gitignore");
+          await access(gitignorePath);
+        } catch {
+          // .gitignore missing — create one
+          try {
+            await writeFile(
+              resolve(cwd, ".gitignore"),
+              "node_modules\n.next\nout\n.env.local\n.env*.local\n.DS_Store\n",
+              "utf-8"
+            );
+          } catch { /* non-critical */ }
+        }
+
         // Try to extract package names from npm output (npm v6 shows "+ pkg@ver" lines)
         const installedNames = output
           .split("\n")

@@ -86,6 +86,36 @@ async function withProjectLock<T>(projectPath: string, fn: () => Promise<T>): Pr
   }
 }
 
+/** Common business acronyms to uppercase in display labels. */
+const LABEL_ACRONYMS = new Set([
+  'crm', 'api', 'saas', 'ui', 'ux', 'db', 'id', 'hr',
+  'b2b', 'b2c', 'ai', 'ml', 'sdk', 'url', 'seo', 'kpi', 'cms', 'erp',
+]);
+
+/**
+ * Convert a collection name to a human-readable sidebar/display label.
+ * e.g. "crm_tasks" → "CRM Tasks", "team_members" → "Team Members"
+ * Recognizes common business acronyms and uppercases them fully.
+ */
+function toHumanLabel(name: string): string {
+  return name
+    .split(/[_-]/)
+    .map((word) => {
+      const lower = word.toLowerCase();
+      if (LABEL_ACRONYMS.has(lower)) return word.toUpperCase();
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    })
+    .join(" ");
+}
+
+/**
+ * Convert a collection name to a URL-safe slug using hyphens.
+ * e.g. "crm_tasks" → "crm-tasks", "team_members" → "team-members"
+ */
+function toUrlSlug(name: string): string {
+  return name.replace(/_/g, "-");
+}
+
 /**
  * Convert a raw field name (camelCase or snake_case) to a readable label.
  * e.g. "clientId" → "Client", "firstName" → "First Name", "due_date" → "Due Date"
@@ -191,6 +221,12 @@ export function registerAddCollectionTool(server: McpServer): void {
       const pascalPlural = toPascalPlural(name);
       const camelPlural = toCamelCase(name);
       const hookName = `use${pascalPlural}`;
+      const humanLabel = toHumanLabel(name);   // e.g. "crm_tasks" → "CRM Tasks"
+      const urlSlug = toUrlSlug(name);          // e.g. "crm_tasks" → "crm-tasks"
+      // Singular human label for user-facing copy (button text, dialog titles, toasts)
+      // e.g. "crm_clients" → strip trailing 's' → "crm_client" → "CRM Client"
+      const singularName = name.endsWith("s") ? name.slice(0, -1) : name;
+      const humanLabelSingular = toHumanLabel(singularName); // e.g. "CRM Client"
 
       // Validate field names against reserved words
       const invalidField = fields.find((f: { name: string }) => RESERVED_WORDS.has(f.name));
@@ -216,37 +252,62 @@ export function registerAddCollectionTool(server: McpServer): void {
         const dbPath = resolve(projectPath, "src/lib/database.ts");
         const hooksPath = resolve(projectPath, "src/lib/hooks.ts");
 
+        // Read files — create boilerplate if missing (supports custom apps, not just varity_init projects)
         let typesOriginal: string;
+        let typesWasCreated = false;
         try {
           typesOriginal = await readFile(typesPath, "utf-8");
         } catch {
-          return errorResponse(
-            "FILE_NOT_FOUND",
-            `Could not read ${typesPath}`,
-            "Ensure the project was created with varity_init and has src/types/index.ts."
-          );
+          // File doesn't exist — create it with minimal boilerplate
+          typesOriginal = `// Varity data types — auto-generated\n`;
+          typesWasCreated = true;
+          try {
+            await mkdir(dirname(typesPath), { recursive: true });
+            await writeFile(typesPath, typesOriginal, "utf-8");
+          } catch (err) {
+            if (isDiskFullError(err)) {
+              return errorResponse("DISK_FULL", "Could not create src/types/index.ts — disk is full.", "Free up disk space and try again.");
+            }
+            return errorResponse("FILE_CREATE_FAILED", `Could not create ${typesPath}`, "Check directory permissions.");
+          }
         }
 
         let dbOriginal: string;
+        let dbWasCreated = false;
         try {
           dbOriginal = await readFile(dbPath, "utf-8");
         } catch {
-          return errorResponse(
-            "FILE_NOT_FOUND",
-            `Could not read ${dbPath}`,
-            "This project may not have been created with varity_init. Run varity_init first to scaffold the project."
-          );
+          // File doesn't exist — create it with boilerplate
+          dbOriginal = `import { db } from '@varity-labs/sdk';\nimport type {  } from '../types';\n\nexport { db };\n`;
+          dbWasCreated = true;
+          try {
+            await mkdir(dirname(dbPath), { recursive: true });
+            await writeFile(dbPath, dbOriginal, "utf-8");
+          } catch (err) {
+            if (isDiskFullError(err)) {
+              return errorResponse("DISK_FULL", "Could not create src/lib/database.ts — disk is full.", "Free up disk space and try again.");
+            }
+            return errorResponse("FILE_CREATE_FAILED", `Could not create ${dbPath}`, "Check directory permissions.");
+          }
         }
 
         let hooksOriginal: string;
+        let hooksWasCreated = false;
         try {
           hooksOriginal = await readFile(hooksPath, "utf-8");
         } catch {
-          return errorResponse(
-            "FILE_NOT_FOUND",
-            `Could not read ${hooksPath}`,
-            "This project may not have been created with varity_init. Run varity_init first to scaffold the project."
-          );
+          // File doesn't exist — create it with boilerplate including UseCollectionReturn type
+          hooksOriginal = `import { useState, useEffect, useCallback } from 'react';\nimport type {  } from '../types';\nimport {  } from './database';\n\nexport interface UseCollectionReturn<T> {\n  data: T[];\n  loading: boolean;\n  error: string | null;\n  create: (input: Omit<T, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>;\n  update: (id: string, updates: Partial<T>) => Promise<void>;\n  remove: (id: string) => Promise<void>;\n  refresh: () => Promise<void>;\n}\n`;
+          hooksWasCreated = true;
+          try {
+            await mkdir(dirname(hooksPath), { recursive: true });
+            await writeFile(hooksPath, hooksOriginal, "utf-8");
+          } catch (err) {
+            if (isDiskFullError(err)) {
+              return errorResponse("DISK_FULL", "Could not create src/lib/hooks.ts — disk is full.", "Free up disk space and try again.");
+            }
+            return errorResponse("FILE_CREATE_FAILED", `Could not create ${hooksPath}`, "Check directory permissions.");
+          }
         }
 
         // ── Check for existing or partially-added collection ──
@@ -330,7 +391,7 @@ export function registerAddCollectionTool(server: McpServer): void {
             dbContent = dbContent.replace(importRegex, `import type {${updatedTypes}} from '../types'`);
           }
         } else {
-          // No existing type import — add one after the last import line
+          // No existing type import — add one after the last import line or at top
           const lastImportIdx = dbContent.lastIndexOf("import ");
           if (lastImportIdx !== -1) {
             const lineEnd = dbContent.indexOf("\n", lastImportIdx);
@@ -338,6 +399,8 @@ export function registerAddCollectionTool(server: McpServer): void {
               dbContent.slice(0, lineEnd + 1) +
               `import type { ${pascalSingular} } from '../types';\n` +
               dbContent.slice(lineEnd + 1);
+          } else {
+            dbContent = `import type { ${pascalSingular} } from '../types';\n` + dbContent;
           }
         }
         const accessorLine = `export const ${camelPlural} = () => db.collection<${pascalSingular}>('${name}');`;
@@ -356,6 +419,9 @@ export function registerAddCollectionTool(server: McpServer): void {
               `import {${updatedImports}} from './database'`
             );
           }
+        } else {
+          // No existing database import — add one at the top
+          hooksContent = `import { ${camelPlural} } from './database';\n` + hooksContent;
         }
 
         const typeImportRegex = /import\s+type\s*\{([^}]+)\}\s*from\s*['"]\.\.\/types['"]/;
@@ -368,6 +434,18 @@ export function registerAddCollectionTool(server: McpServer): void {
               typeImportRegex,
               `import type {${updatedTypes}} from '../types'`
             );
+          }
+        } else {
+          // No existing types import — add one at the top (after any existing imports)
+          const lastImportIdxHooks = hooksContent.lastIndexOf("import ");
+          if (lastImportIdxHooks !== -1) {
+            const lineEndHooks = hooksContent.indexOf("\n", lastImportIdxHooks);
+            hooksContent =
+              hooksContent.slice(0, lineEndHooks + 1) +
+              `import type { ${pascalSingular} } from '../types';\n` +
+              hooksContent.slice(lineEndHooks + 1);
+          } else {
+            hooksContent = `import type { ${pascalSingular} } from '../types';\n` + hooksContent;
           }
         }
 
@@ -491,7 +569,7 @@ export function ${hookName}(): UseCollectionReturn<${pascalSingular}> {
         if (add_page) {
           const pagePath = resolve(
             projectPath,
-            `src/app/dashboard/${name}/page.tsx`
+            `src/app/dashboard/${urlSlug}/page.tsx`
           );
           const pageDir = dirname(pagePath);
 
@@ -632,11 +710,11 @@ export default function ${pascalPlural}Page() {
 ${validationLines ? validationLines + "\n" : ""}    setSubmitting(true);
     try {
       await create(form as Omit<${pascalSingular}, 'id' | 'createdAt' | 'updatedAt'>);
-      toast.success('${pascalSingular} created');
+      toast.success('${humanLabelSingular} created');
       setCreateOpen(false);
       setForm(EMPTY_FORM);
     } catch {
-      toast.error('Failed to create ${pascalSingular.toLowerCase()}');
+      toast.error('Failed to create ${humanLabelSingular.toLowerCase()}');
     } finally {
       setSubmitting(false);
     }
@@ -645,7 +723,7 @@ ${validationLines ? validationLines + "\n" : ""}    setSubmitting(true);
   async function handleDelete(id: string) {
     try {
       await remove(id);
-      toast.success('${pascalSingular} deleted');
+      toast.success('${humanLabelSingular} deleted');
     } catch {
       toast.error('Failed to delete');
     }
@@ -668,15 +746,15 @@ ${columnDefs}
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">${pascalPlural}</h1>
-          <p className="mt-1 text-sm text-gray-600">Manage your ${name}.</p>
+          <h1 className="text-2xl font-bold text-gray-900">${humanLabel}</h1>
+          <p className="mt-1 text-sm text-gray-600">Manage your ${humanLabel.toLowerCase()}.</p>
         </div>
         <Button onClick={() => setCreateOpen(true)} icon={<Plus className="h-4 w-4" />}>
-          New ${pascalSingular}
+          New ${humanLabelSingular}
         </Button>
       </div>
 
-      <Dialog open={createOpen} onClose={() => setCreateOpen(false)} title="Create ${pascalSingular}">
+      <Dialog open={createOpen} onClose={() => setCreateOpen(false)} title="Create ${humanLabelSingular}">
         <div className="space-y-4">
 ${formInputs}
           <Button onClick={handleCreate} loading={submitting}>Create</Button>
@@ -685,16 +763,16 @@ ${formInputs}
 
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3">
-          <p className="text-sm text-red-700">Failed to load ${name}.</p>
+          <p className="text-sm text-red-700">Failed to load ${humanLabel.toLowerCase()}.</p>
           <button onClick={refresh} className="text-sm text-red-700 underline">Retry</button>
         </div>
       )}
 
       {!loading && items.length === 0 ? (
         <EmptyState
-          title="No ${name} yet"
-          description="Create your first ${pascalSingular.toLowerCase()}."
-          action={{ label: 'Create ${pascalSingular}', onClick: () => setCreateOpen(true) }}
+          title="No ${humanLabel.toLowerCase()} yet"
+          description="Create your first ${humanLabelSingular.toLowerCase()}."
+          action={{ label: 'Create ${humanLabelSingular}', onClick: () => setCreateOpen(true) }}
         />
       ) : (
         <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
@@ -741,17 +819,60 @@ ${formInputs}
               "Check file permissions and try again. All collection files (type, accessor, hook) have been rolled back."
             );
           }
-          filesCreated.push(`src/app/dashboard/${name}/page.tsx`);
+          filesCreated.push(`src/app/dashboard/${urlSlug}/page.tsx`);
+
+          // BUG #7: Ensure ToastProvider wraps the dashboard so useToast() works.
+          // Check if dashboard layout exists and has ToastProvider. If not, create it.
+          const dashboardLayoutPath = resolve(projectPath, "src/app/dashboard/layout.tsx");
+          const mainLayoutPath = resolve(projectPath, "src/app/layout.tsx");
+          let toastProviderPresent = false;
+          try {
+            const mainLayoutContent = await readFile(mainLayoutPath, "utf-8");
+            if (mainLayoutContent.includes("ToastProvider")) toastProviderPresent = true;
+          } catch { /* main layout may not exist */ }
+          if (!toastProviderPresent) {
+            try {
+              const dashLayoutContent = await readFile(dashboardLayoutPath, "utf-8");
+              if (dashLayoutContent.includes("ToastProvider")) toastProviderPresent = true;
+            } catch { /* dashboard layout may not exist */ }
+          }
+          if (!toastProviderPresent) {
+            // Create a minimal dashboard layout that provides ToastProvider
+            const dashboardLayoutContent = `'use client';\nimport { ToastProvider } from '@varity-labs/ui-kit';\nimport type { ReactNode } from 'react';\n\nexport default function DashboardLayout({ children }: { children: ReactNode }) {\n  return <ToastProvider>{children}</ToastProvider>;\n}\n`;
+            try {
+              await mkdir(dirname(dashboardLayoutPath), { recursive: true });
+              await writeFile(dashboardLayoutPath, dashboardLayoutContent, "utf-8");
+              filesCreated.push("src/app/dashboard/layout.tsx");
+            } catch { /* non-critical — page still works, just no toast notifications */ }
+          }
+
+          // Ensure tsconfig.json has @/ path alias so generated page imports work.
+          // Custom apps (not created via varity_init) won't have this configured.
+          const tsconfigPath = resolve(projectPath, "tsconfig.json");
+          try {
+            const tsconfigContent = await readFile(tsconfigPath, "utf-8");
+            const tsconfig = JSON.parse(tsconfigContent);
+            const paths = tsconfig.compilerOptions?.paths ?? {};
+            if (!paths["@/*"]) {
+              if (!tsconfig.compilerOptions) tsconfig.compilerOptions = {};
+              if (!tsconfig.compilerOptions.paths) tsconfig.compilerOptions.paths = {};
+              tsconfig.compilerOptions.paths["@/*"] = ["./src/*"];
+              await writeFile(tsconfigPath, JSON.stringify(tsconfig, null, 2) + "\n", "utf-8");
+              filesModified.push("tsconfig.json");
+            }
+          } catch {
+            // tsconfig.json may not exist or may not be valid JSON — skip silently
+          }
 
           // Auto-add navigation item to sidebar so the page is reachable
           const constantsPath = resolve(projectPath, "src/lib/constants.ts");
           try {
             const constantsContent = await readFile(constantsPath, "utf-8");
-            if (!constantsContent.includes(`/dashboard/${name}`)) {
+            if (!constantsContent.includes(`/dashboard/${urlSlug}`)) {
               // Insert before the Settings nav item (last functional item)
               const settingsLine = `  { label: 'Settings'`;
               const navIcon = getIconForCollection(name);
-              const newNavItem = `  { label: '${pascalPlural}', icon: '${navIcon}', path: '/dashboard/${name}' },\n`;
+              const newNavItem = `  { label: '${humanLabel}', icon: '${navIcon}', path: '/dashboard/${urlSlug}' },\n`;
               const updatedConstants = constantsContent.includes(settingsLine)
                 ? constantsContent.replace(settingsLine, newNavItem + settingsLine)
                 : constantsContent.replace(
@@ -797,19 +918,19 @@ ${formInputs}
               `Use the ${camelPlural}() accessor for direct database access`,
               ...(add_page
                 ? [
-                    `Navigate to /dashboard/${name} to see the new page`,
+                    `Navigate to /dashboard/${urlSlug} to see the new page`,
                     filesModified.includes("src/lib/constants.ts")
-                      ? `✅ Sidebar navigation updated — "${pascalPlural}" menu item added automatically`
-                      : `Add a navigation entry to src/lib/constants.ts: { label: '${pascalPlural}', icon: '${getIconForCollection(name)}', path: '/dashboard/${name}' }`,
+                      ? `✅ Sidebar navigation updated — "${humanLabel}" menu item added automatically`
+                      : `Add a navigation entry to src/lib/constants.ts: { label: '${humanLabel}', icon: '${getIconForCollection(name)}', path: '/dashboard/${urlSlug}' }`,
                   ]
                 : [
-                    `Run with add_page=true to scaffold a dashboard page at /dashboard/${name}`,
+                    `Run with add_page=true to scaffold a dashboard page at /dashboard/${urlSlug}`,
                   ]),
             ],
           },
           `Added "${name}" collection: ${pascalSingular} type, ${camelPlural}() accessor, and ${hookName}() hook.${
             add_page
-              ? ` Dashboard page created at src/app/dashboard/${name}/page.tsx.${filesModified.includes("src/lib/constants.ts") ? " Sidebar navigation updated." : ""}`
+              ? ` Dashboard page created at src/app/dashboard/${urlSlug}/page.tsx.${filesModified.includes("src/lib/constants.ts") ? " Sidebar navigation updated." : ""}`
               : ""
           }`
         );
