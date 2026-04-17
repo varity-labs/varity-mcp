@@ -184,12 +184,11 @@ export function registerBuildTool(server: McpServer): void {
           try {
             await access(`${cwd}/${mainFile}`);
             return successResponse({
-              success: true,
-              message: `Server app detected (${mainFile}) — no build step needed. Ready to deploy.`,
               deployable_output: true,
               framework: "nodejs",
+              entry_point: mainFile,
               note: "This is a server application. Use varity_deploy to deploy it directly."
-            });
+            }, `Server app detected (${mainFile}) — no build step needed. Ready to deploy.`);
           } catch {
             return errorResponse(
               "NO_BUILD_SCRIPT",

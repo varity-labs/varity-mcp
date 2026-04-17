@@ -202,50 +202,46 @@ export function registerDeployTool(server: McpServer): void {
         const hasDynamicFramework = dynamicFrameworks.some(f => f in deps);
 
         if (hasDynamicFramework) {
-          // Server framework detected — always dynamic (Akash)
           detectedHosting = "dynamic";
           orchestrationSummary = "Detected: Dynamic app → Hosting: Cloud compute (Akash — auto-configured with database)";
         } else if ("next" in deps) {
-          // Next.js — check if static export or dynamic
           let isStatic = false;
           try {
             const nextCfg = await readFile(`${cwd}/next.config.js`, "utf-8");
             isStatic = nextCfg.includes("output: 'export'") || nextCfg.includes('output: "export"');
-          } catch {
-            // No next.config.js — assume dynamic (Akash)
-          }
+          } catch { /* No next.config.js — assume dynamic */ }
           detectedHosting = isStatic ? "static" : "dynamic";
           orchestrationSummary = isStatic
             ? "Detected: Next.js static app → Hosting: Global CDN"
             : "Detected: Dynamic Next.js app → Hosting: Cloud compute (Akash — auto-configured with database)";
         } else {
-          // Unknown framework — default to dynamic (Akash) for custom apps
           detectedHosting = "dynamic";
           orchestrationSummary = "Detected: Custom app → Hosting: Cloud compute (Akash — auto-configured with database)";
-          args.push("--hosting", detectedHosting);
-          // For dynamic (Akash) deployments, resolve and pass the GitHub repo URL
-          if (detectedHosting === "dynamic") {
-            // Resolve repo URL: explicit param > .git/config auto-detect
-            let resolvedRepoUrl = repo_url || "";
-            if (!resolvedRepoUrl) {
-              const gitRemoteResult = await execCLI("git", ["remote", "get-url", "origin"], { cwd, timeout: 5000 });
-              if (gitRemoteResult.exitCode === 0 && gitRemoteResult.stdout.trim()) {
-                resolvedRepoUrl = gitRemoteResult.stdout.trim();
-              }
+        }
+
+        // Push hosting flag for ALL detection paths
+        args.push("--hosting", detectedHosting);
+
+        // For ALL dynamic (Akash) deployments, resolve and pass the GitHub repo URL
+        if (detectedHosting === "dynamic") {
+          let resolvedRepoUrl = repo_url || "";
+          if (!resolvedRepoUrl) {
+            const gitRemoteResult = await execCLI("git", ["remote", "get-url", "origin"], { cwd, timeout: 5000 });
+            if (gitRemoteResult.exitCode === 0 && gitRemoteResult.stdout.trim()) {
+              resolvedRepoUrl = gitRemoteResult.stdout.trim();
             }
-            if (resolvedRepoUrl) {
-              // Pass repo URL to CLI AND write to config as fallback
-              args.push("--repo-url", resolvedRepoUrl);
-              try {
-                const configPath = `${cwd}/varity.config.json`;
-                let config: Record<string, unknown> = {};
-                try { config = JSON.parse(await readFile(configPath, "utf-8")); } catch { /* new config */ }
-                config.github_repo = resolvedRepoUrl;
-                await writeFile(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
-              } catch { /* non-critical */ }
-            } else {
-              orchestrationSummary += " | ⚠️ No GitHub repo detected — create one first with varity_create_repo";
-            }
+          }
+          if (resolvedRepoUrl) {
+            args.push("--repo-url", resolvedRepoUrl);
+            try {
+              const configPath = `${cwd}/varity.config.json`;
+              let config: Record<string, unknown> = {};
+              try { config = JSON.parse(await readFile(configPath, "utf-8")); } catch { /* new config */ }
+              config.github_repo = resolvedRepoUrl;
+              await writeFile(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
+            } catch { /* non-critical */ }
+          } else {
+            orchestrationSummary += " | ⚠️ No GitHub repo detected — create one first with varity_create_repo";
           }
         }
       } catch {
