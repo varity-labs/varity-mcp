@@ -372,6 +372,20 @@ export function registerDeployTool(server: McpServer): void {
           cardUrl = `https://varity.app/card/${varityMatch[1]}`;
         }
 
+        // Extract Akash-specific info from deployment record
+        let providerUrl: string | undefined;
+        let akashDseq: string | undefined;
+        try {
+          const deploymentsDir2 = getDeploymentsDir();
+          const files2 = await readdir(deploymentsDir2);
+          const latestJson = files2.filter((f) => f.endsWith(".json")).sort().reverse()[0];
+          if (latestJson) {
+            const rec = JSON.parse(await readFile(`${deploymentsDir2}/${latestJson}`, "utf-8"));
+            providerUrl = rec.akash?.url;
+            akashDseq = rec.akash?.dseq;
+          }
+        } catch { /* non-critical */ }
+
         return successResponse(
           {
             url: deployUrl,
@@ -384,27 +398,28 @@ export function registerDeployTool(server: McpServer): void {
             share_image: cardUrl ? `${cardUrl}/image.png` : undefined,
             orchestration: orchestrationSummary,
             infrastructure: {
-              hosting: detectedHosting === "static" ? "Global CDN — served from 30+ edge locations worldwide (auto-selected)" : detectedHosting === "dynamic" ? "Cloud compute — dedicated CPU/RAM on distributed providers (auto-selected)" : "Varity (auto-selected)",
+              hosting: detectedHosting === "static"
+                ? "Global CDN — served from 30+ edge locations worldwide (auto-selected)"
+                : detectedHosting === "dynamic"
+                ? "Cloud compute (Akash Network) — dedicated CPU/RAM, auto-configured (auto-selected)"
+                : "Varity (auto-selected)",
               database: "Document database (included)",
               auth: "Authentication (included)",
+              ...(providerUrl ? { provider_url: providerUrl } : {}),
+              ...(akashDseq ? { akash_deployment_id: akashDseq } : {}),
             },
-            build_note: !buildSkipped
-              ? "Note: varity_deploy ran npm run build internally to produce the exact artifact uploaded to production. If you also ran varity_build separately, that earlier build was a local verification step — the deploy's own build is what's live."
-              : undefined,
             next_steps: submit_to_store
               ? [
                   `App live at: ${deployUrl}`,
                   "App submitted to Varity App Store",
                   "Revenue split: 90% to you, 10% platform fee",
                   ...(cardUrl ? [`Share your deployment: ${cardUrl}`] : []),
-                  "Note: your deployed app uses local project files. If you created a GitHub repo with varity_create_repo, push your code to sync it: git push origin main",
                 ]
               : [
                   `App live at: ${deployUrl}`,
                   ...(cardUrl ? [`Share your deployment: ${cardUrl}`] : []),
                   "To monetize: run deploy again with submit_to_store=true",
                   `Or visit: https://developer.store.varity.so`,
-                  "Note: your deployed app uses local project files. If you created a GitHub repo with varity_create_repo, push your code to sync it: git push origin main",
                 ],
           },
           `Deployed successfully! ${orchestrationSummary}. Live at: ${deployUrl}${cardUrl ? ` | Share: ${cardUrl}` : ""}`

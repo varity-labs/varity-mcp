@@ -220,21 +220,52 @@ export function registerCreateRepoTool(server: McpServer): void {
 
       try {
         if (projectPath) {
-          // === PRIMARY FLOW: Push local project to empty GitHub repo ===
-          const { repo, usedName, wasTaken } = await createRepoWithRetry(
-            (n) => createEmptyGitHubRepo(n, description, visibility, token!),
-            name
-          );
+          // === PRIMARY FLOW: Push local project to GitHub repo ===
+          // First try to push to existing repo (update flow)
+          let repo: GitHubRepo;
+          let usedName = name;
+          let wasTaken = false;
+          let isUpdate = false;
 
-          // Push local project to the new repo
+          try {
+            // Check if repo already exists
+            const checkRes = await fetch(`https://api.github.com/repos/${(await fetch("https://api.github.com/user", { headers: { Authorization: `token ${token}` } }).then(r => r.json()) as any).login}/${name}`, {
+              headers: { Authorization: `token ${token}` },
+            });
+            if (checkRes.ok) {
+              // Repo exists — push update to it
+              repo = await checkRes.json() as GitHubRepo;
+              isUpdate = true;
+            } else {
+              // Repo doesn't exist — create it
+              const result = await createRepoWithRetry(
+                (n) => createEmptyGitHubRepo(n, description, visibility, token!),
+                name
+              );
+              repo = result.repo;
+              usedName = result.usedName;
+              wasTaken = result.wasTaken;
+            }
+          } catch {
+            // Fallback — create new
+            const result = await createRepoWithRetry(
+              (n) => createEmptyGitHubRepo(n, description, visibility, token!),
+              name
+            );
+            repo = result.repo;
+            usedName = result.usedName;
+            wasTaken = result.wasTaken;
+          }
+
+          // Push local project to the repo (works for both new and existing)
           try {
             pushLocalProject(projectPath, repo.clone_url, token!);
           } catch (pushErr) {
             const pushMsg = pushErr instanceof Error ? pushErr.message : String(pushErr);
             return errorResponse(
               "PUSH_FAILED",
-              `Repository created at ${repo.html_url} but failed to push local files: ${pushMsg}`,
-              "Push manually: git init && git remote add origin " + repo.clone_url + " && git add -A && git commit -m 'Initial commit' && git push -u origin main"
+              `Repository ${isUpdate ? "exists" : "created"} at ${repo.html_url} but failed to push: ${pushMsg}`,
+              "Push manually: git init && git remote add origin " + repo.clone_url + " && git add -A && git commit -m 'Update' && git push -u origin main --force"
             );
           }
 
