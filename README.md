@@ -65,7 +65,7 @@ Your AI gets complete knowledge of the Varity SDK — no searching, no guessing:
 | `varity://sdk/patterns` | Canonical app patterns — file structure, CRUD pages, auth wrapping |
 | `varity://sdk/deploy` | Deployment reference, App Store submission, revenue split |
 
-### 14 Tools
+### 15 Tools
 
 | Tool | Description | Transport |
 |------|-------------|-----------|
@@ -77,11 +77,12 @@ Your AI gets complete knowledge of the Varity SDK — no searching, no guessing:
 | `varity_dev_server` | Start/stop local dev server | stdio |
 | `varity_open_browser` | Open URL in default browser | stdio |
 | **Deployment** | | |
-| `varity_deploy` | Deploy to production (auto-builds first) | all |
+| `varity_login` | Authenticate with deploy key or browser | all |
+| `varity_deploy` | Deploy to production (orchestration algorithm auto-selects hosting) | all |
 | `varity_deploy_status` | Check deployment status | all |
 | `varity_deploy_logs` | View build logs | all |
 | `varity_submit_to_store` | Submit to Varity App Store | all |
-| `varity_create_repo` | Create GitHub repo with template | all |
+| `varity_create_repo` | Create GitHub repo and push code | all |
 | **Info** | | |
 | `varity_doctor` | Check environment prerequisites | all |
 | `varity_search_docs` | Search tutorials and guides | all |
@@ -100,11 +101,12 @@ Your AI gets complete knowledge of the Varity SDK — no searching, no guessing:
 Describe what you want. The AI handles everything:
 
 ```
-You: "Build me a client invoice tracker"
-AI:  ✅ Scaffolded project with auth, database, dashboard
-     ✅ Added invoices collection with types, hook, and CRUD page
-     ✅ Built and deployed to https://invoice-tracker.varity.app
-     ✅ Submitted to App Store at $49/month (you earn $44.10/user)
+You: "Build me a client invoice tracker and deploy it with Varity"
+AI:  ✅ Built Express API with invoice routes
+     ✅ Added database collections (clients, invoices, payments)
+     ✅ Orchestration algorithm detected dynamic app → Akash hosting
+     ✅ Deployed with postgres + redis → https://invoice-tracker.varity.app
+     ✅ Submitted to App Store (you earn 90% of revenue)
 ```
 
 No terminal commands. No configuration. No DevOps.
