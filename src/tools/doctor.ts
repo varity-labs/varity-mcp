@@ -245,11 +245,17 @@ export function registerDoctorTool(server: McpServer): void {
 
       // Tiered readiness:
       // - `ready` = Node.js + npm work → can use varity_init, varity_build, varity_deploy (MCP tools)
-      // - `cli_deploy_ready` = also Python + varitykit + auth → can use `varitykit app deploy` CLI directly
+      // - `cli_deploy_ready` = also Python + varitykit + auth + sufficient RAM → can use `varitykit app deploy` CLI directly
       // Python / varitykit only block the CLI path, NOT the MCP-based varity_deploy tool.
+      // RAM < 3 GB is treated as a build blocker: local Next.js builds OOM at that threshold,
+      // so cli_deploy_ready must be false even though other checks are merely "warn".
       const coreChecks = checks.filter((c) => c.name === "Node.js" || c.name === "npm");
       const ready = coreChecks.every((c) => c.status === "pass");
-      const cliDeployReady = checks.every((c) => c.status === "pass" || (c.status as string) === "warn");
+      const ramCheck = checks.find((c) => c.name === "RAM");
+      const ramSufficient = !ramCheck || (ramCheck.status as string) !== "warn";
+      const cliDeployReady =
+        ramSufficient &&
+        checks.every((c) => c.status === "pass" || (c.status as string) === "warn");
 
       const coreIssues = checks.filter((c) => (c.name === "Node.js" || c.name === "npm") && c.status === "fail");
       const cliIssues = checks.filter(
@@ -268,8 +274,23 @@ export function registerDoctorTool(server: McpServer): void {
       }
 
       if (ready && !cliDeployReady) {
-        // Core tools work, but Python / varitykit / auth missing
         const cliFixList = cliIssues.map((c) => c.fix || c.message).filter(Boolean);
+
+        if (!ramSufficient && cliIssues.length === 0) {
+          // RAM is the only reason cli_deploy_ready is false — all other checks are pass/warn.
+          // Surface this prominently so users don't proceed to an OOM kill.
+          return successResponse(
+            {
+              ready: true,
+              cli_deploy_ready: false,
+              checks,
+              note: "Environment ready, but available RAM is too low for a local Next.js build (~3 GB peak). Use varity_deploy — builds run on remote infrastructure so local RAM is not a constraint.",
+            },
+            "Environment ready, but RAM is too low for local builds — close other apps or use varity_deploy (builds run remotely, local RAM is not a constraint)."
+          );
+        }
+
+        // Core tools work, but Python / varitykit / auth missing (and possibly RAM too)
         return successResponse(
           {
             ready: true,
