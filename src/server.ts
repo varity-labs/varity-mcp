@@ -16,6 +16,7 @@ import { registerOpenBrowserTool } from "./tools/open-browser.js";
 import { registerDevServerTool } from "./tools/dev-server.js";
 import { registerAddCollectionTool } from "./tools/add-collection.js";
 import { registerLoginTool } from "./tools/login.js";
+import { registerMigrateTool } from "./tools/migrate.js";
 import { createOAuthProvider } from "./auth/provider.js";
 
 export const VERSION = "2.0.0-beta.8";
@@ -68,6 +69,7 @@ export function createVarityServer(mode: TransportMode = "stdio"): McpServer {
   registerDeployStatusTool(server);
   registerDeployLogsTool(server);
   registerSubmitToStoreTool(server);
+  registerMigrateTool(server);
 
   return server;
 }
