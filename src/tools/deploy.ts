@@ -392,6 +392,26 @@ export function registerDeployTool(server: McpServer): void {
           }
         } catch { /* non-critical */ }
 
+        // For containerized (Akash) deployments the deployment record tracks neither
+        // static file counts nor a pre-computed build size — those fields only exist
+        // for CDN-hosted static builds.  Surface meaningful labels instead of the
+        // uninitialized-looking "unknown" / "0" defaults.
+        if (detectedHosting === "dynamic") {
+          if (buildSize === "unknown") {
+            try {
+              const duResult = await execCLI("du", ["-sh", cwd], { timeout: 10_000 });
+              if (duResult.exitCode === 0 && duResult.stdout.trim()) {
+                const sizeMatch = duResult.stdout.trim().match(/^(\S+)/);
+                if (sizeMatch) buildSize = sizeMatch[1]!;
+              }
+            } catch { /* non-critical */ }
+            if (buildSize === "unknown") buildSize = "N/A (containerized)";
+          }
+          if (fileCount === "0" || fileCount === "unknown") {
+            fileCount = "N/A (containerized)";
+          }
+        }
+
         return successResponse(
           {
             url: deployUrl,
