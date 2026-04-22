@@ -203,7 +203,7 @@ export function registerDeployTool(server: McpServer): void {
 
         if (hasDynamicFramework) {
           detectedHosting = "dynamic";
-          orchestrationSummary = "Detected: Dynamic app → Hosting: Cloud compute (Akash — auto-configured with database)";
+          orchestrationSummary = "Detected: Dynamic app → Hosting: Cloud compute (auto-configured)";
         } else if ("next" in deps) {
           let isStatic = false;
           try {
@@ -213,10 +213,10 @@ export function registerDeployTool(server: McpServer): void {
           detectedHosting = isStatic ? "static" : "dynamic";
           orchestrationSummary = isStatic
             ? "Detected: Next.js static app → Hosting: Global CDN"
-            : "Detected: Dynamic Next.js app → Hosting: Cloud compute (Akash — auto-configured with database)";
+            : "Detected: Dynamic Next.js app → Hosting: Cloud compute (auto-configured)";
         } else {
           detectedHosting = "dynamic";
-          orchestrationSummary = "Detected: Custom app → Hosting: Cloud compute (Akash — auto-configured with database)";
+          orchestrationSummary = "Detected: Custom app → Hosting: Cloud compute (auto-configured)";
         }
 
         // Push hosting flag for ALL detection paths
@@ -421,7 +421,7 @@ export function registerDeployTool(server: McpServer): void {
               hosting: detectedHosting === "static"
                 ? "Global CDN — served from 30+ edge locations worldwide (auto-selected)"
                 : detectedHosting === "dynamic"
-                ? "Cloud compute (Akash Network) — dedicated CPU/RAM, auto-configured (auto-selected)"
+                ? "Cloud compute — dedicated CPU/RAM, auto-configured (auto-selected)"
                 : "Varity (auto-selected)",
               database: "Document database (included)",
               auth: "Authentication (included)",
