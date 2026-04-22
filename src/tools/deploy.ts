@@ -352,9 +352,15 @@ export function registerDeployTool(server: McpServer): void {
               : "unknown";
             fileCount = String(latest.build?.files ?? latest.ipfs?.file_count ?? "unknown");
             deploymentId = latest.deployment_id || jsonFiles[0]!.replace(".json", "");
-            // Save the build log so varity_deploy_logs can show real output
-            if (capturedBuildOutput && deploymentId !== "unknown") {
-              await saveBuildLog(deploymentId, capturedBuildOutput);
+            // Save the build log so varity_deploy_logs can show real output.
+            // Always include the varitykit deploy output; prepend the npm build
+            // phase when it ran so developers see the full picture in one log.
+            if (deploymentId !== "unknown") {
+              const logContent = [
+                ...(capturedBuildOutput.trim() ? [`[Build Phase]\n${capturedBuildOutput}`] : []),
+                `[Deploy Phase]\n${output}`,
+              ].join("\n\n");
+              await saveBuildLog(deploymentId, logContent);
             }
           }
         } catch {
