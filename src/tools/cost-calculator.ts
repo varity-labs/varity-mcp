@@ -128,7 +128,7 @@ export function registerCostCalculatorTool(server: McpServer): void {
         `|---------------|----------|----------|----------|`,
         `| Hosting       | $${aws.hosting}/mo | $${vercel.hosting}/mo | $${varity.hosting}/mo |`,
         `| Database      | $${aws.database}/mo | $${vercel.database}/mo | $${varity.database}/mo |`,
-        `| Auth          | $${aws.auth}/mo | $${vercel.auth}/mo | $${varity.auth}/mo (included) |`,
+        `| Auth          | $${aws.auth}/mo | $${vercel.auth}/mo | ${has_auth ? `$${varity.auth}/mo (included)` : "$0/mo"} |`,
         `| Payments      | Stripe fees | Stripe fees | Coming soon (90/10 split) |`,
         `| **Total**     | **$${aws.total}/mo** | **$${vercel.total}/mo** | **$${varity.total}/mo** |`,
       ].join("\n");

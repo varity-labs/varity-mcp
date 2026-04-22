@@ -6,7 +6,7 @@ import { getApiKey } from "../utils/config.js";
 
 interface Check {
   name: string;
-  status: "pass" | "fail";
+  status: "pass" | "fail" | "warn";
   version?: string;
   message?: string;
   fix?: string;
@@ -138,7 +138,7 @@ export function registerDoctorTool(server: McpServer): void {
           } else {
             checks.push({
               name: "Python",
-              status: "warn" as any,
+              status: "warn",
               version,
               message: `Python: Not required for MCP tools (only needed for CLI deploys). Found ${version} — upgrade to 3.10+ if you use varitykit directly.`,
               fix: "Install Python 3.10+ from https://python.org (only needed for direct CLI usage)",
@@ -148,7 +148,7 @@ export function registerDoctorTool(server: McpServer): void {
         } else {
           checks.push({
             name: "Python",
-            status: "warn" as any,
+            status: "warn",
             message: "Python: Not required for MCP tools (only needed for CLI deploys)",
             fix: "Install Python 3.10+ from https://python.org if you plan to use varitykit CLI directly",
           });
@@ -157,7 +157,7 @@ export function registerDoctorTool(server: McpServer): void {
       } catch {
         checks.push({
           name: "Python",
-          status: "warn" as any,
+          status: "warn",
           message: "Python: Not required for MCP tools (only needed for CLI deploys)",
           fix: "Install Python 3.10+ from https://python.org if you plan to use varitykit CLI directly",
         });
@@ -213,7 +213,7 @@ export function registerDoctorTool(server: McpServer): void {
         } else {
           checks.push({
             name: "GitHub Token",
-            status: "warn" as any,
+            status: "warn",
             message: "No GitHub token found — varity_create_repo requires one. Options: (1) install gh CLI and run 'gh auth login', or (2) set GITHUB_TOKEN env var.",
             fix: "Option 1 (easiest): Install GitHub CLI (https://cli.github.com) and run 'gh auth login'. Option 2: Create a token at https://github.com/settings/tokens (needs 'repo' scope), then set: export GITHUB_TOKEN=ghp_...",
           });
@@ -228,7 +228,7 @@ export function registerDoctorTool(server: McpServer): void {
         if (freeGB < 3) {
           checks.push({
             name: "RAM",
-            status: "warn" as any,
+            status: "warn",
             message: `Low RAM: ${freeGB.toFixed(1)} GB free. Next.js 15 builds peak at ~3 GB — varity_build/varity_deploy may be killed by the OS.`,
             fix: "Close other applications to free memory, or use a machine with more RAM before building.",
           });
@@ -245,11 +245,17 @@ export function registerDoctorTool(server: McpServer): void {
 
       // Tiered readiness:
       // - `ready` = Node.js + npm work → can use varity_init, varity_build, varity_deploy (MCP tools)
-      // - `cli_deploy_ready` = also Python + varitykit + auth → can use `varitykit app deploy` CLI directly
+      // - `cli_deploy_ready` = also Python + varitykit + auth + sufficient RAM → can use `varitykit app deploy` CLI directly
       // Python / varitykit only block the CLI path, NOT the MCP-based varity_deploy tool.
+      // RAM < 3 GB is treated as a build blocker: local Next.js builds OOM at that threshold,
+      // so cli_deploy_ready must be false even though other checks are merely "warn".
       const coreChecks = checks.filter((c) => c.name === "Node.js" || c.name === "npm");
       const ready = coreChecks.every((c) => c.status === "pass");
-      const cliDeployReady = checks.every((c) => c.status === "pass" || (c.status as string) === "warn");
+      const ramCheck = checks.find((c) => c.name === "RAM");
+      const ramSufficient = !ramCheck || (ramCheck.status as string) !== "warn";
+      const cliDeployReady =
+        ramSufficient &&
+        checks.every((c) => c.status === "pass" || (c.status as string) === "warn");
 
       const coreIssues = checks.filter((c) => (c.name === "Node.js" || c.name === "npm") && c.status === "fail");
       const cliIssues = checks.filter(
@@ -268,8 +274,23 @@ export function registerDoctorTool(server: McpServer): void {
       }
 
       if (ready && !cliDeployReady) {
-        // Core tools work, but Python / varitykit / auth missing
         const cliFixList = cliIssues.map((c) => c.fix || c.message).filter(Boolean);
+
+        if (!ramSufficient && cliIssues.length === 0) {
+          // RAM is the only reason cli_deploy_ready is false — all other checks are pass/warn.
+          // Surface this prominently so users don't proceed to an OOM kill.
+          return successResponse(
+            {
+              ready: true,
+              cli_deploy_ready: false,
+              checks,
+              note: "Environment ready, but available RAM is too low for a local Next.js build (~3 GB peak). Use varity_deploy — builds run on remote infrastructure so local RAM is not a constraint.",
+            },
+            "Environment ready, but RAM is too low for local builds — close other apps or use varity_deploy (builds run remotely, local RAM is not a constraint)."
+          );
+        }
+
+        // Core tools work, but Python / varitykit / auth missing (and possibly RAM too)
         return successResponse(
           {
             ready: true,
