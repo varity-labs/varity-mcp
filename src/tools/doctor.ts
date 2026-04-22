@@ -6,7 +6,7 @@ import { getApiKey } from "../utils/config.js";
 
 interface Check {
   name: string;
-  status: "pass" | "fail";
+  status: "pass" | "fail" | "warn";
   version?: string;
   message?: string;
   fix?: string;
@@ -138,7 +138,7 @@ export function registerDoctorTool(server: McpServer): void {
           } else {
             checks.push({
               name: "Python",
-              status: "warn" as any,
+              status: "warn",
               version,
               message: `Python: Not required for MCP tools (only needed for CLI deploys). Found ${version} — upgrade to 3.10+ if you use varitykit directly.`,
               fix: "Install Python 3.10+ from https://python.org (only needed for direct CLI usage)",
@@ -148,7 +148,7 @@ export function registerDoctorTool(server: McpServer): void {
         } else {
           checks.push({
             name: "Python",
-            status: "warn" as any,
+            status: "warn",
             message: "Python: Not required for MCP tools (only needed for CLI deploys)",
             fix: "Install Python 3.10+ from https://python.org if you plan to use varitykit CLI directly",
           });
@@ -157,7 +157,7 @@ export function registerDoctorTool(server: McpServer): void {
       } catch {
         checks.push({
           name: "Python",
-          status: "warn" as any,
+          status: "warn",
           message: "Python: Not required for MCP tools (only needed for CLI deploys)",
           fix: "Install Python 3.10+ from https://python.org if you plan to use varitykit CLI directly",
         });
@@ -213,7 +213,7 @@ export function registerDoctorTool(server: McpServer): void {
         } else {
           checks.push({
             name: "GitHub Token",
-            status: "warn" as any,
+            status: "warn",
             message: "No GitHub token found — varity_create_repo requires one. Options: (1) install gh CLI and run 'gh auth login', or (2) set GITHUB_TOKEN env var.",
             fix: "Option 1 (easiest): Install GitHub CLI (https://cli.github.com) and run 'gh auth login'. Option 2: Create a token at https://github.com/settings/tokens (needs 'repo' scope), then set: export GITHUB_TOKEN=ghp_...",
           });
@@ -228,7 +228,7 @@ export function registerDoctorTool(server: McpServer): void {
         if (freeGB < 3) {
           checks.push({
             name: "RAM",
-            status: "warn" as any,
+            status: "warn",
             message: `Low RAM: ${freeGB.toFixed(1)} GB free. Next.js 15 builds peak at ~3 GB — varity_build/varity_deploy may be killed by the OS.`,
             fix: "Close other applications to free memory, or use a machine with more RAM before building.",
           });

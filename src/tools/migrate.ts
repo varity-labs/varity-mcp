@@ -223,11 +223,14 @@ export function registerMigrateTool(server: McpServer): void {
           "DEPLOY_FAILED",
           `Migration codemods applied but deployment failed: ${deployOutput.slice(-500)}`,
           "Codemods were applied to the cloned repo but the deploy step failed. " +
-          "Try running varity_deploy manually on the transformed project at: " + cloneDir
+          "Fix the error above and try varity_migrate again."
         );
       }
 
       const deployUrl = await extractDeployUrl(deployOutput);
+
+      // Cleanup temp directory on success
+      await rm(cloneDir, { recursive: true, force: true }).catch(() => {});
 
       return successResponse(
         {
@@ -237,7 +240,7 @@ export function registerMigrateTool(server: McpServer): void {
           changes_applied: migrationSummary.changes_applied,
           warnings: migrationSummary.warnings,
           infrastructure: {
-            hosting: "Cloud compute (Akash) — auto-configured",
+            hosting: "Dynamic cloud hosting — auto-configured",
             database: "Document database (included)",
             auth: "Authentication (included)",
           },
