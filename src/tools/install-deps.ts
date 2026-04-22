@@ -5,6 +5,33 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { execCLI } from "../utils/cli-bridge.js";
 
+// Returns names of framework binaries that are listed in package.json but absent from .bin/
+async function getMissingBinaries(cwd: string): Promise<string[]> {
+  const missing: string[] = [];
+  try {
+    const pkg = JSON.parse(await readFile(resolve(cwd, "package.json"), "utf-8"));
+    const deps: Record<string, string> = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
+    const knownBins: [string, string][] = [
+      ["next", "next"],
+      ["vite", "vite"],
+      ["react-scripts", "react-scripts"],
+      ["typescript", "tsc"],
+    ];
+    for (const [dep, bin] of knownBins) {
+      if (dep in deps) {
+        try {
+          await access(resolve(cwd, "node_modules", ".bin", bin));
+        } catch {
+          missing.push(bin);
+        }
+      }
+    }
+  } catch {
+    // package.json unreadable or missing — skip verification
+  }
+  return missing;
+}
+
 export function registerInstallDepsTool(server: McpServer): void {
   server.registerTool(
     "varity_install_deps",
@@ -150,10 +177,17 @@ export function registerInstallDepsTool(server: McpServer): void {
         const binDir = resolve(cwd, "node_modules", ".bin");
         const binFiles = await readdir(binDir);
         if (binFiles.length > 0) {
-          return successResponse(
-            { installed: true, package_count: binFiles.length, note: "Verified via installed binaries." },
-            `Dependencies installed successfully (${binFiles.length} binaries available).`
-          );
+          // Verify that framework binaries (e.g. .bin/next) are actually linked before
+          // declaring success — a partial install can leave .bin/ non-empty but missing
+          // the package's own binary entries.
+          const missingBins = await getMissingBinaries(cwd);
+          if (missingBins.length === 0) {
+            return successResponse(
+              { installed: true, package_count: binFiles.length, note: "Verified via installed binaries." },
+              `Dependencies installed successfully (${binFiles.length} binaries available).`
+            );
+          }
+          // missingBins.length > 0 — fall through; auto-clean retry below will handle it
         }
       } catch {
         // .bin doesn't exist — fall through to error handling
@@ -164,9 +198,36 @@ export function registerInstallDepsTool(server: McpServer): void {
         const nmDir = resolve(cwd, "node_modules");
         const nmContents = await readdir(nmDir);
         if (nmContents.length > 10) {
-          return successResponse(
-            { installed: true, package_count: nmContents.length, note: "Dependencies installed (verified by package count). If you encounter 'module not found' errors, re-run varity_install_deps." },
-            `Dependencies installed (${nmContents.length} packages found). Ready to develop.`
+          const missingBins = await getMissingBinaries(cwd);
+          if (missingBins.length === 0) {
+            return successResponse(
+              { installed: true, package_count: nmContents.length, note: "Dependencies installed (verified by package count). If you encounter 'module not found' errors, re-run varity_install_deps." },
+              `Dependencies installed (${nmContents.length} packages found). Ready to develop.`
+            );
+          }
+          // Framework binaries are missing despite node_modules having content — the install
+          // ended before npm finished linking binaries. Auto-clean and retry once.
+          try {
+            await rm(resolve(cwd, "node_modules"), { recursive: true, force: true });
+            const retryResult = await execCLI("npm", ["install", "--legacy-peer-deps"], { cwd, timeout: 180_000 });
+            if (retryResult.exitCode === 0) {
+              const retryMissing = await getMissingBinaries(cwd);
+              if (retryMissing.length === 0) {
+                const retryAdded = (retryResult.stdout + retryResult.stderr).match(/added (\d+) packages?/);
+                const retryCount = retryAdded ? parseInt(retryAdded[1]!, 10) : 0;
+                return successResponse(
+                  { installed: true, package_count: retryCount, repaired_broken_install: true },
+                  `Repaired broken node_modules and installed ${retryCount} packages successfully.`
+                );
+              }
+            }
+          } catch {
+            // Auto-repair failed — fall through to MISSING_BINARIES error
+          }
+          return errorResponse(
+            "MISSING_BINARIES",
+            `npm install completed but framework binaries are missing: ${missingBins.join(", ")}. node_modules is in a broken state.`,
+            "Run: rm -rf node_modules && npm install --legacy-peer-deps"
           );
         }
       } catch {
