@@ -199,15 +199,23 @@ export function registerAddCollectionTool(server: McpServer): void {
           .describe("Project directory (default: current working directory)"),
         name: z
           .string()
+          .min(1, "Collection name cannot be empty")
+          .regex(
+            /^[a-z][a-z0-9_]*$/,
+            "Collection name must start with a lowercase letter and contain only lowercase letters, digits, and underscores (e.g. 'invoices', 'team_members')"
+          )
           .describe(
             "Collection name (lowercase, e.g. 'invoices', 'team_members')"
           ),
         fields: z
           .array(
             z.object({
-              name: z.string().describe("Field name (e.g. 'amount')"),
-              type: z
+              name: z
                 .string()
+                .min(1, "Field name cannot be empty")
+                .describe("Field name (e.g. 'amount')"),
+              type: z
+                .enum(["string", "number", "boolean", "Date"])
                 .describe(
                   "Field type: 'string', 'number', 'boolean', or 'Date'"
                 ),

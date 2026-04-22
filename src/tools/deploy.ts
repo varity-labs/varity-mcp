@@ -181,7 +181,7 @@ export function registerDeployTool(server: McpServer): void {
           }
         }
       } catch (err: unknown) {
-        const isFileError = err instanceof Error && 'code' in err && (err as any).code === 'ENOENT';
+        const isFileError = err instanceof Error && (err as NodeJS.ErrnoException).code === 'ENOENT';
         const isParseError = err instanceof SyntaxError;
         if (!isFileError && !isParseError) {
           throw err;
