@@ -91,13 +91,15 @@ export function registerInstallDepsTool(server: McpServer): void {
 
       // Use --legacy-peer-deps to handle transitive dependency conflicts that cause npm to exit
       // non-zero even though packages install successfully.
+      // --bin-links is explicit to override any environment .npmrc that sets no-bin-links=true,
+      // which would cause npm to exit 0 while skipping .bin/ symlink creation entirely.
       const baseArgs = packages && packages.length > 0
-        ? ["install", ...packages]
-        : ["install", "--legacy-peer-deps"];
+        ? ["install", ...packages, "--bin-links"]
+        : ["install", "--legacy-peer-deps", "--bin-links"];
 
       const result = await execCLI("npm", baseArgs, {
         cwd,
-        timeout: 180_000, // 3 minutes
+        timeout: 300_000, // 5 minutes
       });
 
       const output = result.stdout + "\n" + result.stderr;
@@ -125,6 +127,46 @@ export function registerInstallDepsTool(server: McpServer): void {
 
       // Check 1: exit code
       if (result.exitCode === 0) {
+        // Verify framework binaries exist even on a clean exit — npm can exit 0 when doing
+        // an incremental install over a broken node_modules without regenerating missing .bin/
+        // symlinks (e.g., pre-existing partial install, or no-bin-links in env .npmrc).
+        const exitZeroMissingBins = await getMissingBinaries(cwd);
+        if (exitZeroMissingBins.length > 0) {
+          // npm exited 0 but framework binaries are missing — clean and do a full reinstall.
+          try {
+            await rm(resolve(cwd, "node_modules"), { recursive: true, force: true });
+            const repairResult = await execCLI("npm", ["install", "--legacy-peer-deps", "--bin-links"], { cwd, timeout: 300_000 });
+            if (repairResult.exitCode === 0) {
+              const repairMissing = await getMissingBinaries(cwd);
+              if (repairMissing.length === 0) {
+                const repairOutput = repairResult.stdout + "\n" + repairResult.stderr;
+                const repairAdded = repairOutput.match(/added (\d+) packages?/);
+                const repairCount = repairAdded ? parseInt(repairAdded[1]!, 10) : 0;
+                try {
+                  await access(resolve(cwd, ".gitignore"));
+                } catch {
+                  try {
+                    await writeFile(
+                      resolve(cwd, ".gitignore"),
+                      "node_modules\n.next\nout\n.env.local\n.env*.local\n.DS_Store\n",
+                      "utf-8"
+                    );
+                  } catch { /* non-critical */ }
+                }
+                return successResponse(
+                  { installed: true, package_count: repairCount, repaired_broken_install: true },
+                  `Repaired incomplete installation and installed ${repairCount} packages successfully.`
+                );
+              }
+            }
+          } catch { /* fall through to error */ }
+          return errorResponse(
+            "MISSING_BINARIES",
+            `npm install reported success but framework binaries are missing: ${exitZeroMissingBins.join(", ")}. The installation is incomplete.`,
+            "Run: rm -rf node_modules && npm install"
+          );
+        }
+
         // Create .gitignore if it doesn't exist — prevents node_modules from being committed
         try {
           const gitignorePath = resolve(cwd, ".gitignore");
@@ -209,7 +251,7 @@ export function registerInstallDepsTool(server: McpServer): void {
           // ended before npm finished linking binaries. Auto-clean and retry once.
           try {
             await rm(resolve(cwd, "node_modules"), { recursive: true, force: true });
-            const retryResult = await execCLI("npm", ["install", "--legacy-peer-deps"], { cwd, timeout: 180_000 });
+            const retryResult = await execCLI("npm", ["install", "--legacy-peer-deps", "--bin-links"], { cwd, timeout: 300_000 });
             if (retryResult.exitCode === 0) {
               const retryMissing = await getMissingBinaries(cwd);
               if (retryMissing.length === 0) {
@@ -248,7 +290,7 @@ export function registerInstallDepsTool(server: McpServer): void {
       if (output.includes("ENOTEMPTY") || (output.includes("rename") && output.includes("node_modules"))) {
         try {
           await rm(resolve(cwd, "node_modules"), { recursive: true, force: true });
-          const retryResult = await execCLI("npm", baseArgs, { cwd, timeout: 180_000 });
+          const retryResult = await execCLI("npm", baseArgs, { cwd, timeout: 300_000 });
           const retryOutput = retryResult.stdout + "\n" + retryResult.stderr;
           if (retryResult.exitCode === 0) {
             const addedMatch = retryOutput.match(/added (\d+) packages?/);
