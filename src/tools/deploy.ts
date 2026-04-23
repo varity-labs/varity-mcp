@@ -148,8 +148,16 @@ export function registerDeployTool(server: McpServer): void {
         );
       }
 
-      // Auto-build before deploying
+      // Auto-build before deploying — local build is an optimization:
+      // for static (CDN) deploys the build output is the artifact we upload, so a failure is fatal;
+      // for dynamic (cloud compute) deploys a successful build is pushed to GitHub so the container
+      // can run `npm start` without rebuilding (faster). If the local build fails for a dynamic app,
+      // we skip the optimization and let the cloud container build from source instead —
+      // matching what varity_doctor describes: "builds fall back to remote infrastructure".
       let buildSkipped = true;
+      let buildFailed = false;
+      let buildFailedReason = "";
+      let buildFailedHint = "";
       // Capture build output so we can save it as a log after deploy succeeds
       let capturedBuildOutput = "";
       try {
@@ -170,7 +178,10 @@ export function registerDeployTool(server: McpServer): void {
             const rawTail = capturedBuildOutput.slice(-2000);
             // Save failed build log so varity_deploy_logs can show it
             await saveBuildLog(`build-failed-${Date.now()}`, capturedBuildOutput);
-            const fixHint =
+            buildFailed = true;
+            buildSkipped = true; // don't push partial build output to git
+            buildFailedReason = `Local build failed before deploy. Build output:\n${rawTail}`;
+            buildFailedHint =
               capturedBuildOutput.includes("Killed") || capturedBuildOutput.includes("out of memory") || capturedBuildOutput.includes("heap out of memory")
                 ? "The build ran out of memory. To fix:\n1. Close other applications to free RAM and try again.\n2. Set NODE_OPTIONS=--max-old-space-size=2048 in your terminal environment before deploying.\n3. In a cloud IDE or container: upgrade to a larger instance type (Next.js builds need ~2 GB free RAM)."
                 : (capturedBuildOutput.includes("PageNotFoundError") || capturedBuildOutput.includes("Cannot find module for page"))
@@ -180,11 +191,7 @@ export function registerDeployTool(server: McpServer): void {
                 : capturedBuildOutput.includes("Type error") || capturedBuildOutput.includes("TypeScript")
                 ? "Fix the TypeScript errors shown above, then try deploying again."
                 : "Check the build errors above, fix them, and try deploying again.";
-            return errorResponse(
-              "BUILD_FAILED",
-              `Local build failed before deploy. Build output:\n${rawTail}`,
-              fixHint
-            );
+            // Don't return here — check hosting type first (see post-detection check below).
           }
         }
       } catch (err: unknown) {
@@ -300,6 +307,18 @@ export function registerDeployTool(server: McpServer): void {
           }
         }
         // If not Python either, let varitykit detect (args already has --mode auto)
+      }
+
+      // Post-detection build failure check:
+      // Static deploys need the local build output as the deployable artifact — fail fast.
+      // Dynamic (cloud compute) deploys fall back to cloud infrastructure build from source,
+      // which is what varity_doctor describes when it says "builds run on remote infrastructure".
+      if (buildFailed) {
+        if (detectedHosting === "static") {
+          return errorResponse("BUILD_FAILED", buildFailedReason, buildFailedHint);
+        }
+        // dynamic or unknown: proceed — cloud infrastructure will build from source
+        orchestrationSummary += " | ⚠ Local build failed — cloud infrastructure will build from source (first deploy may be slower)";
       }
 
       // If the MCP already ran a successful build above, tell varitykit to skip its own build.

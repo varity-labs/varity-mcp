@@ -284,9 +284,9 @@ export function registerDoctorTool(server: McpServer): void {
               ready: true,
               cli_deploy_ready: false,
               checks,
-              note: "Environment ready, but available RAM is too low for a local Next.js build (~3 GB peak). Use varity_deploy — builds run on remote infrastructure so local RAM is not a constraint.",
+              note: "Environment ready, but available RAM may be low for a local Next.js build (~3 GB peak). varity_deploy attempts a local build first as an optimization; if the local build fails (e.g. OOM or missing binaries), dynamic (server-side) apps automatically fall back to building on cloud infrastructure — so local RAM is not a hard requirement for dynamic apps.",
             },
-            "Environment ready, but RAM is too low for local builds — close other apps or use varity_deploy (builds run remotely, local RAM is not a constraint)."
+            "Environment ready, but RAM may be low for local builds. varity_deploy will attempt a local build first, then fall back to cloud infrastructure for dynamic apps if the local build fails."
           );
         }
 
