@@ -13,6 +13,39 @@ interface DeploymentRecord {
   size: string;
   timestamp: string;
   path: string;
+  http_status?: number;
+  latency_ms?: number;
+}
+
+export async function checkLiveness(
+  url: string
+): Promise<{ live: boolean; httpStatus?: number; latencyMs?: number }> {
+  if (!url || url === "unknown" || !url.startsWith("http")) {
+    return { live: false };
+  }
+  try {
+    const start = Date.now();
+    const res = await fetch(url, {
+      method: "GET",
+      signal: AbortSignal.timeout(8000),
+      redirect: "follow",
+    });
+    return { live: res.ok, httpStatus: res.status, latencyMs: Date.now() - start };
+  } catch {
+    return { live: false };
+  }
+}
+
+async function applyLiveness(deployments: DeploymentRecord[]): Promise<void> {
+  const results = await Promise.all(deployments.map((d) => checkLiveness(d.url)));
+  for (let i = 0; i < deployments.length; i++) {
+    const { live, httpStatus, latencyMs } = results[i]!;
+    if (deployments[i]!.status === "deployed" && !live) {
+      deployments[i]!.status = "unhealthy";
+    }
+    if (httpStatus !== undefined) deployments[i]!.http_status = httpStatus;
+    if (latencyMs !== undefined) deployments[i]!.latency_ms = latencyMs;
+  }
 }
 
 async function readDeployments(): Promise<DeploymentRecord[]> {
@@ -148,6 +181,8 @@ export function registerDeployStatusTool(server: McpServer): void {
           );
         }
 
+        await applyLiveness([deployment]);
+
         return successResponse(
           { deployment },
           `Deployment ${deployment.id}: ${deployment.status} at ${deployment.url}`
@@ -170,6 +205,8 @@ export function registerDeployStatusTool(server: McpServer): void {
       const maxResults = limit ?? 10;
       const limited = deployments.slice(0, maxResults);
       const hasMore = deployments.length > maxResults;
+
+      await applyLiveness(limited);
 
       return successResponse(
         {
