@@ -1,11 +1,11 @@
 import { z } from "zod";
-import { access, readdir, rm, writeFile, readFile } from "node:fs/promises";
+import { access, readdir, rm, writeFile, readFile, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { execCLI } from "../utils/cli-bridge.js";
 
-// Returns names of framework binaries that are listed in package.json but absent from .bin/
+// Returns names of framework binaries that are listed in package.json but absent or broken in .bin/
 async function getMissingBinaries(cwd: string): Promise<string[]> {
   const missing: string[] = [];
   try {
@@ -19,8 +19,16 @@ async function getMissingBinaries(cwd: string): Promise<string[]> {
     ];
     for (const [dep, bin] of knownBins) {
       if (dep in deps) {
+        const binPath = resolve(cwd, "node_modules", ".bin", bin);
         try {
-          await access(resolve(cwd, "node_modules", ".bin", bin));
+          await access(binPath);
+          // Detect zero-byte stubs — npm 10.9.3 can exit 0 while writing zero-byte placeholder
+          // files instead of real binaries/symlinks. stat() follows symlinks so it checks the
+          // actual binary target, catching both zero-byte files and zero-byte symlink targets.
+          const s = await stat(binPath);
+          if (s.size === 0) {
+            missing.push(bin);
+          }
         } catch {
           missing.push(bin);
         }
