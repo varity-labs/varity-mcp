@@ -252,7 +252,53 @@ export function registerDeployTool(server: McpServer): void {
           }
         }
       } catch {
-        // Can't read package.json — let varitykit detect
+        // No package.json — check for Python project indicators
+        const pythonIndicators = [
+          "requirements.txt",
+          "pyproject.toml",
+          "setup.py",
+          "setup.cfg",
+          "Pipfile",
+          "app.py",
+          "main.py",
+        ];
+        let isPython = false;
+        let pythonEntry = "";
+        for (const indicator of pythonIndicators) {
+          try {
+            await access(join(cwd, indicator));
+            isPython = true;
+            pythonEntry = indicator;
+            break;
+          } catch { /* not found */ }
+        }
+
+        if (isPython) {
+          detectedHosting = "dynamic";
+          orchestrationSummary = `Detected: Python app (${pythonEntry}) → Hosting: Cloud compute (auto-configured)`;
+          args.push("--hosting", "dynamic");
+
+          let resolvedRepoUrl = repo_url || "";
+          if (!resolvedRepoUrl) {
+            const gitRemoteResult = await execCLI("git", ["remote", "get-url", "origin"], { cwd, timeout: 5000 });
+            if (gitRemoteResult.exitCode === 0 && gitRemoteResult.stdout.trim()) {
+              resolvedRepoUrl = gitRemoteResult.stdout.trim();
+            }
+          }
+          if (resolvedRepoUrl) {
+            args.push("--repo-url", resolvedRepoUrl);
+            try {
+              const configPath = `${cwd}/varity.config.json`;
+              let config: Record<string, unknown> = {};
+              try { config = JSON.parse(await readFile(configPath, "utf-8")); } catch { /* new config */ }
+              config.github_repo = resolvedRepoUrl;
+              await writeFile(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
+            } catch { /* non-critical */ }
+          } else {
+            orchestrationSummary += " | ⚠️ No GitHub repo detected — create one first with varity_create_repo";
+          }
+        }
+        // If not Python either, let varitykit detect (args already has --mode auto)
       }
 
       // If the MCP already ran a successful build above, tell varitykit to skip its own build.
