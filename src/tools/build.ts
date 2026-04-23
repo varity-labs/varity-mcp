@@ -362,8 +362,8 @@ export function registerBuildTool(server: McpServer): void {
           ? "A file permission error occurred — the build binary may not be executable. Call varity_install_deps to reinstall all dependencies, then try building again."
           : output.includes("ENOSPC") || output.includes("no space left")
           ? "The build failed because the disk is full. Free up disk space on your machine, then try building again."
-          : output.includes("Killed") || output.includes("out of memory") || output.includes("heap out of memory")
-          ? "The build ran out of memory. Close other applications to free RAM, then try again."
+          : output.includes("Killed") || output.includes("out of memory") || output.includes("heap out of memory") || output.includes("Bus error")
+          ? "The build ran out of memory. Close other applications to free RAM (Next.js 15 builds need ~4 GB free), then try again."
           : "Fix the errors above and try building again.";
 
       return errorResponse("BUILD_FAILED", errorSummary, fixSuggestion);
