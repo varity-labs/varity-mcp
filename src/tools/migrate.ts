@@ -51,22 +51,37 @@ function parseMigrateApplyOutput(raw: string): {
   const changes_applied: string[] = [];
   const warnings: string[] = [];
 
-  if (text.includes("No Vercel-isms found") || text.includes("Nothing to migrate")) {
+  if (
+    text.includes("No Vercel-isms found") ||
+    text.includes("Nothing to migrate") ||
+    text.includes("(no changes)")
+  ) {
     return { changes_applied, warnings, nothing_to_migrate: true };
   }
 
   for (const line of text.split("\n")) {
     const trimmed = line.trim();
-    if (trimmed.startsWith("~ modified:") || trimmed.startsWith("modified:")) {
-      changes_applied.push("Modified: " + trimmed.replace(/^~?\s*modified:\s*/, "").trim());
-    } else if (trimmed.startsWith("- removed:") || trimmed.startsWith("removed:")) {
-      changes_applied.push("Removed: " + trimmed.replace(/^-?\s*removed:\s*/, "").trim());
-    } else if (trimmed.startsWith("+ created:") || trimmed.startsWith("created:")) {
-      changes_applied.push("Created: " + trimmed.replace(/^\+?\s*created:\s*/, "").trim());
+    if (!trimmed) continue;
+
+    if (/^~\s/.test(trimmed)) {
+      const path = trimmed.replace(/^~\s+(?:modified:\s*)?/, "").trim();
+      if (path) changes_applied.push("Modified: " + path);
+    } else if (/^-\s/.test(trimmed) && !trimmed.startsWith("->")) {
+      const path = trimmed.replace(/^-\s+(?:removed:\s*)?/, "").trim();
+      if (path) changes_applied.push("Removed: " + path);
+    } else if (/^\+\s/.test(trimmed)) {
+      const path = trimmed.replace(/^\+\s+(?:created:\s*)?/, "").trim();
+      if (path) changes_applied.push("Created: " + path);
+    } else if (/^removed\s+\S/.test(trimmed)) {
+      changes_applied.push(trimmed);
     } else if (trimmed.startsWith("→") || trimmed.startsWith("->")) {
       changes_applied.push(trimmed.replace(/^[-→>]+\s*/, "").trim());
+    } else if (/^[^:]+:\s+\S+\s*→/.test(trimmed)) {
+      changes_applied.push(trimmed);
     } else if (trimmed.startsWith("⚠") || trimmed.toLowerCase().startsWith("warning:")) {
       warnings.push(trimmed.replace(/^⚠\s*/, "").trim());
+    } else if (trimmed.startsWith("•")) {
+      warnings.push(trimmed.replace(/^•\s*/, "").trim());
     }
   }
 
