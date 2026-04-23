@@ -47,14 +47,11 @@ export function registerOpenBrowserTool(server: McpServer): void {
         );
       }
 
-      // Still return success with the URL so the developer can open it manually
-      return successResponse(
-        {
-          opened: false,
-          url,
-          note: "Could not open browser automatically. Open this URL manually.",
-        },
-        `Could not open browser automatically. Open this URL manually: ${url}`
+      const reason = (result.stderr || result.stdout || "").trim() || "Browser launcher exited with a non-zero status.";
+      return errorResponse(
+        "BROWSER_OPEN_FAILED",
+        `Could not open browser automatically. Reason: ${reason.slice(0, 200)}`,
+        `Open this URL manually: ${url}`
       );
     }
   );
