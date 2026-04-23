@@ -38,7 +38,7 @@ export function registerInstallDepsTool(server: McpServer): void {
     {
       title: "Install Dependencies",
       description:
-        "Install npm dependencies in a Varity project. Use after creating a project or when adding new packages.",
+        "Install project dependencies. Auto-detects npm (JavaScript/TypeScript) and pip (Python) projects. Use after creating a project or when adding new packages.",
       inputSchema: {
         path: z
           .string()
@@ -50,7 +50,7 @@ export function registerInstallDepsTool(server: McpServer): void {
           .array(z.string())
           .optional()
           .describe(
-            "Specific packages to install (e.g., ['axios', 'lodash']). If omitted, runs npm install for all dependencies."
+            "Specific packages to install (e.g., ['axios', 'lodash'] for npm, ['flask', 'requests'] for pip). If omitted, installs all dependencies."
           ),
       },
       annotations: {
@@ -68,6 +68,69 @@ export function registerInstallDepsTool(server: McpServer): void {
           "PATH_NOT_FOUND",
           `Project directory does not exist: ${cwd}`,
           "Check the path and ensure the project has been created (use varity_init first)."
+        );
+      }
+
+      // Python project detection — must happen before npm, which would fail with ENOENT
+      // for projects that legitimately have no package.json.
+      const hasPkgJson = await access(resolve(cwd, "package.json")).then(() => true).catch(() => false);
+      if (!hasPkgJson) {
+        const pythonIndicators = ["requirements.txt", "pyproject.toml", "setup.py", "setup.cfg", "Pipfile"];
+        let detectedPythonFile: string | null = null;
+        for (const indicator of pythonIndicators) {
+          try {
+            await access(resolve(cwd, indicator));
+            detectedPythonFile = indicator;
+            break;
+          } catch { /* not found, try next */ }
+        }
+        if (detectedPythonFile !== null) {
+          // Pipfile projects should use pipenv — pip can't read Pipfile natively
+          if (detectedPythonFile === "Pipfile" && !(packages && packages.length > 0)) {
+            return successResponse(
+              { installed: true, framework: "python", note: "Pipfile detected" },
+              "Python project detected (Pipfile). Run `pipenv install` to install dependencies."
+            );
+          }
+          let pipArgs: string[];
+          if (packages && packages.length > 0) {
+            pipArgs = ["install", ...packages];
+          } else if (detectedPythonFile === "requirements.txt") {
+            pipArgs = ["install", "-r", "requirements.txt"];
+          } else {
+            // pyproject.toml, setup.py, setup.cfg
+            pipArgs = ["install", "-e", "."];
+          }
+          const pipResult = await execCLI("pip", pipArgs, { cwd, timeout: 120_000 });
+          if (pipResult.exitCode === 0) {
+            return successResponse(
+              { installed: true, framework: "python" },
+              packages?.length
+                ? `Installed ${packages.join(", ")} via pip.`
+                : `Python dependencies installed from ${detectedPythonFile}.`
+            );
+          }
+          // pip not found or failed — try pip3
+          const pip3Result = await execCLI("pip3", pipArgs, { cwd, timeout: 120_000 });
+          if (pip3Result.exitCode === 0) {
+            return successResponse(
+              { installed: true, framework: "python" },
+              packages?.length
+                ? `Installed ${packages.join(", ")} via pip3.`
+                : `Python dependencies installed from ${detectedPythonFile} using pip3.`
+            );
+          }
+          const pipErr = (pipResult.stdout + "\n" + pipResult.stderr).trim().substring(0, 500);
+          return errorResponse(
+            "PIP_INSTALL_FAILED",
+            `pip install failed for Python project:\n${pipErr}`,
+            "Ensure pip or pip3 is installed and the requirements file is valid. Run: pip install -r requirements.txt"
+          );
+        }
+        return errorResponse(
+          "NO_PACKAGE_JSON",
+          `No package.json found in: ${cwd}`,
+          "Ensure you are in a project directory with a package.json file. Use varity_init to create a new project."
         );
       }
 
