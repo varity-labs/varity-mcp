@@ -86,7 +86,7 @@ export function registerCostCalculatorTool(server: McpServer): void {
         "Use this when a developer asks about pricing, costs, or platform comparison.",
       inputSchema: {
         users: z
-          .coerce.number()
+          .coerce.number({ invalid_type_error: "'users' is required — provide the estimated number of monthly active users" })
           .min(1, "Must have at least 1 user")
           .describe("Estimated monthly active users"),
         storage_gb: z
