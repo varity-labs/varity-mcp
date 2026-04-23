@@ -19,7 +19,7 @@ import { registerLoginTool } from "./tools/login.js";
 import { registerMigrateTool } from "./tools/migrate.js";
 import { createOAuthProvider } from "./auth/provider.js";
 
-export const VERSION = "2.0.0-beta.8";
+export const VERSION = "2.0.0-beta.15";
 
 export type TransportMode = "stdio" | "http";
 
