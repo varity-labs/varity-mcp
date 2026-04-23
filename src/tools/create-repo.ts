@@ -9,7 +9,7 @@
  */
 
 import { z } from "zod";
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -155,11 +155,11 @@ function pushLocalProject(projectPath: string, cloneUrl: string, token: string):
   try { execSync('git config user.email "varity-mcp@varity.so"', opts); } catch { /* ok */ }
   try { execSync('git config user.name "Varity MCP"', opts); } catch { /* ok */ }
 
-  // Set or update remote origin
+  // Set or update remote origin — use execFileSync (not execSync) to avoid command injection
   try {
-    execSync(`git remote add origin ${authUrl}`, opts);
+    execFileSync("git", ["remote", "add", "origin", authUrl], opts);
   } catch {
-    execSync(`git remote set-url origin ${authUrl}`, opts);
+    execFileSync("git", ["remote", "set-url", "origin", authUrl], opts);
   }
 
   // Guarantee .gitignore excludes node_modules before staging
@@ -181,6 +181,9 @@ function pushLocalProject(projectPath: string, cloneUrl: string, token: string):
   } catch { /* ok */ }
 
   execSync("git push -u origin main --force", opts);
+
+  // Remove token from remote URL immediately after push — token must not persist in .git/config
+  execFileSync("git", ["remote", "set-url", "origin", cloneUrl], opts);
 }
 
 /**
