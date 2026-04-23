@@ -290,9 +290,20 @@ export function registerInstallDepsTool(server: McpServer): void {
       if (output.includes("ENOTEMPTY") || (output.includes("rename") && output.includes("node_modules"))) {
         try {
           await rm(resolve(cwd, "node_modules"), { recursive: true, force: true });
-          const retryResult = await execCLI("npm", baseArgs, { cwd, timeout: 300_000 });
+          // Always do a FULL install after wiping node_modules — even if the original call
+          // was for specific packages. Deleting node_modules removes everything; a
+          // packages-only retry (baseArgs) would leave the project missing its base deps.
+          const retryResult = await execCLI("npm", ["install", "--legacy-peer-deps", "--bin-links"], { cwd, timeout: 300_000 });
           const retryOutput = retryResult.stdout + "\n" + retryResult.stderr;
           if (retryResult.exitCode === 0) {
+            const retryMissing = await getMissingBinaries(cwd);
+            if (retryMissing.length > 0) {
+              return errorResponse(
+                "MISSING_BINARIES",
+                `Cleaned and reinstalled, but framework binaries are still missing: ${retryMissing.join(", ")}.`,
+                "Run: rm -rf node_modules && npm install"
+              );
+            }
             const addedMatch = retryOutput.match(/added (\d+) packages?/);
             const packageCount = addedMatch ? parseInt(addedMatch[1]!, 10) : 0;
             return successResponse(

@@ -131,7 +131,11 @@ function parseBuildErrors(output: string): string[] {
       trimmed.includes("Module not found") ||
       trimmed.includes("Type error") ||
       trimmed.includes("SyntaxError") ||
-      trimmed.includes("Cannot find module")
+      trimmed.includes("Cannot find module") ||
+      // Shell "command not found" when a framework binary is missing from .bin/
+      ((trimmed.startsWith("sh:") || trimmed.startsWith("bash:") || trimmed.startsWith("zsh:")) && trimmed.includes("not found")) ||
+      // npm ENOENT when spawning a missing binary (e.g. "npm error enoent spawn next ENOENT")
+      (trimmed.startsWith("npm error") && trimmed.toLowerCase().includes("enoent"))
     ) {
       errors.push(trimmed);
     }
@@ -205,6 +209,18 @@ export function registerBuildTool(server: McpServer): void {
         );
       }
 
+      // Detect missing node_modules before running — produces a clear error instead of
+      // the confusing "sh: next: not found" that parseBuildErrors won't recognize.
+      try {
+        await access(resolve(cwd, "node_modules"));
+      } catch {
+        return errorResponse(
+          "MISSING_NODE_MODULES",
+          `node_modules is missing in: ${cwd}. Dependencies have not been installed.`,
+          "Run varity_install_deps first to install dependencies, then try building again."
+        );
+      }
+
       const result = await execCLI("npm", ["run", "build"], {
         cwd,
         timeout: 300_000, // 5 minutes
@@ -273,7 +289,12 @@ export function registerBuildTool(server: McpServer): void {
 
       // Context-aware fix suggestion based on error type
       const fixSuggestion =
-        errors.some((e) => e.includes("Cannot find module") || e.includes("Module not found"))
+        errors.some((e) =>
+          ((e.startsWith("sh:") || e.startsWith("bash:") || e.startsWith("zsh:")) && e.includes("not found")) ||
+          (e.startsWith("npm error") && e.toLowerCase().includes("enoent"))
+        )
+        ? "A framework binary is missing from node_modules/.bin. Run varity_install_deps to reinstall all dependencies, then try building again."
+        : errors.some((e) => e.includes("Cannot find module") || e.includes("Module not found"))
           ? (
               // @tanstack/react-query is a peer dep of wagmi (via ui-kit) that npm sometimes
               // hoists into ui-kit/node_modules instead of the top-level. Install it explicitly.
