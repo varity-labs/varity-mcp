@@ -244,16 +244,16 @@ export function registerDoctorTool(server: McpServer): void {
       }
 
       // Tiered readiness:
-      // - `ready` = Node.js + npm work → can use varity_init, varity_build, varity_deploy (MCP tools)
-      // - `cli_deploy_ready` = also Python + varitykit + auth + sufficient RAM → can use `varitykit app deploy` CLI directly
-      // Python / varitykit only block the CLI path, NOT the MCP-based varity_deploy tool.
-      // RAM < 3 GB is treated as a build blocker: local Next.js builds OOM at that threshold,
-      // so cli_deploy_ready must be false even though other checks are merely "warn".
+      // `devToolsReady` = Node.js + npm work → varity_init, varity_build, varity_dev_server available
+      // `ready` = ALL prerequisites met → varity_deploy works (Node.js + npm + Python + varitykit + auth + RAM)
+      // varity_deploy calls varitykit under the hood and requires Python 3.10+, so it is NOT
+      // available when only Node.js + npm are present. `ready` is the single authoritative signal.
       const coreChecks = checks.filter((c) => c.name === "Node.js" || c.name === "npm");
-      const ready = coreChecks.every((c) => c.status === "pass");
+      const devToolsReady = coreChecks.every((c) => c.status === "pass");
       const ramCheck = checks.find((c) => c.name === "RAM");
       const ramSufficient = !ramCheck || (ramCheck.status as string) !== "warn";
-      const cliDeployReady =
+      const ready =
+        devToolsReady &&
         ramSufficient &&
         checks.every((c) => c.status === "pass" || (c.status as string) === "warn");
 
@@ -262,52 +262,50 @@ export function registerDoctorTool(server: McpServer): void {
         (c) => !["Node.js", "npm"].includes(c.name) && (c.status === "fail")
       );
 
-      if (ready && cliDeployReady) {
+      if (ready) {
         return successResponse(
           {
             ready: true,
-            cli_deploy_ready: true,
             checks,
           },
           "Environment is ready! All prerequisites are met — you can build, develop, and deploy apps with Varity."
         );
       }
 
-      if (ready && !cliDeployReady) {
+      if (devToolsReady) {
         const cliFixList = cliIssues.map((c) => c.fix || c.message).filter(Boolean);
 
         if (!ramSufficient && cliIssues.length === 0) {
-          // RAM is the only reason cli_deploy_ready is false — all other checks are pass/warn.
-          // Surface this prominently so users don't proceed to an OOM kill.
+          // RAM is the only reason ready is false — all other checks are pass/warn.
           return successResponse(
             {
-              ready: true,
-              cli_deploy_ready: false,
+              ready: false,
+              dev_tools_ready: true,
               checks,
-              note: "Environment ready, but available RAM may be low for a local Next.js build (~3 GB peak). varity_deploy attempts a local build first as an optimization; if the local build fails (e.g. OOM or missing binaries), dynamic (server-side) apps automatically fall back to building on cloud infrastructure — so local RAM is not a hard requirement for dynamic apps.",
+              note: "Node.js and npm are ready (varity_init, varity_build, varity_dev_server work). varity_deploy may encounter issues: available RAM is low for a local Next.js build (~3 GB peak). Dynamic apps automatically fall back to building on cloud infrastructure if the local build fails — so low RAM is not a hard blocker for dynamic deployments.",
             },
-            "Environment ready, but RAM may be low for local builds. varity_deploy will attempt a local build first, then fall back to cloud infrastructure for dynamic apps if the local build fails."
+            "Node.js and npm ready, but RAM may be low for local builds. varity_deploy will fall back to cloud infrastructure for dynamic apps if the local build fails."
           );
         }
 
-        // Core tools work, but Python / varitykit / auth missing (and possibly RAM too)
+        // Node.js + npm work, but Python / varitykit / auth are missing — varity_deploy blocked
         return successResponse(
           {
-            ready: true,
-            cli_deploy_ready: false,
+            ready: false,
+            dev_tools_ready: true,
             checks,
-            note: `Development tools (varity_init, varity_build, varity_dev_server) are ready. Important: varity_deploy also requires Python 3.10+ and a working varitykit CLI — fix the following ${cliIssues.length} issue${cliIssues.length === 1 ? "" : "s"} before deploying:`,
+            note: `Node.js and npm are ready (varity_init, varity_build, varity_dev_server work). varity_deploy requires ${cliIssues.length} more prerequisite${cliIssues.length === 1 ? "" : "s"} — fix the following before deploying:`,
             cli_issues: cliFixList,
           },
-          `Ready for development (init, build, dev server work). Fix ${cliIssues.length} issue${cliIssues.length === 1 ? "" : "s"} before deploying: ${cliFixList.join("; ")}`
+          `Not ready to deploy yet. Fix ${cliIssues.length} issue${cliIssues.length === 1 ? "" : "s"} to enable deployment: ${cliFixList.join("; ")}`
         );
       }
 
-      // Core tools (Node.js / npm) are broken — nothing works
+      // Node.js / npm broken — nothing works
       return successResponse(
         {
           ready: false,
-          cli_deploy_ready: false,
+          dev_tools_ready: false,
           checks,
           next_steps: nextSteps,
         },
