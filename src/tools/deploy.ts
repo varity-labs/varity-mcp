@@ -5,13 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { execCLI, execVaritykit, isCLIAvailable } from "../utils/cli-bridge.js";
 import { getDeploymentsDir } from "../utils/config.js";
-
-/** Strip ANSI escape codes from CLI output before string matching. */
-// eslint-disable-next-line no-control-regex
-const ANSI_RE = /\x1b\[[0-9;]*[mGKHF]|\x1b\][^\x07]*\x07|\x1b[()][0-9A-Z]/g;
-function stripAnsi(text: string): string {
-  return text.replace(ANSI_RE, "");
-}
+import { stripAnsi } from "../utils/strip-ansi.js";
 
 /** Save build output as a log file so varity_deploy_logs can show real content. */
 async function saveBuildLog(deploymentId: string, buildOutput: string): Promise<void> {
@@ -167,7 +161,7 @@ export function registerDeployTool(server: McpServer): void {
           capturedBuildOutput = (buildResult.stdout || "") + "\n" + (buildResult.stderr || "");
 
           if (buildResult.exitCode !== 0) {
-            const rawTail = capturedBuildOutput.slice(-2000);
+            const rawTail = stripAnsi(capturedBuildOutput.slice(-2000));
             // Save failed build log so varity_deploy_logs can show it
             await saveBuildLog(`build-failed-${Date.now()}`, capturedBuildOutput);
             const fixHint =

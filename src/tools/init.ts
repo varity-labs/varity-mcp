@@ -4,6 +4,7 @@ import { basename, dirname, resolve } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { execCLI, execNpx, execVaritykit, isCLIAvailable } from "../utils/cli-bridge.js";
+import { stripAnsi } from "../utils/strip-ansi.js";
 
 /**
  * Check if a local template directory exists (for development/testing).
@@ -576,7 +577,7 @@ export function registerInitTool(server: McpServer): void {
 
         return errorResponse(
           "INIT_FAILED",
-          `Failed to create project: ${vkResult.stderr || "(no output — the CLI may have crashed)"}`,
+          `Failed to create project: ${stripAnsi(vkResult.stderr || "(no output — the CLI may have crashed)")}`,
           "Try running manually: npx create-varity-app " + name
         );
       }
@@ -584,7 +585,7 @@ export function registerInitTool(server: McpServer): void {
       // Both methods failed
       return errorResponse(
         "INIT_FAILED",
-        `Failed to scaffold project: ${result.stderr || "(no output — npx may have failed to start)"}`,
+        `Failed to scaffold project: ${stripAnsi(result.stderr || "(no output — npx may have failed to start)")}`,
         "Ensure Node.js >= 18 is installed and try: npx create-varity-app " +
           name
       );

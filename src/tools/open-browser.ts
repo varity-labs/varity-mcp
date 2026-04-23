@@ -2,6 +2,7 @@ import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { execCLI } from "../utils/cli-bridge.js";
+import { stripAnsi } from "../utils/strip-ansi.js";
 
 export function registerOpenBrowserTool(server: McpServer): void {
   server.registerTool(
