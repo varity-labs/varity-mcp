@@ -452,8 +452,11 @@ export function registerDeployTool(server: McpServer): void {
         );
       }
 
-      // Deploy failed — parse error for helpful suggestion
-      const output = result.stderr || result.stdout;
+      // Deploy failed — parse error for helpful suggestion.
+      // IMPORTANT: combine stdout+stderr. On failure, cli-bridge always sets stderr to at
+      // minimum the Node error string ("Error: Command failed: ..."), so `stderr || stdout`
+      // would silently discard stdout — which is where Python CLIs write their real errors.
+      const output = (result.stdout || "") + "\n" + (result.stderr || "");
 
       if (output.includes("No framework detected")) {
         return errorResponse(
@@ -474,8 +477,8 @@ export function registerDeployTool(server: McpServer): void {
         return errorResponse(
           isOom ? "BUILD_OOM" : "DEPLOY_CRASHED",
           isOom
-            ? `The deploy process was killed due to insufficient memory (exit code ${result.exitCode}). Build output:\n${output.slice(-500)}`
-            : `The deploy process crashed unexpectedly. Output:\n${output.slice(-500)}`,
+            ? `The deploy process was killed due to insufficient memory (exit code ${result.exitCode}). Build output:\n${output.slice(-2000)}`
+            : `The deploy process crashed unexpectedly. Output:\n${output.slice(-2000)}`,
           isOom
             ? "Not enough free RAM for the deploy process. To fix:\n" +
               "1. Free up RAM by closing other applications.\n" +
@@ -514,7 +517,7 @@ export function registerDeployTool(server: McpServer): void {
       if (output.includes("build failed") || output.includes("Build error")) {
         return errorResponse(
           "BUILD_FAILED",
-          `Build failed: ${output.substring(0, 500)}`,
+          `Build failed: ${output.slice(-2000)}`,
           "Fix the build errors shown above, then try deploying again."
         );
       }
@@ -529,7 +532,7 @@ export function registerDeployTool(server: McpServer): void {
 
       return errorResponse(
         "DEPLOY_FAILED",
-        `Deployment failed: ${output.substring(0, 500)}`,
+        `Deployment failed: ${output.slice(-2000)}`,
         "Check the error above. Common fixes: ensure dependencies are installed (run varity_install_deps), check for build errors (run varity_build for details)."
       );
     }
