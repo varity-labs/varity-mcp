@@ -308,20 +308,24 @@ export function registerDeployTool(server: McpServer): void {
             const latest = JSON.parse(
               await readFile(`${deploymentsDir}/${jsonFiles[0]}`, "utf-8")
             );
-            // Prefer the clean varity.app custom domain URL over raw provider URLs
+            // Prefer the clean varity.app custom domain URL over raw provider URLs.
+            // Check plain `url` before `akash.url` so a pre-resolved canonical URL wins.
             const rawUrl =
               latest.custom_domain?.url ||
-              latest.akash?.url ||
               latest.url ||
+              latest.akash?.url ||
               latest.ipfs?.gateway_url ||
               "unknown";
 
-            // If the resolved URL is a raw storage hash, construct a clean varity.app URL
+            // Canonicalize any raw provider URL (IPFS hash, Akash ingress, etc.) to
+            // varity.app — matching the same logic used in varity_deploy_status.
             const isRawIpfs =
               rawUrl.includes("ipfs.io/ipfs/") ||
               rawUrl.includes("ipfscdn.");
-            if (isRawIpfs) {
-              ipfsUrl = rawUrl; // preserve as secondary
+            const isRawProvider =
+              isRawIpfs || (rawUrl !== "unknown" && !rawUrl.startsWith("https://varity.app"));
+            if (isRawProvider) {
+              if (isRawIpfs) ipfsUrl = rawUrl; // preserve as secondary
               // Source the app slug from the deployment record first
               const subdomain =
                 latest.custom_domain?.subdomain ||
