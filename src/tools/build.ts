@@ -202,6 +202,17 @@ export function registerBuildTool(server: McpServer): void {
           }
         }
       } catch {
+        // Python projects legitimately have no package.json — build is not needed
+        const pythonIndicators = ["requirements.txt", "pyproject.toml", "setup.py", "Pipfile", "setup.cfg"];
+        for (const indicator of pythonIndicators) {
+          try {
+            await access(resolve(cwd, indicator));
+            return successResponse(
+              { deployable_output: true, framework: "python", build_needed: false },
+              "Python project detected — no build step needed. Use varity_deploy to deploy directly."
+            );
+          } catch { /* not found, try next */ }
+        }
         return errorResponse(
           "NO_PACKAGE_JSON",
           `No package.json found in: ${cwd}`,
