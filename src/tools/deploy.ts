@@ -235,7 +235,8 @@ export function registerDeployTool(server: McpServer): void {
           if (!resolvedRepoUrl) {
             const gitRemoteResult = await execCLI("git", ["remote", "get-url", "origin"], { cwd, timeout: 5000 });
             if (gitRemoteResult.exitCode === 0 && gitRemoteResult.stdout.trim()) {
-              resolvedRepoUrl = gitRemoteResult.stdout.trim();
+              // Strip any embedded token (https://TOKEN@github.com/...) before storing
+              resolvedRepoUrl = gitRemoteResult.stdout.trim().replace(/^(https?:\/\/)[^@]+@/, "$1");
             }
           }
           if (resolvedRepoUrl) {
