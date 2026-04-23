@@ -183,23 +183,35 @@ export function registerBuildTool(server: McpServer): void {
         const raw = await readFile(packageJsonPath, "utf-8");
         const pkg = JSON.parse(raw);
         if (!pkg.scripts?.build) {
-          // For server apps (Express, Fastify, etc.) no build step is needed — just verify the entry point exists
-          const mainFile = pkg.main || "server.js";
-          try {
-            await access(`${cwd}/${mainFile}`);
+          // For server apps (Express, Fastify, etc.) no build step is needed — just verify the entry point exists.
+          // Try pkg.main first, then the Node.js default (index.js), then common server conventions.
+          const entryPointCandidates: string[] = [
+            ...(pkg.main ? [pkg.main] : []),
+            "index.js",
+            "server.js",
+            "app.js",
+          ];
+          let detectedEntry: string | null = null;
+          for (const candidate of entryPointCandidates) {
+            try {
+              await access(resolve(cwd, candidate));
+              detectedEntry = candidate;
+              break;
+            } catch { /* not found, try next */ }
+          }
+          if (detectedEntry !== null) {
             return successResponse({
               deployable_output: true,
               framework: "nodejs",
-              entry_point: mainFile,
+              entry_point: detectedEntry,
               note: "This is a server application. Use varity_deploy to deploy it directly."
-            }, `Server app detected (${mainFile}) — no build step needed. Ready to deploy.`);
-          } catch {
-            return errorResponse(
-              "NO_BUILD_SCRIPT",
-              'No "build" script found in package.json and no server entry point detected.',
-              'Add a build script (e.g., "build": "next build") or ensure server.js/index.js exists.'
-            );
+            }, `Server app detected (${detectedEntry}) — no build step needed. Ready to deploy.`);
           }
+          return errorResponse(
+            "NO_BUILD_SCRIPT",
+            'No "build" script found in package.json and no server entry point detected.',
+            'Add a build script (e.g., "build": "next build") or ensure index.js/server.js/app.js exists.'
+          );
         }
       } catch {
         // Python projects legitimately have no package.json — build is not needed
