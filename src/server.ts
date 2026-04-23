@@ -52,15 +52,17 @@ export function createVarityServer(mode: TransportMode = "stdio"): McpServer {
   registerCostCalculatorTool(server);
   registerDoctorTool(server);
 
-  // ── Development tools (stdio only — requires local filesystem) ──
+  // ── Development tools (all transports — run on MCP server's local filesystem) ──
+  registerLoginTool(server);
+  registerInitTool(server);
+  registerInstallDepsTool(server);
+  registerBuildTool(server);
+  registerAddCollectionTool(server);
+
+  // ── Local-environment tools (stdio only — require a local browser or local process on the client machine) ──
   if (mode === "stdio") {
-    registerLoginTool(server);
-    registerInitTool(server);
-    registerInstallDepsTool(server);
-    registerBuildTool(server);
     registerOpenBrowserTool(server);
     registerDevServerTool(server);
-    registerAddCollectionTool(server);
   }
 
   // ── Deployment tools (all transports) ──
