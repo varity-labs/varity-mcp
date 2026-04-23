@@ -10,6 +10,8 @@
 
 import { z } from "zod";
 import { execSync } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 
@@ -94,6 +96,49 @@ async function createRepoFromTemplate(
   return response.json();
 }
 
+// Entries that must be present in .gitignore to avoid pushing large/secret files
+const DEFAULT_IGNORES = [
+  "node_modules/",
+  "__pycache__/",
+  "*.pyc",
+  ".env",
+  ".env.local",
+  ".env.*.local",
+  "dist/",
+  "build/",
+  ".venv/",
+  "venv/",
+  ".DS_Store",
+];
+
+/**
+ * Ensure .gitignore excludes node_modules and other common large dirs.
+ * Custom apps often have no .gitignore — without this, git add -A stages
+ * node_modules and GitHub rejects the push with a 100 MB file error.
+ */
+function ensureGitignore(projectPath: string): void {
+  const gitignorePath = path.join(projectPath, ".gitignore");
+
+  let existing = "";
+  try {
+    existing = readFileSync(gitignorePath, "utf-8");
+  } catch {
+    // File doesn't exist — will create it
+  }
+
+  const existingLines = existing.split("\n").map((l) => l.trim());
+  const missing = DEFAULT_IGNORES.filter((entry) => {
+    const bare = entry.replace(/\/$/, "");
+    return !existingLines.some((l) => l === entry || l === bare);
+  });
+
+  if (missing.length === 0) return;
+
+  const separator = existing && !existing.endsWith("\n") ? "\n" : "";
+  const header = existing ? "\n# Added by Varity\n" : "# Common ignores\n";
+  writeFileSync(gitignorePath, existing + separator + header + missing.join("\n") + "\n");
+}
+
 /**
  * Push local project directory to GitHub repo.
  * Handles: git init, remote setup, initial commit, push.
@@ -116,6 +161,9 @@ function pushLocalProject(projectPath: string, cloneUrl: string, token: string):
   } catch {
     execSync(`git remote set-url origin ${authUrl}`, opts);
   }
+
+  // Guarantee .gitignore excludes node_modules before staging
+  ensureGitignore(projectPath);
 
   // Stage all files (respects .gitignore)
   execSync("git add -A", opts);
