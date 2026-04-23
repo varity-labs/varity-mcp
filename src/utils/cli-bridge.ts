@@ -24,7 +24,12 @@ export async function execCLI(
     const { stdout, stderr } = await execFileAsync(command, args, {
       timeout,
       cwd: options.cwd,
-      env: { ...process.env, FORCE_COLOR: "0", ...(options.env ?? {}) },
+      // FORCE_COLOR=0 disables colors for Node.js tools (chalk/supports-color).
+      // NO_COLOR=1 is the cross-ecosystem standard (https://no-color.org/) and
+      // is what Python/Rich actually respects — FORCE_COLOR="0" is a non-empty
+      // string, so Python's `bool("0")` is True, causing Rich to *enable* ANSI
+      // output instead of disabling it.  Both vars together cover all toolchains.
+      env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1", ...(options.env ?? {}) },
       maxBuffer: 10 * 1024 * 1024, // 10 MB
     });
 

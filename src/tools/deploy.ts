@@ -6,6 +6,13 @@ import { successResponse, errorResponse } from "../utils/responses.js";
 import { execCLI, execVaritykit, isCLIAvailable } from "../utils/cli-bridge.js";
 import { getDeploymentsDir } from "../utils/config.js";
 
+/** Strip ANSI escape codes from CLI output before string matching. */
+// eslint-disable-next-line no-control-regex
+const ANSI_RE = /\x1b\[[0-9;]*[mGKHF]|\x1b\][^\x07]*\x07|\x1b[()][0-9A-Z]/g;
+function stripAnsi(text: string): string {
+  return text.replace(ANSI_RE, "");
+}
+
 /** Save build output as a log file so varity_deploy_logs can show real content. */
 async function saveBuildLog(deploymentId: string, buildOutput: string): Promise<void> {
   try {
@@ -291,7 +298,7 @@ export function registerDeployTool(server: McpServer): void {
 
       if (result.exitCode === 0) {
         // Parse deploy output for URL and metadata
-        const output = result.stdout + "\n" + result.stderr;
+        const output = stripAnsi(result.stdout + "\n" + result.stderr);
 
         // Try to read the latest deployment record (most reliable source of URL)
         let deployUrl = "unknown";
@@ -460,7 +467,9 @@ export function registerDeployTool(server: McpServer): void {
       // IMPORTANT: combine stdout+stderr. On failure, cli-bridge always sets stderr to at
       // minimum the Node error string ("Error: Command failed: ..."), so `stderr || stdout`
       // would silently discard stdout — which is where Python CLIs write their real errors.
-      const output = (result.stdout || "") + "\n" + (result.stderr || "");
+      // Strip ANSI escape codes before string matching — Rich can emit them even with
+      // FORCE_COLOR=0 because Python treats the string "0" as truthy.
+      const output = stripAnsi((result.stdout || "") + "\n" + (result.stderr || ""));
 
       if (output.includes("No framework detected")) {
         return errorResponse(
