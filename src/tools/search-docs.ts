@@ -61,7 +61,7 @@ const DOCS_INDEX: DocsEntry[] = [
     title: "Introduction",
     section: "Getting Started",
     url: `${INFRASTRUCTURE.DOCS}/getting-started/introduction`,
-    content: `Varity is a developer platform to build, deploy, and monetize apps — 70-85% cheaper than AWS, with auth, storage, and hosting included.
+    content: `Varity is a developer platform to build, deploy, and monetize apps — 60-80% cheaper than AWS, with auth, storage, and hosting included.
 
 Build real-world apps without managing infrastructure. Deploy with one command. Monetize through the App Store with a 90/10 revenue split.`,
     keywords: ["introduction", "what is varity", "overview", "about", "why"],
@@ -144,7 +144,7 @@ No connection strings, no ORM setup. Deploy in 5 minutes.`,
     url: `${INFRASTRUCTURE.DOCS}/getting-started/why-varity`,
     content: `Why Varity over AWS, Vercel, or Netlify?
 
-- 70-85% cost savings
+- 60-80% cost savings
 - Zero DevOps overhead
 - Built-in auth and database
 - One-command deploys
