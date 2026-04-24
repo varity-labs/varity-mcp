@@ -179,6 +179,7 @@ export function registerBuildTool(server: McpServer): void {
 
       // Verify package.json exists and has a build script
       const packageJsonPath = resolve(cwd, "package.json");
+      let buildBinaryName: string | null = null;
       try {
         const raw = await readFile(packageJsonPath, "utf-8");
         const pkg = JSON.parse(raw);
@@ -213,6 +214,9 @@ export function registerBuildTool(server: McpServer): void {
             'Add a build script (e.g., "build": "next build") or ensure index.js/server.js/app.js exists.'
           );
         }
+        // Capture the framework binary for a proactive executability check below
+        const buildCmd = (pkg.scripts.build as string).trim().split(/\s+/)[0] ?? null;
+        if (buildCmd && !buildCmd.includes("/")) buildBinaryName = buildCmd;
       } catch {
         // Python projects legitimately have no package.json — build is not needed
         const pythonIndicators = ["requirements.txt", "pyproject.toml", "setup.py", "Pipfile", "setup.cfg"];
@@ -242,6 +246,20 @@ export function registerBuildTool(server: McpServer): void {
           `node_modules is missing in: ${cwd}. Dependencies have not been installed.`,
           "Run varity_install_deps first to install dependencies, then try building again."
         );
+      }
+
+      // Proactive binary check — consistent with varity_install_deps: if the framework binary
+      // is missing or a broken symlink, report it before npm even tries to execute it.
+      if (buildBinaryName) {
+        try {
+          await access(resolve(cwd, "node_modules", ".bin", buildBinaryName));
+        } catch {
+          return errorResponse(
+            "MISSING_BINARIES",
+            `The build binary '${buildBinaryName}' is missing or not accessible in node_modules/.bin. node_modules may be in a broken state.`,
+            "Call varity_install_deps to reinstall all dependencies, then try building again."
+          );
+        }
       }
 
       const result = await execCLI("npm", ["run", "build"], {
@@ -341,9 +359,9 @@ export function registerBuildTool(server: McpServer): void {
                 : "Fix the TypeScript errors shown above, then try building again."
             )
           : output.includes("Permission denied") || output.includes("EACCES")
-          ? "A file permission error occurred — the Next.js binary may not be executable. Fix by running: rm -rf node_modules && npm install, then try building again."
+          ? "A file permission error occurred — the build binary may not be executable. Call varity_install_deps to reinstall all dependencies, then try building again."
           : output.includes("ENOSPC") || output.includes("no space left")
-          ? "The build failed because the disk is full. Free up disk space (run `df -h` to check) and try again."
+          ? "The build failed because the disk is full. Free up disk space on your machine, then try building again."
           : output.includes("Killed") || output.includes("out of memory") || output.includes("heap out of memory")
           ? "The build ran out of memory. Close other applications to free RAM, then try again."
           : "Fix the errors above and try building again.";
