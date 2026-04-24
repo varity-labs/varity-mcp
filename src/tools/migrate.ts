@@ -6,15 +6,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { execCLI, execVaritykit } from "../utils/cli-bridge.js";
 import { getDeploymentsDir } from "../utils/config.js";
+import { stripAnsi } from "../utils/strip-ansi.js";
 
 function isGitHubUrl(url: string): boolean {
   return /^https?:\/\/github\.com\/|^git@github\.com:/.test(url);
-}
-
-/** Strip ANSI escape codes from CLI output for clean parsing. */
-function stripAnsi(text: string): string {
-  // eslint-disable-next-line no-control-regex
-  return text.replace(/\x1B\[[0-9;]*[mGKHF]/g, "").replace(/\x1B\[\?[0-9]+[hl]/g, "");
 }
 
 /** Extract the deployed URL from varitykit deploy output or the deployments dir. */
@@ -132,7 +127,7 @@ export function registerMigrateTool(server: McpServer): void {
 
       if (cloneResult.exitCode !== 0) {
         await rm(cloneDir, { recursive: true, force: true }).catch(() => {});
-        const errText = cloneResult.stderr || cloneResult.stdout;
+        const errText = stripAnsi(cloneResult.stderr || cloneResult.stdout);
         if (errText.includes("not found") || errText.includes("does not exist") || errText.includes("Repository not found")) {
           return errorResponse(
             "REPO_NOT_FOUND",
@@ -196,7 +191,7 @@ export function registerMigrateTool(server: McpServer): void {
           });
           if (buildResult.exitCode !== 0) {
             await rm(cloneDir, { recursive: true, force: true }).catch(() => {});
-            const buildOutput = (buildResult.stdout + "\n" + buildResult.stderr).slice(-2000);
+            const buildOutput = stripAnsi((buildResult.stdout + "\n" + buildResult.stderr)).slice(-2000);
             return errorResponse(
               "BUILD_FAILED",
               `Migration codemods applied, but the app failed to build:\n${buildOutput}`,
@@ -221,7 +216,7 @@ export function registerMigrateTool(server: McpServer): void {
         { timeout: 300_000 }
       );
 
-      const deployOutput = deployResult.stdout + "\n" + deployResult.stderr;
+      const deployOutput = stripAnsi(deployResult.stdout + "\n" + deployResult.stderr);
 
       if (deployResult.exitCode !== 0) {
         // Cleanup on deploy failure

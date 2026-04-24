@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { execVaritykit, execCLI } from "../utils/cli-bridge.js";
 import { INFRASTRUCTURE, isAuthenticated } from "../utils/config.js";
+import { stripAnsi } from "../utils/strip-ansi.js";
 
 export function registerLoginTool(server: McpServer): void {
   server.registerTool(
@@ -44,7 +45,7 @@ export function registerLoginTool(server: McpServer): void {
         }
 
         // Login failed — surface the CLI error clearly
-        const output = (result.stderr || result.stdout || "").trim();
+        const output = stripAnsi((result.stderr || result.stdout || "").trim());
         return errorResponse(
           "LOGIN_FAILED",
           `Login failed: ${output || "Invalid deploy key or authentication error."}`,

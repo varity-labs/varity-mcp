@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { execCLI } from "../utils/cli-bridge.js";
+import { stripAnsi } from "../utils/strip-ansi.js";
 
 // Returns names of framework binaries that are listed in package.json but absent or broken in .bin/
 async function getMissingBinaries(cwd: string): Promise<string[]> {
@@ -128,7 +129,7 @@ export function registerInstallDepsTool(server: McpServer): void {
                 : `Python dependencies installed from ${detectedPythonFile} using pip3.`
             );
           }
-          const pipErr = (pipResult.stdout + "\n" + pipResult.stderr).trim().substring(0, 500);
+          const pipErr = stripAnsi((pipResult.stdout + "\n" + pipResult.stderr).trim()).substring(0, 500);
           return errorResponse(
             "PIP_INSTALL_FAILED",
             `pip install failed for Python project:\n${pipErr}`,
@@ -179,7 +180,7 @@ export function registerInstallDepsTool(server: McpServer): void {
         timeout: 300_000, // 5 minutes
       });
 
-      const output = result.stdout + "\n" + result.stderr;
+      const output = stripAnsi(result.stdout + "\n" + result.stderr);
       const addedMatch = output.match(/added (\d+) packages?/);
       const packageCount = addedMatch ? parseInt(addedMatch[1]!, 10) : 0;
       // Extract changed package names from npm output for transparency

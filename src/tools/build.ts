@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { execCLI } from "../utils/cli-bridge.js";
+import { stripAnsi } from "../utils/strip-ansi.js";
 
 /** Check if a directory exists. */
 async function dirExists(dir: string): Promise<boolean> {
@@ -269,7 +270,7 @@ export function registerBuildTool(server: McpServer): void {
         env: { ...process.env, NODE_OPTIONS: "--max-old-space-size=4096" },
       });
 
-      const output = result.stdout + "\n" + result.stderr;
+      const output = stripAnsi(result.stdout + "\n" + result.stderr);
       const errors = parseBuildErrors(output);
 
       if (result.exitCode === 0) {
