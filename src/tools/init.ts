@@ -156,9 +156,9 @@ async function scaffoldFromLocal(
     // Never use local file:// paths — developers need reproducible installs from npm.
     const PUBLISHED_VERSIONS: Record<string, string> = {
       "@tanstack/react-query": "^5.0.0",
-      "@varity-labs/sdk": "^2.0.0-beta.10",
-      "@varity-labs/ui-kit": "^2.0.0-beta.10",
-      "@varity-labs/types": "^2.0.0-beta.5",
+      "@varity-labs/sdk": "^2.0.0-beta.14",
+      "@varity-labs/ui-kit": "^2.0.0-beta.15",
+      "@varity-labs/types": "^2.0.0-beta.8",
     };
 
     for (const depKey of ["dependencies", "devDependencies"] as const) {
@@ -418,9 +418,9 @@ export function registerInitTool(server: McpServer): void {
           const pkg = JSON.parse(pkgRaw) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
           const LATEST_VERSIONS: Record<string, string> = {
             "@tanstack/react-query": "^5.0.0",
-            "@varity-labs/sdk": "^2.0.0-beta.10",
-            "@varity-labs/ui-kit": "^2.0.0-beta.10",
-            "@varity-labs/types": "^2.0.0-beta.5",
+            "@varity-labs/sdk": "^2.0.0-beta.14",
+            "@varity-labs/ui-kit": "^2.0.0-beta.15",
+            "@varity-labs/types": "^2.0.0-beta.8",
           };
           let pkgChanged = false;
           for (const depKey of ["dependencies", "devDependencies"] as const) {
@@ -495,9 +495,9 @@ export function registerInitTool(server: McpServer): void {
           const pkg = JSON.parse(pkgRaw) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
           const LATEST_VERSIONS: Record<string, string> = {
             "@tanstack/react-query": "^5.0.0",
-            "@varity-labs/sdk": "^2.0.0-beta.10",
-            "@varity-labs/ui-kit": "^2.0.0-beta.10",
-            "@varity-labs/types": "^2.0.0-beta.5",
+            "@varity-labs/sdk": "^2.0.0-beta.14",
+            "@varity-labs/ui-kit": "^2.0.0-beta.15",
+            "@varity-labs/types": "^2.0.0-beta.8",
           };
           let pkgChanged = false;
           for (const depKey of ["dependencies", "devDependencies"] as const) {

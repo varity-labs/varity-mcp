@@ -75,7 +75,7 @@ Build real-world apps without managing infrastructure. Deploy with one command. 
 npm install @varity-labs/sdk @varity-labs/ui-kit @varity-labs/types
 pip install varitykit
 
-Requirements: Node.js 18+, Python 3.8+, npm/pnpm/yarn
+Requirements: Node.js 18+, Python 3.10+, npm/pnpm/yarn
 
 Verify installation:
 varitykit doctor`,
@@ -763,15 +763,12 @@ Use with ChatGPT, Claude, or Cursor for faster development.`,
     url: `${INFRASTRUCTURE.DOCS}/ai-tools/mcp-server-spec`,
     content: `Install the Varity MCP server for AI editors.
 
-7 tools for deploying, searching docs, and managing apps via Cursor or Claude:
+15 tools for deploying, searching docs, and managing apps via Cursor or Claude:
 
-- varity_search_docs
-- varity_cost_calculator
-- varity_init
-- varity_deploy
-- varity_deploy_status
-- varity_deploy_logs
-- varity_submit_to_store
+- varity_search_docs, varity_cost_calculator, varity_doctor, varity_login
+- varity_init, varity_install_deps, varity_build, varity_add_collection
+- varity_create_repo, varity_deploy, varity_deploy_status, varity_deploy_logs
+- varity_submit_to_store, varity_migrate, varity_open_browser
 
 Install: npx -y @varity-labs/mcp
 
