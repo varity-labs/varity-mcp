@@ -30,12 +30,16 @@ export function registerLoginTool(server: McpServer): void {
         const result = await execVaritykit("login", ["--key", deploy_key]);
 
         if (result.exitCode === 0) {
+          const cliMessage = result.stdout.trim();
           return successResponse(
             {
               authenticated: true,
               deploy_key_set: true,
+              ...(cliMessage ? { account_message: cliMessage } : {}),
             },
-            "Logged in to Varity successfully. You can now run varity_deploy to deploy your app."
+            cliMessage
+              ? `Logged in to Varity successfully. ${cliMessage}`
+              : "Logged in to Varity successfully. You can now run varity_deploy to deploy your app."
           );
         }
 
@@ -63,6 +67,25 @@ export function registerLoginTool(server: McpServer): void {
 
       // No key provided — open the settings page so the user can copy their key
       const settingsUrl = `${INFRASTRUCTURE.DEVELOPER_PORTAL}/dashboard/settings`;
+
+      const isHeadless =
+        process.env.CI === "true" ||
+        process.env.HEADLESS === "true" ||
+        (process.platform === "linux" && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY);
+
+      if (isHeadless) {
+        return successResponse(
+          {
+            authenticated: false,
+            headless_environment: true,
+            settings_url: settingsUrl,
+            next_step:
+              "Headless environment detected — browser cannot open automatically. " +
+              "Get your deploy key from the settings URL, then call varity_login with: deploy_key: \"<your-key>\"",
+          },
+          `Headless environment detected — browser cannot open automatically.\n\nTo log in:\n1. Open on any browser: ${settingsUrl}\n2. Add a payment method if prompted\n3. Copy your deploy key from the Settings page\n4. Call varity_login again with: deploy_key: "<your-key>"`
+        );
+      }
 
       const platform = process.platform;
       const command =

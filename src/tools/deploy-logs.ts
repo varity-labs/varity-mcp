@@ -57,14 +57,23 @@ export function registerDeployLogsTool(server: McpServer): void {
           const lines = content.split("\n");
           const truncated = lines.slice(-limit);
 
-          // Annotate the "shared development database" build-phase message so
-          // developers reading post-deploy logs are not misled into thinking
-          // their production app lacks a private database (DX-005).
-          const annotatedLines = truncated.map((line) =>
-            line.includes("Using shared development database")
-              ? line + " ← build-phase only; your deployed app has a private database"
-              : line
-          );
+          const annotatedLines = truncated.map((line) => {
+            // Rewrite CLI command references to MCP equivalents so log output
+            // makes sense when read through varity_deploy_logs.
+            if (line.includes("varitykit app deploy --submit-to-store")) {
+              return line.replace(
+                /varitykit app deploy --submit-to-store/g,
+                "varity_submit_to_store (MCP tool)"
+              );
+            }
+            // Annotate the "shared development database" build-phase message so
+            // developers reading post-deploy logs are not misled into thinking
+            // their production app lacks a private database (DX-005).
+            if (line.includes("Using shared development database")) {
+              return line + " ← build-phase only; your deployed app has a private database";
+            }
+            return line;
+          });
 
           return successResponse(
             {

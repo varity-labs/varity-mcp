@@ -164,10 +164,17 @@ export function registerMigrateTool(server: McpServer): void {
           {
             dry_run: true,
             github_url,
-            cloned_to: cloneDir,
             nothing_to_migrate: migrationSummary.nothing_to_migrate,
             changes_that_would_apply: migrationSummary.changes_applied,
             warnings: migrationSummary.warnings,
+            ...(migrationSummary.nothing_to_migrate
+              ? {
+                  note: "Scanned the cloned repository and found no Vercel-specific artifacts " +
+                    "(no vercel.json, no @vercel/* dependencies, no Vercel environment variables). " +
+                    "This repository root is already compatible with Varity. " +
+                    "If your app lives in a subdirectory, provide the full GitHub URL to that path.",
+                }
+              : {}),
           },
           migrationSummary.nothing_to_migrate
             ? "No Vercel-specific artifacts found — this app is already Varity-compatible."
@@ -239,6 +246,7 @@ export function registerMigrateTool(server: McpServer): void {
           nothing_to_migrate: migrationSummary.nothing_to_migrate,
           changes_applied: migrationSummary.changes_applied,
           warnings: migrationSummary.warnings,
+          tmp_clone_cleaned: true,
           infrastructure: {
             hosting: "Dynamic cloud hosting — auto-configured",
             database: "Document database (included)",
@@ -247,7 +255,7 @@ export function registerMigrateTool(server: McpServer): void {
           next_steps: [
             ...(deployUrl ? [`App live at: ${deployUrl}`] : []),
             "Review the warnings above and manually fix anything flagged.",
-            "To monetize: deploy again with submit_to_store=true via varity_deploy.",
+            "To monetize: call varity_submit_to_store with the deployment ID.",
           ],
         },
         deployUrl

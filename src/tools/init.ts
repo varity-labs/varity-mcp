@@ -235,6 +235,23 @@ function resolveProjectPaths(
   return { cwd: resolved, projectPath: resolve(resolved, name) };
 }
 
+async function depsActuallyInstalled(projectPath: string): Promise<boolean> {
+  try {
+    const binDir = resolve(projectPath, "node_modules", ".bin");
+    const binFiles = await readdir(binDir);
+    if (binFiles.length > 0) return true;
+  } catch {
+    // .bin missing — check raw package count as fallback
+  }
+  try {
+    const nmDir = resolve(projectPath, "node_modules");
+    const entries = await readdir(nmDir);
+    return entries.filter((e) => !e.startsWith(".")).length > 50;
+  } catch {
+    return false;
+  }
+}
+
 async function dirExists(dir: string): Promise<boolean> {
   try {
     await access(dir);
@@ -354,23 +371,24 @@ export function registerInitTool(server: McpServer): void {
         const scaffold = await scaffoldFromLocal(localTemplate, projectPath, name);
         if (scaffold.success) {
           const install = await runNpmInstall(projectPath);
+          const depsInstalled = install.success || await depsActuallyInstalled(projectPath);
           return successResponse(
             {
               project_name: name,
               project_path: projectPath,
               template,
               source: "local",
-              deps_installed: install.success,
-              ...(install.success ? {} : { note: "Dependencies not installed — run varity_install_deps to install them in one step." }),
+              deps_installed: depsInstalled,
+              ...(!depsInstalled ? { note: "Dependencies not installed — run varity_install_deps to install them in one step." } : {}),
               template_collections: {
                 built_in: ["projects", "tasks", "team_members", "user_settings"],
                 note: "These names are already in the template. Use different names with varity_add_collection to avoid conflicts.",
               },
-              next_steps: install.success
-                ? [`cd ${projectPath}`, "npm run dev", "# Use varity_dev_server to start the dev server — it auto-selects an available port", "# When ready: use varity_deploy"]
-                : ["Run varity_install_deps to install dependencies", `cd ${projectPath}`, "npm run dev", "# When ready: use varity_deploy"],
+              next_steps: depsInstalled
+                ? [`cd ${projectPath}`, "Call varity_dev_server to start the development server", "When ready to deploy: call varity_deploy"]
+                : ["Call varity_install_deps to install dependencies", `cd ${projectPath}`, "Then call varity_dev_server to start the development server"],
             },
-            install.success
+            depsInstalled
               ? `Created "${name}" at ${projectPath} with dependencies installed. Ready to develop.`
               : `Created "${name}" at ${projectPath}. Run varity_install_deps to finish setup.`
           );
@@ -441,30 +459,29 @@ export function registerInitTool(server: McpServer): void {
         }
 
         const install = await runNpmInstall(projectPath);
+        const depsInstalled = install.success || await depsActuallyInstalled(projectPath);
 
         return successResponse(
           {
             project_name: name,
             project_path: projectPath,
             template,
-            deps_installed: install.success,
-            ...(install.success ? {} : { note: "Dependencies not installed — run varity_install_deps to install them in one step." }),
+            deps_installed: depsInstalled,
+            ...(!depsInstalled ? { note: "Dependencies not installed — run varity_install_deps to install them in one step." } : {}),
             template_collections: {
               built_in: ["projects", "tasks", "team_members", "user_settings"],
               note: "These names are already in the template. Use different names with varity_add_collection to avoid conflicts.",
             },
-            next_steps: install.success
+            next_steps: depsInstalled
               ? [
                   `cd ${projectPath}`,
-                  "npm run dev",
-                  "# Use varity_dev_server to start the dev server — it auto-selects an available port",
-                  "# When ready: use varity_deploy",
+                  "Call varity_dev_server to start the development server",
+                  "When ready to deploy: call varity_deploy",
                 ]
               : [
-                  "Run varity_install_deps to install dependencies",
+                  "Call varity_install_deps to install dependencies",
                   `cd ${projectPath}`,
-                  "npm run dev",
-                  "# When ready: use varity_deploy",
+                  "Then call varity_dev_server to start the development server",
                 ],
             files_created: [
               "package.json",
@@ -518,24 +535,25 @@ export function registerInitTool(server: McpServer): void {
         }
 
         const install = await runNpmInstall(projectPath);
+        const depsInstalled = install.success || await depsActuallyInstalled(projectPath);
         return successResponse(
           {
             project_name: name,
             project_path: projectPath,
             template,
-            deps_installed: install.success,
-            note: install.success
+            deps_installed: depsInstalled,
+            note: depsInstalled
               ? "Project created and dependencies installed."
               : "Project created but dependencies could not be installed automatically. Run varity_install_deps to install them.",
             template_collections: {
               built_in: ["projects", "tasks", "team_members", "user_settings"],
               note: "These names are already in the template. Use different names with varity_add_collection to avoid conflicts.",
             },
-            next_steps: install.success
-              ? [`cd ${projectPath}`, "npm run dev", "# When ready: use varity_deploy"]
-              : ["Run varity_install_deps to install dependencies", `cd ${projectPath}`, "npm run dev", "# When ready: use varity_deploy"],
+            next_steps: depsInstalled
+              ? [`cd ${projectPath}`, "Call varity_dev_server to start the development server", "When ready to deploy: call varity_deploy"]
+              : ["Call varity_install_deps to install dependencies", `cd ${projectPath}`, "Then call varity_dev_server to start the development server"],
           },
-          install.success
+          depsInstalled
             ? `Created "${name}" at ${projectPath} with dependencies installed. Ready to develop.`
             : `Created "${name}" at ${projectPath}. Run varity_install_deps to finish setup.`
         );
@@ -553,22 +571,23 @@ export function registerInitTool(server: McpServer): void {
         if (await dirExists(projectPath)) {
           await patchProjectFiles(projectPath, name);
           const install = await runNpmInstall(projectPath);
+          const depsInstalled = install.success || await depsActuallyInstalled(projectPath);
           return successResponse(
             {
               project_name: name,
               project_path: projectPath,
               template,
               method: "varitykit",
-              deps_installed: install.success,
+              deps_installed: depsInstalled,
               template_collections: {
                 built_in: ["projects", "tasks", "team_members", "user_settings"],
                 note: "These names are already in the template. Use different names with varity_add_collection to avoid conflicts.",
               },
-              next_steps: install.success
-                ? [`cd ${projectPath}`, "npm run dev", "# When ready: use varity_deploy"]
-                : ["Run varity_install_deps to install dependencies", `cd ${projectPath}`, "npm run dev", "# When ready: use varity_deploy"],
+              next_steps: depsInstalled
+                ? [`cd ${projectPath}`, "Call varity_dev_server to start the development server", "When ready to deploy: call varity_deploy"]
+                : ["Call varity_install_deps to install dependencies", `cd ${projectPath}`, "Then call varity_dev_server to start the development server"],
             },
-            install.success
+            depsInstalled
               ? `Created "${name}" at ${projectPath} with dependencies installed. Ready to develop.`
               : `Created "${name}" at ${projectPath}. Run varity_install_deps to finish setup.`
           );

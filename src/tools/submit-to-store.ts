@@ -66,7 +66,7 @@ export function registerSubmitToStoreTool(server: McpServer): void {
       const revenueNote =
         price > 0
           ? `Users pay $${price}/month — you receive $${developerRevenue}/month per user (90% of $${price})`
-          : "Free apps can still generate revenue through in-app features";
+          : null;
 
       // Build the submission URL with query params
       const params = new URLSearchParams({
@@ -120,24 +120,21 @@ export function registerSubmitToStoreTool(server: McpServer): void {
           revenue_split: {
             developer: "90%",
             platform: "10%",
-            note: revenueNote,
+            ...(revenueNote ? { note: revenueNote } : {}),
           },
           review_timeline: "Apps typically appear in the store within 1–4 hours of submission. Monitor status at developer.store.varity.so.",
           next_steps: [
             browserOpened
-              ? "⚠️ Submission page opened in your browser — you MUST click Submit on that page to finalize (the app is NOT listed until you do)"
-              : `⚠️ Open this URL and click Submit to finalize your listing: ${submissionUrl}`,
-            "Review app details on the submission page, then click Submit to finalize",
+              ? "⚠️ Click Submit on the submission page to finalize — the app is NOT listed until you do"
+              : `⚠️ Open this URL in your browser and click Submit: ${submissionUrl}`,
             "App will appear in the store within 1–4 hours of submission",
             "Monitor approval status at developer.store.varity.so",
-            revenueNote,
+            ...(revenueNote ? [revenueNote] : []),
           ],
-          store_url: INFRASTRUCTURE.APP_STORE,
-          developer_portal: INFRASTRUCTURE.DEVELOPER_PORTAL,
         },
         browserOpened
-          ? `Submission page opened in your browser. Review the details and click Submit to list your app on the store.\n\nSubmission URL: ${submissionUrl}`
-          : `Submission page ready. Open this URL to complete listing your app:\n\n${submissionUrl}`
+          ? "Submission page opened in your browser. Click Submit to finalize your listing."
+          : "Submission page ready. Open the URL in submission_url to list your app on the store."
       );
     }
   );
