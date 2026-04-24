@@ -221,22 +221,23 @@ export function registerDoctorTool(server: McpServer): void {
         }
       }
 
-      // 7. RAM check — Next.js 15 builds peak at ~3 GB
+      // 7. RAM check — Next.js 15 builds need ~4 GB free: the build process itself peaks near
+      //    3 GB, and OS baseline + the Node.js MCP host process consume roughly 1 GB on top.
       try {
         const { freemem } = await import("node:os");
         const freeGB = freemem() / (1024 * 1024 * 1024);
-        if (freeGB < 3) {
+        if (freeGB < 4) {
           checks.push({
             name: "RAM",
             status: "warn",
-            message: `Low RAM: ${freeGB.toFixed(1)} GB free. Next.js 15 builds peak at ~3 GB — varity_build/varity_deploy may be killed by the OS.`,
+            message: `Low RAM: ${freeGB.toFixed(1)} GB free. Next.js 15 builds need ~4 GB free (build process peaks near 3 GB, plus ~1 GB for OS and host overhead) — varity_build/varity_deploy may be killed by the OS.`,
             fix: "Close other applications to free memory, or use a machine with more RAM before building.",
           });
         } else {
           checks.push({
             name: "RAM",
             status: "pass",
-            message: `${freeGB.toFixed(1)} GB free (Next.js 15 builds peak at ~3 GB — you're good)`,
+            message: `${freeGB.toFixed(1)} GB free (Next.js 15 builds need ~4 GB free — you're good)`,
           });
         }
       } catch {
@@ -282,7 +283,7 @@ export function registerDoctorTool(server: McpServer): void {
               ready: false,
               dev_tools_ready: true,
               checks,
-              note: "Node.js and npm are ready (varity_init, varity_build, varity_dev_server work). varity_deploy may encounter issues: available RAM is low for a local Next.js build (~3 GB peak). Dynamic apps automatically fall back to building on cloud infrastructure if the local build fails — so low RAM is not a hard blocker for dynamic deployments.",
+              note: "Node.js and npm are ready (varity_init, varity_build, varity_dev_server work). varity_deploy may encounter issues: available RAM is below the ~4 GB needed for a local Next.js 15 build. Dynamic apps automatically fall back to building on cloud infrastructure if the local build fails — so low RAM is not a hard blocker for dynamic deployments.",
             },
             "Node.js and npm ready, but RAM may be low for local builds. varity_deploy will fall back to cloud infrastructure for dynamic apps if the local build fails."
           );
