@@ -145,9 +145,15 @@ export function registerInstallDepsTool(server: McpServer): void {
         if (nmEntries.length < 5) {
           // Near-empty — likely a broken partial install. Safe to remove.
           await rm(nodeModulesPath, { recursive: true, force: true });
+        } else {
+          // Substantial node_modules exists. Check if framework binaries are already
+          // missing — if so, an incremental npm install won't regenerate .bin/ symlinks
+          // for already-"installed" packages. Must clean first to force a fresh install.
+          const preexistingMissing = await getMissingBinaries(cwd);
+          if (preexistingMissing.length > 0) {
+            await rm(nodeModulesPath, { recursive: true, force: true });
+          }
         }
-        // If nmEntries.length >= 5, real packages are present — let npm handle it.
-        // (npm install is idempotent; it will install any missing packages without destroying existing ones)
       } catch {
         // node_modules doesn't exist — that's fine, npm install will create it
       }
@@ -199,34 +205,32 @@ export function registerInstallDepsTool(server: McpServer): void {
           try {
             await rm(resolve(cwd, "node_modules"), { recursive: true, force: true });
             const repairResult = await execCLI("npm", ["install", "--legacy-peer-deps", "--bin-links"], { cwd, timeout: 300_000 });
-            if (repairResult.exitCode === 0) {
-              const repairMissing = await getMissingBinaries(cwd);
-              if (repairMissing.length === 0) {
-                const repairOutput = repairResult.stdout + "\n" + repairResult.stderr;
-                const repairAdded = repairOutput.match(/added (\d+) packages?/);
-                const repairCount = repairAdded ? parseInt(repairAdded[1]!, 10) : 0;
+            const repairMissing = await getMissingBinaries(cwd);
+            if (repairMissing.length === 0) {
+              const repairOutput = repairResult.stdout + "\n" + repairResult.stderr;
+              const repairAdded = repairOutput.match(/added (\d+) packages?/);
+              const repairCount = repairAdded ? parseInt(repairAdded[1]!, 10) : 0;
+              try {
+                await access(resolve(cwd, ".gitignore"));
+              } catch {
                 try {
-                  await access(resolve(cwd, ".gitignore"));
-                } catch {
-                  try {
-                    await writeFile(
-                      resolve(cwd, ".gitignore"),
-                      "node_modules\n.next\nout\n.env.local\n.env*.local\n.DS_Store\n",
-                      "utf-8"
-                    );
-                  } catch { /* non-critical */ }
-                }
-                return successResponse(
-                  { installed: true, package_count: repairCount, repaired_broken_install: true },
-                  `Repaired incomplete installation and installed ${repairCount} packages successfully.`
-                );
+                  await writeFile(
+                    resolve(cwd, ".gitignore"),
+                    "node_modules\n.next\nout\n.env.local\n.env*.local\n.DS_Store\n",
+                    "utf-8"
+                  );
+                } catch { /* non-critical */ }
               }
+              return successResponse(
+                { installed: true, package_count: repairCount, repaired_broken_install: true },
+                `Repaired incomplete installation and installed ${repairCount} packages successfully.`
+              );
             }
           } catch { /* fall through to error */ }
           return errorResponse(
             "MISSING_BINARIES",
             `npm install reported success but framework binaries are missing: ${exitZeroMissingBins.join(", ")}. The installation is incomplete.`,
-            "Run: rm -rf node_modules && npm install"
+            "Call varity_install_deps again to retry. If the issue persists, ensure Node.js v18+ is installed."
           );
         }
 
@@ -315,16 +319,14 @@ export function registerInstallDepsTool(server: McpServer): void {
           try {
             await rm(resolve(cwd, "node_modules"), { recursive: true, force: true });
             const retryResult = await execCLI("npm", ["install", "--legacy-peer-deps", "--bin-links"], { cwd, timeout: 300_000 });
-            if (retryResult.exitCode === 0) {
-              const retryMissing = await getMissingBinaries(cwd);
-              if (retryMissing.length === 0) {
-                const retryAdded = (retryResult.stdout + retryResult.stderr).match(/added (\d+) packages?/);
-                const retryCount = retryAdded ? parseInt(retryAdded[1]!, 10) : 0;
-                return successResponse(
-                  { installed: true, package_count: retryCount, repaired_broken_install: true },
-                  `Repaired broken node_modules and installed ${retryCount} packages successfully.`
-                );
-              }
+            const retryMissing = await getMissingBinaries(cwd);
+            if (retryMissing.length === 0) {
+              const retryAdded = (retryResult.stdout + retryResult.stderr).match(/added (\d+) packages?/);
+              const retryCount = retryAdded ? parseInt(retryAdded[1]!, 10) : 0;
+              return successResponse(
+                { installed: true, package_count: retryCount, repaired_broken_install: true },
+                `Repaired broken node_modules and installed ${retryCount} packages successfully.`
+              );
             }
           } catch {
             // Auto-repair failed — fall through to MISSING_BINARIES error
@@ -332,7 +334,7 @@ export function registerInstallDepsTool(server: McpServer): void {
           return errorResponse(
             "MISSING_BINARIES",
             `npm install completed but framework binaries are missing: ${missingBins.join(", ")}. node_modules is in a broken state.`,
-            "Run: rm -rf node_modules && npm install --legacy-peer-deps"
+            "Call varity_install_deps again to retry. If the issue persists, ensure Node.js v18+ is installed."
           );
         }
       } catch {
@@ -358,15 +360,8 @@ export function registerInstallDepsTool(server: McpServer): void {
           // packages-only retry (baseArgs) would leave the project missing its base deps.
           const retryResult = await execCLI("npm", ["install", "--legacy-peer-deps", "--bin-links"], { cwd, timeout: 300_000 });
           const retryOutput = retryResult.stdout + "\n" + retryResult.stderr;
-          if (retryResult.exitCode === 0) {
-            const retryMissing = await getMissingBinaries(cwd);
-            if (retryMissing.length > 0) {
-              return errorResponse(
-                "MISSING_BINARIES",
-                `Cleaned and reinstalled, but framework binaries are still missing: ${retryMissing.join(", ")}.`,
-                "Run: rm -rf node_modules && npm install"
-              );
-            }
+          const retryMissing = await getMissingBinaries(cwd);
+          if (retryMissing.length === 0) {
             const addedMatch = retryOutput.match(/added (\d+) packages?/);
             const packageCount = addedMatch ? parseInt(addedMatch[1]!, 10) : 0;
             return successResponse(
@@ -374,13 +369,18 @@ export function registerInstallDepsTool(server: McpServer): void {
               `Cleaned broken node_modules and installed ${packageCount} packages successfully.`
             );
           }
+          return errorResponse(
+            "MISSING_BINARIES",
+            `Cleaned and reinstalled, but framework binaries are still missing: ${retryMissing.join(", ")}.`,
+            "Call varity_install_deps again to retry. If the issue persists, ensure Node.js v18+ is installed."
+          );
         } catch {
           // Auto-clean failed — fall through to error response below
         }
         return errorResponse(
           "BROKEN_NODE_MODULES",
           "npm install failed because of a broken pre-installed node_modules directory.",
-          "Fix by running: rm -rf node_modules && npm install"
+          "Call varity_install_deps again to retry. If the issue persists, ensure Node.js v18+ is installed."
         );
       }
 
