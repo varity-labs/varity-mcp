@@ -95,8 +95,11 @@ export function registerMigrateTool(server: McpServer): void {
       title: "Migrate from Vercel to Varity",
       description:
         "Migrate a Vercel project to Varity in one step: clones the GitHub repository, " +
-        "removes Vercel-specific artifacts (vercel.json, @vercel/* packages, image optimizer config, " +
-        "env var renames), and deploys the transformed app to Varity infrastructure. " +
+        "applies codemods (removes vercel.json, strips @vercel/* packages and their imports, " +
+        "adds images.unoptimized:true, injects output:'standalone' for Akash containers, " +
+        "renames VERCEL_URL/VERCEL_ENV/VERCEL_GIT_COMMIT_SHA env vars, " +
+        "removes experimental.runtime:'edge' which is unsupported on Akash), " +
+        "then deploys the transformed app to Varity infrastructure. " +
         "Returns a live deployment URL and a migration report. " +
         "Works with Next.js projects. Use this when a developer wants to move their Vercel app to Varity.",
       inputSchema: {
