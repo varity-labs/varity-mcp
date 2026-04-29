@@ -352,6 +352,7 @@ export function registerDeployTool(server: McpServer): void {
         let buildSize = "unknown";
         let fileCount = "unknown";
         let deploymentId = "unknown";
+        let gatewayRegistrationFailed = false;
 
         let ipfsUrl: string | undefined;
         try {
@@ -362,6 +363,8 @@ export function registerDeployTool(server: McpServer): void {
             const latest = JSON.parse(
               await readFile(`${deploymentsDir}/${jsonFiles[0]}`, "utf-8")
             );
+            // Detect gateway registration failure recorded by the CLI
+            gatewayRegistrationFailed = latest.gateway_registration?.success === false;
             // Prefer the clean varity.app custom domain URL over raw provider URLs.
             // Check plain `url` before `akash.url` so a pre-resolved canonical URL wins.
             const rawUrl =
@@ -380,25 +383,30 @@ export function registerDeployTool(server: McpServer): void {
               isRawIpfs || (rawUrl !== "unknown" && !rawUrl.startsWith("https://varity.app"));
             if (isRawProvider) {
               if (isRawIpfs) ipfsUrl = rawUrl; // preserve as secondary
-              // Source the app slug from the deployment record first
-              const subdomain =
-                latest.custom_domain?.subdomain ||
-                latest.app_name ||
-                latest.project_name;
-              if (subdomain) {
-                deployUrl = `https://varity.app/${subdomain}/`;
+              if (gatewayRegistrationFailed) {
+                // Registration failed — use raw provider URL; don't expose an unregistered varity.app path
+                deployUrl = rawUrl;
               } else {
-                // Fall back to reading the project's package.json name
-                try {
-                  const pkgJson = JSON.parse(await readFile(`${cwd}/package.json`, "utf-8"));
-                  const pkgName: string | undefined = pkgJson.name;
-                  if (pkgName) {
-                    deployUrl = `https://varity.app/${pkgName.toLowerCase().replace(/[^a-z0-9-]/g, "-")}/`;
-                  } else {
+                // Source the app slug from the deployment record first
+                const subdomain =
+                  latest.custom_domain?.subdomain ||
+                  latest.app_name ||
+                  latest.project_name;
+                if (subdomain) {
+                  deployUrl = `https://varity.app/${subdomain}/`;
+                } else {
+                  // Fall back to reading the project's package.json name
+                  try {
+                    const pkgJson = JSON.parse(await readFile(`${cwd}/package.json`, "utf-8"));
+                    const pkgName: string | undefined = pkgJson.name;
+                    if (pkgName) {
+                      deployUrl = `https://varity.app/${pkgName.toLowerCase().replace(/[^a-z0-9-]/g, "-")}/`;
+                    } else {
+                      deployUrl = rawUrl;
+                    }
+                  } catch {
                     deployUrl = rawUrl;
                   }
-                } catch {
-                  deployUrl = rawUrl;
                 }
               }
             } else {
@@ -474,7 +482,7 @@ export function registerDeployTool(server: McpServer): void {
           {
             url: deployUrl,
             deployment_id: deploymentId,
-            status: "deployed",
+            status: gatewayRegistrationFailed ? "deploy_route_pending" : "deployed",
             build_size: buildSize,
             files: fileCount,
             store_listing: submit_to_store ? "submitted" : "not_submitted",
@@ -506,7 +514,9 @@ export function registerDeployTool(server: McpServer): void {
                   `Or visit: https://developer.store.varity.so`,
                 ],
           },
-          `Deployed successfully! ${orchestrationSummary}. Live at: ${deployUrl}${cardUrl ? ` | Share: ${cardUrl}` : ""}`
+          gatewayRegistrationFailed
+            ? `Container running at ${deployUrl} — gateway route registration failed. Run varity_deploy_status to retry.`
+            : `Deployed successfully! ${orchestrationSummary}. Live at: ${deployUrl}${cardUrl ? ` | Share: ${cardUrl}` : ""}`
         );
       }
 
