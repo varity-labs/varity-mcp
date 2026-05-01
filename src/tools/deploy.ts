@@ -31,10 +31,11 @@ export function registerDeployTool(server: McpServer): void {
       title: "Deploy to Production",
       description:
         "Deploy the current project to production on Varity infrastructure. " +
-        "Automatically detects framework (Next.js, React, Vue), builds the project, and deploys it. " +
+        "Automatically detects framework (Next.js, React, Vue, Python/FastAPI), builds the project, and deploys it. " +
         "Returns a live URL. The deployed app automatically gets a production database, " +
-        "authentication, and payment processing — zero configuration required. " +
-        "Cost: ~70% less than AWS/Vercel. " +
+        "authentication, and file storage. Zero configuration required. " +
+        "Pattern: AI agent deploys, the developer takes ownership of a live production app. " +
+        "60-80% cheaper than AWS. " +
         "Use this when a developer wants to deploy, publish, ship, or make their app live.",
       inputSchema: {
         path: z
