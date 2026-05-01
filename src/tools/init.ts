@@ -332,9 +332,18 @@ export function registerInitTool(server: McpServer): void {
             "If omitted, the project is created inside the MCP server's working directory, which is rarely " +
             "the user's workspace root. Ask the user where they want the project if unsure."
           ),
+        force: z
+          .boolean()
+          .optional()
+          .default(false)
+          .describe(
+            "Overwrite files in an existing non-empty directory. " +
+            "WARNING: existing files will be replaced without backup. " +
+            "Default: false. Only set true when the user explicitly requests overwriting."
+          ),
       },
     },
-    async ({ name, template, path }) => {
+    async ({ name, template, path, force }) => {
       const { cwd, projectPath } = resolveProjectPaths(name, path);
 
       // Ensure the parent directory exists
@@ -346,6 +355,19 @@ export function registerInitTool(server: McpServer): void {
           `Cannot create parent directory ${cwd}: ${err}`,
           "Check the path permissions and try again."
         );
+      }
+
+      // Refuse to overwrite an existing non-empty directory unless force=true.
+      // Without this guard, varity_init silently clobbers custom apps with the saas-starter template.
+      if (await dirExists(projectPath)) {
+        const entries = await readdir(projectPath).catch(() => [] as string[]);
+        if (entries.length > 0 && !force) {
+          return errorResponse(
+            "DIR_NOT_EMPTY",
+            `Directory "${projectPath}" already exists and is not empty (${entries.length} item${entries.length === 1 ? "" : "s"} found).`,
+            "Use force=true to overwrite existing files, or choose a different project name."
+          );
+        }
       }
 
       // Try local template first (for development/testing — uses fixed template source)
