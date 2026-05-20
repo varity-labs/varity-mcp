@@ -159,7 +159,7 @@ export function registerDeployTool(server: McpServer): void {
         const pkg = JSON.parse(pkgRaw);
         if (pkg.scripts?.build) {
           buildSkipped = false;
-          const buildResult = await execCLI("npm", ["run", "build"], {
+          let buildResult = await execCLI("npm", ["run", "build"], {
             cwd,
             timeout: 300_000,
             // Increase Node.js heap to 4 GB to avoid OOM kills on large dependency trees
@@ -167,6 +167,27 @@ export function registerDeployTool(server: McpServer): void {
           });
           // Capture full build output for log saving regardless of success/failure
           capturedBuildOutput = (buildResult.stdout || "") + "\n" + (buildResult.stderr || "");
+
+          // Self-heal common broken-install state where next exists but isn't executable.
+          // This appears as `sh: 1: next: Permission denied` in npm build output.
+          if (buildResult.exitCode !== 0 && capturedBuildOutput.includes("next: Permission denied")) {
+            const reinstallResult = await execCLI("npm", ["install", "--legacy-peer-deps"], {
+              cwd,
+              timeout: 300_000,
+            });
+            const retryResult = await execCLI("npm", ["run", "build"], {
+              cwd,
+              timeout: 300_000,
+              env: { ...process.env, NODE_OPTIONS: "--max-old-space-size=4096" },
+            });
+            buildResult = retryResult;
+            capturedBuildOutput = [
+              capturedBuildOutput,
+              "\n[Auto-repair] next binary permission issue detected; ran npm install --legacy-peer-deps and retried build.\n",
+              (reinstallResult.stdout || "") + "\n" + (reinstallResult.stderr || ""),
+              (retryResult.stdout || "") + "\n" + (retryResult.stderr || ""),
+            ].join("\n");
+          }
 
           if (buildResult.exitCode !== 0) {
             const rawTail = stripAnsi(capturedBuildOutput.slice(-2000));
