@@ -18,6 +18,26 @@ async function saveBuildLog(deploymentId: string, buildOutput: string): Promise<
   }
 }
 
+/**
+ * Canonicalize Varity app URLs so static-app relative asset resolution is stable.
+ * Example: https://varity.app/my-app -> https://varity.app/my-app/
+ */
+function normalizeVarityAppAppUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname !== "varity.app") return url;
+    if (parsed.search || parsed.hash) return url;
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    // Only normalize canonical app paths (/app-slug). Leave root and deeper paths untouched.
+    if (parts.length === 1 && !parsed.pathname.endsWith("/")) {
+      return `https://varity.app/${parts[0]}/`;
+    }
+    return url;
+  } catch {
+    return url;
+  }
+}
+
 export function registerDeployTool(server: McpServer): void {
   server.registerTool(
     "varity_deploy",
@@ -439,6 +459,8 @@ export function registerDeployTool(server: McpServer): void {
               deployUrl = rawUrl;
             }
 
+            deployUrl = normalizeVarityAppAppUrl(deployUrl);
+
             buildSize = latest.build?.size_mb
               ? `${latest.build.size_mb.toFixed(1)} MB`
               : "unknown";
@@ -461,6 +483,7 @@ export function registerDeployTool(server: McpServer): void {
             /https?:\/\/[^\s]+\.(?:varity\.app|ipfs\.\S+|ipfscdn\.\S+|gateway\.\S+)/i
           );
           deployUrl = urlMatch?.[0] ?? "Check varity_deploy_status for the URL";
+          deployUrl = normalizeVarityAppAppUrl(deployUrl);
         }
 
         // Build card URL from deploy URL if it's on varity.app
