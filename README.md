@@ -4,9 +4,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/varity-labs/varity-sdk/blob/main/LICENSE)
 [![Status: Beta](https://img.shields.io/badge/Status-Beta-yellow.svg)](https://github.com/varity-labs/varity-mcp)
 
-> Build, deploy, and monetize production apps from any AI coding tool — Cursor, Claude Code, VS Code, ChatGPT, Windsurf, OpenClaw, and more.
+> Build and deploy apps from AI coding tools including Cursor, Claude Code, VS Code, ChatGPT, and Windsurf.
 
-The Varity MCP Server is a full development engine for AI editors. It provides SDK knowledge, development tools, and deployment automation — so your AI can build complete apps with auth, database, and hosting auto-configured. Zero terminal commands required.
+The Varity MCP Server is a development layer for AI editors. It provides SDK knowledge, development tools, and deployment automation so your AI can build complete apps with auth, database, and hosting configuration support.
 
 ## Install
 
@@ -55,14 +55,14 @@ claude mcp add varity -- npx -y @varity-labs/mcp
 
 ### 5 SDK Resources
 
-Your AI gets complete knowledge of the Varity SDK — no searching, no guessing:
+Your AI gets complete knowledge of the Varity SDK - no searching, no guessing:
 
 | Resource | Content |
 |----------|---------|
 | `varity://sdk/database` | Collection CRUD API, QueryOptions, Document types, React hook patterns |
 | `varity://sdk/auth` | PrivyStack, usePrivy, ProtectedRoute, LoginButton, provider setup |
 | `varity://sdk/ui-components` | 52+ components with props, types, and usage examples |
-| `varity://sdk/patterns` | Canonical app patterns — file structure, CRUD pages, auth wrapping |
+| `varity://sdk/patterns` | Canonical app patterns - file structure, CRUD pages, auth wrapping |
 | `varity://sdk/deploy` | Deployment reference, App Store submission, revenue split |
 
 ### 15 Tools
@@ -86,7 +86,7 @@ Your AI gets complete knowledge of the Varity SDK — no searching, no guessing:
 | **Info** | | |
 | `varity_doctor` | Check environment prerequisites | all |
 | `varity_search_docs` | Search tutorials and guides | all |
-| `varity_cost_calculator` | Compare costs vs AWS/Vercel | all |
+| `varity_cost_calculator` | Generate deployment cost estimates | all |
 
 ### 3 Workflow Prompts
 
@@ -104,9 +104,9 @@ Describe what you want. The AI handles everything:
 You: "Build me a client invoice tracker and deploy it with Varity"
 AI:  ✅ Built Express API with invoice routes
      ✅ Added database collections (clients, invoices, payments)
-     ✅ Orchestration algorithm detected dynamic app → Akash hosting
+     ✅ Orchestration detected dynamic app hosting requirements
      ✅ Deployed with postgres + redis → https://invoice-tracker.varity.app
-     ✅ Submitted to App Store (you earn 90% of revenue)
+     ✅ Submitted to App Store
 ```
 
 No terminal commands. No configuration. No DevOps.
@@ -117,12 +117,12 @@ No terminal commands. No configuration. No DevOps.
 |---|---|---|
 | AI knows the SDK | Searches docs | Full API reference always in context |
 | Create apps | Scaffold only | Scaffold + auto-install deps |
-| Database setup | Manual | `varity_add_collection` — types, hook, page |
+| Database setup | Manual | `varity_add_collection` - types, hook, page |
 | Build | Manual `npm run build` | `varity_build` tool |
 | Deploy | Manual commands | `varity_deploy` (auto-builds first) |
 | Auth | Configure yourself | Zero-config, auto-injected |
-| Cost | AWS/Vercel pricing | ~70% cheaper |
-| Monetize | Not possible | 90/10 revenue split via App Store |
+| Cost insight | Basic estimates | `varity_cost_calculator` estimates |
+| Store publishing | Not available | `varity_submit_to_store` available |
 
 ## Prerequisites
 
@@ -131,10 +131,10 @@ No terminal commands. No configuration. No DevOps.
 
 ## Cost
 
-Varity is ~70% cheaper than AWS/Vercel. Auth and database are included at no extra cost. Use the `varity_cost_calculator` tool for detailed estimates.
+Use `varity_cost_calculator` for project-specific estimates.
 
 ---
 
-**Part of the [Varity SDK](https://github.com/varity-labs/varity-sdk)** — Build, deploy, and monetize apps 70% cheaper than AWS.
+**Part of the [Varity SDK](https://github.com/varity-labs/varity-sdk)**.
 
 [Documentation](https://docs.varity.so/ai-tools/mcp-server-spec) · [GitHub](https://github.com/varity-labs/varity-mcp) · [Discord](https://discord.gg/7vWsdwa2Bg)
