@@ -18,7 +18,7 @@ import { registerAgentTools } from "./tools/agent.js";
 import { registerDeleteDeploymentTool } from "./tools/delete-deployment.js";
 import { createOAuthProvider } from "./auth/provider.js";
 
-export const VERSION = "2.1.0";
+export const VERSION = "2.1.1";
 
 export type TransportMode = "stdio" | "http";
 

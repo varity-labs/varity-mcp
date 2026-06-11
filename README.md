@@ -6,7 +6,7 @@
 
 > Deploy production apps and AI agents from Cursor, Claude Code, VS Code, Windsurf, or ChatGPT. Flat predictable pricing — your bill stays the same as your app grows.
 
-The Varity MCP Server lets your AI editor scaffold, deploy, and manage apps in production for you. Flat monthly cost per app, locked at deploy time based on hardware reserved — no usage-based billing, no surprise overages. One server, every AI client, zero commands.
+The Varity MCP Server lets your AI editor build, deploy, and manage apps in production for you. Flat monthly cost per app, locked at deploy time based on hardware reserved — no usage-based billing, no surprise overages. One server, every AI client, zero commands.
 
 **Browser usage**: see the [browser usage guide](https://docs.varity.so/ai-tools/browser-usage) for Claude.ai or ChatGPT browser.
 **Quick start**: pick your editor below and run one command.
@@ -115,7 +115,6 @@ The MCP exposes Varity's deploy surface so your AI tool can take action — not 
 | `varity_cost_calculator` | Estimate your monthly cost before you deploy |
 | `varity_doctor` | Check that your environment is ready to deploy |
 | `varity_login` | Authenticate with your deploy key |
-| `varity_init` | Scaffold a new Next.js project |
 | `varity_install_deps` | Install project dependencies |
 | `varity_build` | Build the project |
 | `varity_open_browser` | Open a URL locally (stdio transports only) |
@@ -150,8 +149,8 @@ From empty folder to deployed app, all in natural language:
 
 ```
 You: "Make me a simple landing page for my coffee shop and deploy it"
-AI:  Scaffolded a Next.js app, edited the home page, ran the build,
-     deployed live at https://varity.app/coffee-shop/
+AI:  Wrote the landing page, ran the build, deployed live at
+     https://varity.app/coffee-shop/
 
 You: "Now deploy a Telegram bot I can chat with"
 AI:  Need three things: an OpenAI API key, a Telegram bot token (get
