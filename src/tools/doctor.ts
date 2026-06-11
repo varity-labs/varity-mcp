@@ -29,7 +29,7 @@ export function registerDoctorTool(server: McpServer): void {
       description:
         "Check if the developer's environment is ready to build and deploy apps with Varity. " +
         "Verifies Node.js, npm, varitykit CLI, and authentication are properly configured. " +
-        "Run this before varity_init or varity_deploy to catch missing prerequisites early.",
+        "Run this before varity_deploy to catch missing prerequisites early.",
       inputSchema: {},
       annotations: {
         readOnlyHint: true,
@@ -39,7 +39,7 @@ export function registerDoctorTool(server: McpServer): void {
       const checks: Check[] = [];
       const nextSteps: string[] = [];
 
-      // 1. Node.js — require >= 18
+      // 1. Node.js, require >= 18
       const nodeResult = await execCLI("node", ["--version"], { timeout: 10_000 });
       if (nodeResult.exitCode === 0 && nodeResult.stdout) {
         const major = parseMajorVersion(nodeResult.stdout);
@@ -84,7 +84,7 @@ export function registerDoctorTool(server: McpServer): void {
           name: "npm",
           status: "fail",
           message: "npm is not installed",
-          fix: "npm is included with Node.js — install Node.js 18+ from https://nodejs.org",
+          fix: "npm is included with Node.js, install Node.js 18+ from https://nodejs.org",
         });
         nextSteps.push("Install Node.js 18+ from https://nodejs.org (includes npm)");
       }
@@ -102,12 +102,12 @@ export function registerDoctorTool(server: McpServer): void {
             message: `varitykit ${version} detected`,
           });
         } else {
-          // Binary exists but won't run — almost always a Python version mismatch (< 3.10)
+          // Binary exists but won't run, almost always a Python version mismatch (< 3.10)
           checks.push({
             name: "varitykit CLI",
             status: "fail",
             version: "unknown",
-            message: "varitykit is installed but not working — likely a Python version mismatch (check the Python result above)",
+            message: "varitykit is installed but not working, likely a Python version mismatch (check the Python result above)",
             fix: "Ensure Python 3.10+ is active, then reinstall: pip install --upgrade varitykit",
           });
           nextSteps.push("Ensure Python 3.10+ is active (check the Python result), then reinstall: pip install --upgrade varitykit");
@@ -122,7 +122,7 @@ export function registerDoctorTool(server: McpServer): void {
         nextSteps.push("pip install varitykit");
       }
 
-      // 4. Python — only required for varitykit CLI deploys, NOT for MCP tool usage
+      // 4. Python, only required for varitykit CLI deploys, NOT for MCP tool usage
       try {
         const pyCmd = process.platform === "win32" ? "python" : "python3";
         const pyResult = await execCLI(pyCmd, ["--version"], { timeout: 5_000 });
@@ -140,10 +140,10 @@ export function registerDoctorTool(server: McpServer): void {
               name: "Python",
               status: "warn",
               version,
-              message: `Python: Not required for MCP tools (only needed for CLI deploys). Found ${version} — upgrade to 3.10+ if you use varitykit directly.`,
+              message: `Python: Not required for MCP tools (only needed for CLI deploys). Found ${version}, upgrade to 3.10+ if you use varitykit directly.`,
               fix: "Install Python 3.10+ from https://python.org (only needed for direct CLI usage)",
             });
-            // Not added to nextSteps — Python is not required for MCP-based deployment
+            // Not added to nextSteps, Python is not required for MCP-based deployment
           }
         } else {
           checks.push({
@@ -152,7 +152,7 @@ export function registerDoctorTool(server: McpServer): void {
             message: "Python: Not required for MCP tools (only needed for CLI deploys)",
             fix: "Install Python 3.10+ from https://python.org if you plan to use varitykit CLI directly",
           });
-          // Not added to nextSteps — Python is not required for MCP-based deployment
+          // Not added to nextSteps, Python is not required for MCP-based deployment
         }
       } catch {
         checks.push({
@@ -161,10 +161,10 @@ export function registerDoctorTool(server: McpServer): void {
           message: "Python: Not required for MCP tools (only needed for CLI deploys)",
           fix: "Install Python 3.10+ from https://python.org if you plan to use varitykit CLI directly",
         });
-        // Not added to nextSteps — Python is not required for MCP-based deployment
+        // Not added to nextSteps, Python is not required for MCP-based deployment
       }
 
-      // 5. Authentication — check for deploy_key in config
+      // 5. Authentication, check for deploy_key in config
       const apiKey = await getApiKey();
       if (apiKey) {
         checks.push({
@@ -176,17 +176,17 @@ export function registerDoctorTool(server: McpServer): void {
         checks.push({
           name: "Authentication",
           status: "fail",
-          message: "Not authenticated — no deploy key found in ~/.varitykit/config.json",
+          message: "Not authenticated, no deploy key found in ~/.varitykit/config.json",
           fix: "varitykit auth login",
         });
         nextSteps.push("varitykit auth login");
       }
 
-      // 6. GitHub token — required specifically for varity_create_repo
+      // 6. GitHub token, required specifically for varity_create_repo
       // Treated as "warn" (not "fail") because deployment and all other tools work without it.
       // Token resolution order (same as varity_create_repo):
       //   1. GITHUB_TOKEN / GH_TOKEN env var
-      //   2. `gh auth token` (GitHub CLI) — succeeds if gh CLI is installed and authenticated
+      //   2. `gh auth token` (GitHub CLI), succeeds if gh CLI is installed and authenticated
       const githubToken = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
       if (githubToken) {
         checks.push({
@@ -201,60 +201,59 @@ export function registerDoctorTool(server: McpServer): void {
           const ghResult = await execCLI("gh", ["auth", "token"], { timeout: 5_000 });
           ghCliToken = ghResult.exitCode === 0 && !!ghResult.stdout.trim();
         } catch {
-          // gh CLI not available — that's fine
+          // gh CLI not available, that's fine
         }
 
         if (ghCliToken) {
           checks.push({
             name: "GitHub Token",
             status: "pass",
-            message: "GitHub CLI authenticated — varity_create_repo will use 'gh auth token' automatically",
+            message: "GitHub CLI authenticated, varity_create_repo will use 'gh auth token' automatically",
           });
         } else {
           checks.push({
             name: "GitHub Token",
             status: "warn",
-            message: "No GitHub token found — varity_create_repo requires one. Options: (1) install gh CLI and run 'gh auth login', or (2) set GITHUB_TOKEN env var.",
+            message: "No GitHub token found, varity_create_repo requires one. Options: (1) install gh CLI and run 'gh auth login', or (2) set GITHUB_TOKEN env var.",
             fix: "Option 1 (easiest): Install GitHub CLI (https://cli.github.com) and run 'gh auth login'. Option 2: Create a token at https://github.com/settings/tokens (needs 'repo' scope), then set: export GITHUB_TOKEN=ghp_...",
           });
-          // Not added to nextSteps — only blocks varity_create_repo, not deployment
+          // Not added to nextSteps, only blocks varity_create_repo, not deployment
         }
       }
 
-      // 7. RAM check — Next.js 15 builds need ~4 GB free: the build process itself peaks near
-      //    3 GB, and OS baseline + the Node.js MCP host process consume roughly 1 GB on top.
+      // 7. RAM check, Next.js 15 builds peak at ~3 GB
       try {
         const { freemem } = await import("node:os");
         const freeGB = freemem() / (1024 * 1024 * 1024);
-        if (freeGB < 4) {
+        if (freeGB < 3) {
           checks.push({
             name: "RAM",
             status: "warn",
-            message: `Low RAM: ${freeGB.toFixed(1)} GB free. Next.js 15 builds need ~4 GB free (build process peaks near 3 GB, plus ~1 GB for OS and host overhead) — varity_build/varity_deploy may be killed by the OS.`,
+            message: `Low RAM: ${freeGB.toFixed(1)} GB free. Next.js 15 builds peak at ~3 GB, varity_build/varity_deploy may be killed by the OS.`,
             fix: "Close other applications to free memory, or use a machine with more RAM before building.",
           });
         } else {
           checks.push({
             name: "RAM",
             status: "pass",
-            message: `${freeGB.toFixed(1)} GB free (Next.js 15 builds need ~4 GB free — you're good)`,
+            message: `${freeGB.toFixed(1)} GB free (Next.js 15 builds peak at ~3 GB, you're good)`,
           });
         }
       } catch {
-        // Can't check RAM — skip
+        // Can't check RAM, skip
       }
 
       // Tiered readiness:
-      // `devToolsReady` = Node.js + npm work → varity_init, varity_build, varity_dev_server available
-      // `ready` = ALL prerequisites met → varity_deploy works (Node.js + npm + Python + varitykit + auth + RAM)
-      // varity_deploy calls varitykit under the hood and requires Python 3.10+, so it is NOT
-      // available when only Node.js + npm are present. `ready` is the single authoritative signal.
+      // - `ready` = Node.js + npm work → can use varity_init, varity_build, varity_deploy (MCP tools)
+      // - `cli_deploy_ready` = also Python + varitykit + auth + sufficient RAM → can use `varitykit app deploy` CLI directly
+      // Python / varitykit only block the CLI path, NOT the MCP-based varity_deploy tool.
+      // RAM < 3 GB is treated as a build blocker: local Next.js builds OOM at that threshold,
+      // so cli_deploy_ready must be false even though other checks are merely "warn".
       const coreChecks = checks.filter((c) => c.name === "Node.js" || c.name === "npm");
-      const devToolsReady = coreChecks.every((c) => c.status === "pass");
+      const ready = coreChecks.every((c) => c.status === "pass");
       const ramCheck = checks.find((c) => c.name === "RAM");
       const ramSufficient = !ramCheck || (ramCheck.status as string) !== "warn";
-      const ready =
-        devToolsReady &&
+      const cliDeployReady =
         ramSufficient &&
         checks.every((c) => c.status === "pass" || (c.status as string) === "warn");
 
@@ -263,50 +262,52 @@ export function registerDoctorTool(server: McpServer): void {
         (c) => !["Node.js", "npm"].includes(c.name) && (c.status === "fail")
       );
 
-      if (ready) {
+      if (ready && cliDeployReady) {
         return successResponse(
           {
             ready: true,
+            cli_deploy_ready: true,
             checks,
           },
-          "Environment is ready! All prerequisites are met — you can build, develop, and deploy apps with Varity."
+          "Environment is ready! All prerequisites are met, you can build, develop, and deploy apps with Varity."
         );
       }
 
-      if (devToolsReady) {
+      if (ready && !cliDeployReady) {
         const cliFixList = cliIssues.map((c) => c.fix || c.message).filter(Boolean);
 
         if (!ramSufficient && cliIssues.length === 0) {
-          // RAM is the only reason ready is false — all other checks are pass/warn.
+          // RAM is the only reason cli_deploy_ready is false, all other checks are pass/warn.
+          // Surface this prominently so users don't proceed to an OOM kill.
           return successResponse(
             {
-              ready: false,
-              dev_tools_ready: true,
+              ready: true,
+              cli_deploy_ready: false,
               checks,
-              note: "Node.js and npm are ready (varity_init, varity_build, varity_dev_server work). varity_deploy may encounter issues: available RAM is below the ~4 GB needed for a local Next.js 15 build. Dynamic apps automatically fall back to building on cloud infrastructure if the local build fails — so low RAM is not a hard blocker for dynamic deployments.",
+              note: "Environment ready, but available RAM is too low for a local Next.js build (~3 GB peak). Use varity_deploy, builds run on remote infrastructure so local RAM is not a constraint.",
             },
-            "Node.js and npm ready, but RAM may be low for local builds. varity_deploy will fall back to cloud infrastructure for dynamic apps if the local build fails."
+            "Environment ready, but RAM is too low for local builds, close other apps or use varity_deploy (builds run remotely, local RAM is not a constraint)."
           );
         }
 
-        // Node.js + npm work, but Python / varitykit / auth are missing — varity_deploy blocked
+        // Core tools work, but Python / varitykit / auth missing (and possibly RAM too)
         return successResponse(
           {
-            ready: false,
-            dev_tools_ready: true,
+            ready: true,
+            cli_deploy_ready: false,
             checks,
-            note: `Node.js and npm are ready (varity_init, varity_build, varity_dev_server work). varity_deploy requires ${cliIssues.length} more prerequisite${cliIssues.length === 1 ? "" : "s"} — fix the following before deploying:`,
+            note: `Development tools (varity_build, varity_dev_server) are ready. Important: varity_deploy also requires Python 3.10+ and a working varitykit CLI, fix the following ${cliIssues.length} issue${cliIssues.length === 1 ? "" : "s"} before deploying:`,
             cli_issues: cliFixList,
           },
-          `Not ready to deploy yet. Fix ${cliIssues.length} issue${cliIssues.length === 1 ? "" : "s"} to enable deployment: ${cliFixList.join("; ")}`
+          `Ready for development (init, build, dev server work). Fix ${cliIssues.length} issue${cliIssues.length === 1 ? "" : "s"} before deploying: ${cliFixList.join("; ")}`
         );
       }
 
-      // Node.js / npm broken — nothing works
+      // Core tools (Node.js / npm) are broken, nothing works
       return successResponse(
         {
           ready: false,
-          dev_tools_ready: false,
+          cli_deploy_ready: false,
           checks,
           next_steps: nextSteps,
         },

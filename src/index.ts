@@ -11,8 +11,8 @@ import { logger, logHttpRequest } from "./utils/logger.js";
  * Varity MCP Server
  *
  * Transports:
- *   stdio  — For Cursor, Claude Code, Windsurf, VS Code (default)
- *   http   — For Claude.ai, ChatGPT, browser-based clients
+ *   stdio, For Cursor, Claude Code, Windsurf, VS Code (default)
+ *   http, For Claude.ai, ChatGPT, browser-based clients
  *
  * Usage:
  *   npx -y @varity-labs/mcp                             # stdio (default)
@@ -60,7 +60,7 @@ function parseArgs(): ParsedArgs {
 
 function printHelp(): void {
   console.error(`
-@varity-labs/mcp v${VERSION} — Deploy production apps from any AI coding tool
+@varity-labs/mcp v${VERSION} - Deploy production apps from any AI coding tool
 
 USAGE:
   npx -y @varity-labs/mcp [options]
@@ -73,13 +73,11 @@ OPTIONS:
 
 TOOLS:
   varity_search_docs       Search Varity documentation
-  varity_cost_calculator   Compare costs vs AWS/Vercel
-  varity_init              Create a new production app (stdio only)
-  varity_create_repo       Create GitHub repo with template (HTTP/stdio)
+  varity_cost_calculator   Compare your flat monthly cost vs usage-metered hosting
+  varity_create_repo       Create a GitHub repo from your local project (HTTP/stdio)
   varity_deploy            Deploy to production
   varity_deploy_status     Check deployment status
   varity_deploy_logs       Read build/deployment logs
-  varity_submit_to_store   Submit to Varity App Store
 
 CURSOR (.cursor/mcp.json):
   {
@@ -199,7 +197,7 @@ async function startHttp(port: number): Promise<void> {
           return;
         }
 
-        // New session — create a fresh server + transport pair
+        // New session, create a fresh server + transport pair
         if (req.method === "POST" && !sessionId) {
           const sessionServer = createVarityServer("http");
           const transport = new StreamableHTTPServerTransport({

@@ -1,29 +1,28 @@
 # CLAUDE.md — varity-mcp-standalone
 
-## What this repo is
-**The CANONICAL home of `@varity-labs/mcp`** — the thin MCP server that shells to `varitykit`. Develop MCP changes HERE, then sync them into the mirror at `../varity-sdk-private/packages/cli/varity-mcp/` (keep both aligned, at least for now). Publishes to npm via `varity-labs/varity-mcp`. **Public repo.**
+The CANONICAL home of **`@varity-labs/mcp`** (npm, public repo) — the thin MCP server that shells to `varitykit`. Same engine, no second implementation; the orchestration lives in `varitykit` / the gateway, never here.
 
-## What Varity is (don't drift from this)
-**Predictable-price cloud platform.** Bill on day 1 = bill on day 1000. Usage-metered cloud platforms scale their bills 5-40× with traffic; Varity charges for hardware reserved on a decentralized compute network, so cost is structural and flat. The wedge = **COGS predictability at scale** (structural moat — competitors' COGS floor is AWS). **For anyone deploying anything (non-coders, developers, businesses); never pre-filter the audience in copy.** GTM = product-led growth, B2C-first with B2B in parallel. Internal GTM segmentation (NOT headline copy): solopreneurs, indie hackers, agencies, bootstrapped startups, AI agent builders; vibe coders/non-coders are top-of-funnel via the free static tier. Internally a **DePIN orchestration protocol** that abstracts ALL blockchain complexity — NEVER user-facing. Product = exactly 2 packages: `varitykit` (PyPI) + this MCP. The MCP is a thin wrapper; the orchestration runs in `varitykit`/the gateway, never here.
+## STATUS (verified 2026-06-09)
+Live and published to npm (`latest` + `beta`). Develop MCP changes HERE, then sync them into the in-repo mirror at `../varity-sdk-private/packages/cli/varity-mcp/` — keep both aligned on every change. For the published version + tool count, see the manifest `product.packages."@varity-labs/mcp"` (do not restate here).
 
-**Brand-voice rule:** declarative positioning, NOT comparative. Don't name competitors (Vercel/Render/Railway/etc.) in user-facing surfaces — frame the moat as "usage-based billing vs flat hardware-reserved." Competitor names are fine internally (this file, architecture docs, investor materials) and in operational features (`varitykit migrate` is explicitly Vercel-migration).
+## WIRES IN
+- **Downstream (this calls):** shells `varitykit` for every deploy operation; `varity_cost_calculator` hits the gateway `/api/pricing`. It does NOT talk to Akash/IPFS/db-proxy directly — those are reached only through `varitykit` / the gateway.
+- **Upstream (calls this):** AI coding tools — Claude Code / Cursor / Codex — via MCP (stdio + HTTP transport).
+- **Where it sits in the architecture:** one of the **two** products (`varitykit` + this MCP) and the secondary distribution channel (MCP-in-AI-IDE; the Developer Portal is primary PLG). It is a thin client over the same deploy engine, so it inherits the honest deploy surface and feeds the same deployment telemetry / orchestration path.
+- Exact backend versions / DSEQs / health (gateway, deploy-api, etc.): `../varity.manifest.yaml` → `state.services`. Never hardcode them here.
 
-## Canonical sources (the truth; read in order)
-1. `../CLAUDE.md` — workspace scope + in-scope/ignore repo map
-2. `../POSITIONING.md` — voice, persona, forbidden vocabulary (applies to ALL tool descriptions + responses)
-3. `../PRICING-MODEL-CANONICAL.md` — the ONLY authority for cost claims (the `varity_cost_calculator` tool calls the gateway `/api/pricing`; copy must match)
-4. `../varity.manifest.yaml` — structured truth
+## SOURCE OF TRUTH
+- `../varity.manifest.yaml` — versions, scope, capability, services registry (wins on operational conflict).
+- `../CLAUDE.md` — workspace scope + in-scope/ignore map + guardrails.
+- `../POSITIONING.md` — voice + forbidden vocabulary (applies to every tool description and response).
+- `../PRICING-MODEL-CANONICAL.md` — the only authority for cost claims (the cost-calculator tool must match).
 
-## Facts (verified 2026-05-20)
-- Published: `2.0.0-beta.23` on npm (`latest` + `beta`). **18 tools** (not 16 — older docs say 16).
-- Bump-both when publishing: `package.json` version AND `src/server.ts` `VERSION` const.
+## Repo-specific operational facts
+- Build: `npm run build` (tsc). Dev: `npm run dev` (tsc --watch). HTTP transport: `npm run start:http` (port 3100).
+- Bin: `varity-mcp` → `dist/index.js`.
+- Publish (founder action): bump BOTH `package.json` version AND `src/server.ts` `VERSION`, `npm publish --tag beta --access public`, then sync the change into the in-repo mirror.
 
-## Known stale content to fix
-- README / tool descriptions mentioning "16 tools", SDK/blockchain, "cheaper than AWS", or `varity_init` as a promoted beta path → correct/remove.
-- Any reference to the retired `varity-labs/varity-sdk` monorepo or `sync-to-public.sh`.
-
-## Guardrails
-- Zero blockchain UX in tool descriptions or responses (no addresses, hashes, chain IDs, AKT/USDC).
-- Never claim a tool not actually registered in `src/server.ts`.
-- Never let responses leak ANSI codes, raw stack traces, or platform-specific paths.
-- Cost copy: fixed-hardware framing, vs Vercel/Render/Railway, cite `PRICING-MODEL-CANONICAL.md`.
+## IGNORE-HERE (dormant / out of scope)
+- Any tool/description referencing the App Store / submit-to-store, the SDK / ui-kit / types, `create-varity-app`, or SaaS-template scaffolding — dormant `sdk_pre_investment`, not the product, never promoted to users.
+- Any blockchain/crypto/DePIN/wallet/AKT/USDC vocabulary in tool descriptions or responses — forbidden user-facing.
+- The retired `varity-labs/varity-sdk` open-source monorepo and `sync-to-public.sh` — the public MCP ships from THIS repo, not there.

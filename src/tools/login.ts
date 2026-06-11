@@ -3,7 +3,6 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { execVaritykit, execCLI } from "../utils/cli-bridge.js";
 import { INFRASTRUCTURE, isAuthenticated } from "../utils/config.js";
-import { stripAnsi } from "../utils/strip-ansi.js";
 
 export function registerLoginTool(server: McpServer): void {
   server.registerTool(
@@ -20,7 +19,7 @@ export function registerLoginTool(server: McpServer): void {
           .optional()
           .describe(
             "Your deploy key from the Varity developer portal (developer.store.varity.so/dashboard/settings). " +
-            "If omitted, this tool opens the settings page in your browser — copy your key from there, " +
+            "If omitted, this tool opens the settings page in your browser, copy your key from there, " +
             "then call varity_login again with the key."
           ),
       },
@@ -44,8 +43,8 @@ export function registerLoginTool(server: McpServer): void {
           );
         }
 
-        // Login failed — surface the CLI error clearly
-        const output = stripAnsi((result.stderr || result.stdout || "").trim());
+        // Login failed, surface the CLI error clearly
+        const output = (result.stderr || result.stdout || "").trim();
         return errorResponse(
           "LOGIN_FAILED",
           `Login failed: ${output || "Invalid deploy key or authentication error."}`,
@@ -53,7 +52,7 @@ export function registerLoginTool(server: McpServer): void {
         );
       }
 
-      // No key provided — check if already authenticated
+      // No key provided, check if already authenticated
       const alreadyAuthenticated = await isAuthenticated();
       if (alreadyAuthenticated) {
         return successResponse(
@@ -62,11 +61,11 @@ export function registerLoginTool(server: McpServer): void {
             already_logged_in: true,
             next_step: "You are already logged in. Call varity_deploy when ready, or call varity_doctor to verify your full setup.",
           },
-          "Already logged in to Varity. Your deploy key is configured — call varity_deploy when ready."
+          "Already logged in to Varity. Your deploy key is configured, call varity_deploy when ready."
         );
       }
 
-      // No key provided — open the settings page so the user can copy their key
+      // No key provided, open the settings page so the user can copy their key
       const settingsUrl = `${INFRASTRUCTURE.DEVELOPER_PORTAL}/dashboard/settings`;
 
       const isHeadless =
@@ -81,10 +80,10 @@ export function registerLoginTool(server: McpServer): void {
             headless_environment: true,
             settings_url: settingsUrl,
             next_step:
-              "Headless environment detected — browser cannot open automatically. " +
+              "Headless environment detected, browser cannot open automatically. " +
               "Get your deploy key from the settings URL, then call varity_login with: deploy_key: \"<your-key>\"",
           },
-          `Headless environment detected — browser cannot open automatically.\n\nTo log in:\n1. Open on any browser: ${settingsUrl}\n2. Add a payment method if prompted\n3. Copy your deploy key from the Settings page\n4. Call varity_login again with: deploy_key: "<your-key>"`
+          `Headless environment detected, browser cannot open automatically.\n\nTo log in:\n1. Open on any browser: ${settingsUrl}\n2. Add a payment method if prompted\n3. Copy your deploy key from the Settings page\n4. Call varity_login again with: deploy_key: "<your-key>"`
         );
       }
 
@@ -98,7 +97,7 @@ export function registerLoginTool(server: McpServer): void {
         const openResult = await execCLI(command, args, { timeout: 10_000 });
         browserOpened = openResult.exitCode === 0;
       } catch {
-        // Browser open failure is non-fatal — the URL is still returned
+        // Browser open failure is non-fatal, the URL is still returned
       }
 
       const message = browserOpened

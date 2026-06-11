@@ -4,7 +4,6 @@ import { resolve } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { execCLI } from "../utils/cli-bridge.js";
-import { stripAnsi } from "../utils/strip-ansi.js";
 
 /** Check if a directory exists. */
 async function dirExists(dir: string): Promise<boolean> {
@@ -43,7 +42,7 @@ async function detectOutputDir(cwd: string): Promise<{ dir: string; isDeployable
     if (await dirExists(resolve(cwd, "out"))) {
       return { dir: "out", isDeployable: true };
     }
-    // Build ran but out/ not yet created — check .next/ as fallback
+    // Build ran but out/ not yet created, check .next/ as fallback
     if (await dirExists(resolve(cwd, ".next"))) {
       return { dir: ".next", isDeployable: false };
     }
@@ -174,70 +173,54 @@ export function registerBuildTool(server: McpServer): void {
         return errorResponse(
           "PATH_NOT_FOUND",
           `Project directory does not exist: ${cwd}`,
-          "Check the path and ensure the project has been created (use varity_init first)."
+          "Check the path and ensure the project directory exists and contains a package.json."
         );
       }
 
       // Verify package.json exists and has a build script
       const packageJsonPath = resolve(cwd, "package.json");
-      let buildBinaryName: string | null = null;
       try {
         const raw = await readFile(packageJsonPath, "utf-8");
         const pkg = JSON.parse(raw);
         if (!pkg.scripts?.build) {
-          // For server apps (Express, Fastify, etc.) no build step is needed — just verify the entry point exists.
-          // Try pkg.main first, then the Node.js default (index.js), then common server conventions.
-          const entryPointCandidates: string[] = [
-            ...(pkg.main ? [pkg.main] : []),
-            "index.js",
-            "server.js",
-            "app.js",
-          ];
-          let detectedEntry: string | null = null;
-          for (const candidate of entryPointCandidates) {
-            try {
-              await access(resolve(cwd, candidate));
-              detectedEntry = candidate;
-              break;
-            } catch { /* not found, try next */ }
-          }
-          if (detectedEntry !== null) {
+          // For server apps (Express, Fastify, etc.) no build step is needed, just verify the entry point exists
+          const mainFile = pkg.main || "server.js";
+          try {
+            await access(`${cwd}/${mainFile}`);
             return successResponse({
               deployable_output: true,
               framework: "nodejs",
-              entry_point: detectedEntry,
+              entry_point: mainFile,
               note: "This is a server application. Use varity_deploy to deploy it directly."
-            }, `Server app detected (${detectedEntry}) — no build step needed. Ready to deploy.`);
+            }, `Server app detected (${mainFile}), no build step needed. Ready to deploy.`);
+          } catch {
+            return errorResponse(
+              "NO_BUILD_SCRIPT",
+              'No "build" script found in package.json and no server entry point detected.',
+              'Add a build script (e.g., "build": "next build") or ensure server.js/index.js exists.'
+            );
           }
-          return errorResponse(
-            "NO_BUILD_SCRIPT",
-            'No "build" script found in package.json and no server entry point detected.',
-            'Add a build script (e.g., "build": "next build") or ensure index.js/server.js/app.js exists.'
-          );
         }
-        // Capture the framework binary for a proactive executability check below
-        const buildCmd = (pkg.scripts.build as string).trim().split(/\s+/)[0] ?? null;
-        if (buildCmd && !buildCmd.includes("/")) buildBinaryName = buildCmd;
       } catch {
-        // Python projects legitimately have no package.json — build is not needed
+        // Python projects legitimately have no package.json, build is not needed
         const pythonIndicators = ["requirements.txt", "pyproject.toml", "setup.py", "Pipfile", "setup.cfg"];
         for (const indicator of pythonIndicators) {
           try {
             await access(resolve(cwd, indicator));
             return successResponse(
               { deployable_output: true, framework: "python", build_needed: false },
-              "Python project detected — no build step needed. Use varity_deploy to deploy directly."
+              "Python project detected, no build step needed. Use varity_deploy to deploy directly."
             );
           } catch { /* not found, try next */ }
         }
         return errorResponse(
           "NO_PACKAGE_JSON",
           `No package.json found in: ${cwd}`,
-          "Ensure you are in a project directory with a package.json file. Use varity_init to create a new project."
+          "Ensure you are in a project directory with a package.json file."
         );
       }
 
-      // Detect missing node_modules before running — produces a clear error instead of
+      // Detect missing node_modules before running, produces a clear error instead of
       // the confusing "sh: next: not found" that parseBuildErrors won't recognize.
       try {
         await access(resolve(cwd, "node_modules"));
@@ -249,20 +232,6 @@ export function registerBuildTool(server: McpServer): void {
         );
       }
 
-      // Proactive binary check — consistent with varity_install_deps: if the framework binary
-      // is missing or a broken symlink, report it before npm even tries to execute it.
-      if (buildBinaryName) {
-        try {
-          await access(resolve(cwd, "node_modules", ".bin", buildBinaryName));
-        } catch {
-          return errorResponse(
-            "MISSING_BINARIES",
-            `The build binary '${buildBinaryName}' is missing or not accessible in node_modules/.bin. node_modules may be in a broken state.`,
-            "Call varity_install_deps to reinstall all dependencies, then try building again."
-          );
-        }
-      }
-
       const result = await execCLI("npm", ["run", "build"], {
         cwd,
         timeout: 300_000, // 5 minutes
@@ -270,7 +239,7 @@ export function registerBuildTool(server: McpServer): void {
         env: { ...process.env, NODE_OPTIONS: "--max-old-space-size=4096" },
       });
 
-      const output = stripAnsi(result.stdout + "\n" + result.stderr);
+      const output = result.stdout + "\n" + result.stderr;
       const errors = parseBuildErrors(output);
 
       if (result.exitCode === 0) {
@@ -284,7 +253,7 @@ export function registerBuildTool(server: McpServer): void {
         const largeBundles = parseLargeBundles(output);
         const bundleWarnings = largeBundles.map(
           (b) =>
-            `ℹ ${b.route}: First Load JS is ${b.label}. For Varity dashboard apps, bundles up to ~700 kB are expected — the auth and UI framework account for most of this. Next.js code-splits per route so users only download what each page needs. No action required.`
+            `ℹ ${b.route}: First Load JS is ${b.label}. For Varity dashboard apps, bundles up to ~700 kB are expected, the auth and UI framework account for most of this. Next.js code-splits per route so users only download what each page needs. No action required.`
         );
 
         // Determine the right message based on output type
@@ -292,7 +261,7 @@ export function registerBuildTool(server: McpServer): void {
         if (outputInfo?.dir === "out") {
           successMsg = `Build succeeded! Deployable output in out/. Run varity_deploy to deploy.`;
         } else if (outputInfo?.dir === ".next" && !outputInfo.isDeployable) {
-          successMsg = `TypeScript compilation succeeded (.next/ created). Static export (out/) was not produced — this may indicate an issue with output: 'export' configuration. Run varity_deploy to attempt a full deploy.`;
+          successMsg = `TypeScript compilation succeeded (.next/ created). Static export (out/) was not produced, this may indicate an issue with output: 'export' configuration. Run varity_deploy to attempt a full deploy.`;
         } else if (outputInfo) {
           successMsg = `Build succeeded! Output in ${outputInfo.dir}/. Run varity_deploy to deploy.`;
         } else {
@@ -321,7 +290,7 @@ export function registerBuildTool(server: McpServer): void {
         );
       }
 
-      // Build failed — always include the raw tail of output so the developer
+      // Build failed, always include the raw tail of output so the developer
       // can see the actual failure reason (OOM kill, TypeScript error, missing import, etc.)
       const rawTail = output.slice(-2000);
       const errorSummary =
@@ -337,34 +306,15 @@ export function registerBuildTool(server: McpServer): void {
         )
         ? "A framework binary is missing from node_modules/.bin. Run varity_install_deps to reinstall all dependencies, then try building again."
         : errors.some((e) => e.includes("Cannot find module") || e.includes("Module not found"))
-          ? (
-              // @tanstack/react-query is a peer dep of wagmi (via ui-kit) that npm sometimes
-              // hoists into ui-kit/node_modules instead of the top-level. Install it explicitly.
-              output.includes("@tanstack/react-query") || output.includes("react-query")
-                ? "A required peer dependency is missing. Call `varity_install_deps({ packages: ['@tanstack/react-query'] })` to install it, then try building again."
-                : "A required dependency is missing. Call `varity_install_deps` to reinstall all dependencies, then try building again. If the error persists, ensure your next.config.js has the resolve.alias stubs from the Varity template (run varity_init to get the correct config)."
-            )
+          ? "A required dependency is missing. Call `varity_install_deps` to reinstall all dependencies, then try building again."
           : errors.some((e) => e.includes("Type error") || e.includes("TypeScript"))
-          ? (
-              // Detect the specific cast pattern generated by varity_add_collection for FK reference fields.
-              // TypeScript 5 rejects `(item as Record<string, string>)` when the item type has non-string fields.
-              // The fix is a one-liner: replace the cast with `(item as any)`.
-              errors.some((e) => e.includes("Conversion of type") || output.includes("Conversion of type") || output.includes("Record<string, string>"))
-                ? "TypeScript type error in a generated page. This is caused by a known codegen pattern in varity_add_collection. To fix:\n" +
-                  "  In the failing file, find any line with '(item as Record<string, string>)'\n" +
-                  "  Replace it with: (item as any)\n" +
-                  "  Example:\n" +
-                  "    Before: (item as Record<string, string>).name ?? ...\n" +
-                  "    After:  (item as any).name ?? ...\n" +
-                  "  The generated page should compile after this one-line fix."
-                : "Fix the TypeScript errors shown above, then try building again."
-            )
+          ? "Fix the TypeScript errors shown above, then try building again."
           : output.includes("Permission denied") || output.includes("EACCES")
-          ? "A file permission error occurred — the build binary may not be executable. Call varity_install_deps to reinstall all dependencies, then try building again."
+          ? "A file permission error occurred, the Next.js binary may not be executable. Fix by running: rm -rf node_modules && npm install, then try building again."
           : output.includes("ENOSPC") || output.includes("no space left")
-          ? "The build failed because the disk is full. Free up disk space on your machine, then try building again."
-          : output.includes("Killed") || output.includes("out of memory") || output.includes("heap out of memory") || output.includes("Bus error")
-          ? "The build ran out of memory. Close other applications to free RAM (Next.js 15 builds need ~4 GB free), then try again."
+          ? "The build failed because the disk is full. Free up disk space (run `df -h` to check) and try again."
+          : output.includes("Killed") || output.includes("out of memory") || output.includes("heap out of memory")
+          ? "The build ran out of memory. Close other applications to free RAM, then try again."
           : "Fix the errors above and try building again.";
 
       return errorResponse("BUILD_FAILED", errorSummary, fixSuggestion);

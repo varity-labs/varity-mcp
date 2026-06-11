@@ -4,7 +4,13 @@ import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { getDeploymentsDir } from "../utils/config.js";
-import { stripAnsi } from "../utils/strip-ansi.js";
+
+/** Strip ANSI escape codes so log lines render cleanly in MCP clients. */
+// eslint-disable-next-line no-control-regex
+const ANSI_RE = /\x1b\[[0-9;]*[mGKHF]|\x1b\][^\x07]*\x07|\x1b[()][0-9A-Z]/g;
+function stripAnsi(text: string): string {
+  return text.replace(ANSI_RE, "");
+}
 
 export function registerDeployLogsTool(server: McpServer): void {
   server.registerTool(
@@ -17,7 +23,7 @@ export function registerDeployLogsTool(server: McpServer): void {
         "When only the deployment record exists, returns a structured summary receipt: " +
         "URL, status, build size, build time, and a debug_tip pointing to varity_build for detailed output. " +
         "Use this to get the live URL, check status, or confirm build metrics for a deployment. " +
-        "For detailed build error output (TypeScript errors, module-not-found, etc.), use varity_build — " +
+        "For detailed build error output (TypeScript errors, module-not-found, etc.), use varity_build, " +
         "it captures the full compilation log with exact file/line numbers.",
       inputSchema: {
         deployment_id: z
@@ -52,14 +58,6 @@ export function registerDeployLogsTool(server: McpServer): void {
           const truncated = lines.slice(-limit);
 
           const annotatedLines = truncated.map((line) => {
-            // Rewrite CLI command references to MCP equivalents so log output
-            // makes sense when read through varity_deploy_logs.
-            if (line.includes("varitykit app deploy --submit-to-store")) {
-              return line.replace(
-                /varitykit app deploy --submit-to-store/g,
-                "varity_submit_to_store (MCP tool)"
-              );
-            }
             // Annotate the "shared development database" build-phase message so
             // developers reading post-deploy logs are not misled into thinking
             // their production app lacks a private database (DX-005).
@@ -132,14 +130,14 @@ export function registerDeployLogsTool(server: McpServer): void {
             total_lines: summaryLines.length,
             source: "deployment_record",
             deployment_info: {
-              // Always use clean varity.app URL — never expose raw IPFS or provider URLs
+              // Always use clean varity.app URL, never expose raw IPFS or provider URLs
               url: liveUrl,
               status: buildInfo.success ? "deployed" : "unknown",
               timestamp: data.timestamp || data.deployed_at,
               build_time: buildInfo.time_seconds ? `${buildInfo.time_seconds.toFixed(1)}s` : undefined,
               build_size: buildInfo.size_mb ? `${buildInfo.size_mb.toFixed(1)} MB` : undefined,
             },
-            debug_tip: "Full build logs are not stored for this deployment. To see detailed build output, use the varity_build tool — it captures compilation errors with exact file and line numbers.",
+            debug_tip: "Full build logs are not stored for this deployment. To see detailed build output, use the varity_build tool, it captures compilation errors with exact file and line numbers.",
           },
           `Build summary for deployment ${deployment_id}. Use varity_build to capture detailed compilation output.`
         );

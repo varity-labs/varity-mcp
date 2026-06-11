@@ -1,12 +1,15 @@
 # @varity-labs/mcp
 
 [![npm](https://img.shields.io/npm/v/@varity-labs/mcp)](https://www.npmjs.com/package/@varity-labs/mcp)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/varity-labs/varity-sdk/blob/main/LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/varity-labs/varity-mcp/blob/main/LICENSE)
 [![Status: Beta](https://img.shields.io/badge/Status-Beta-yellow.svg)](https://github.com/varity-labs/varity-mcp)
 
-> Build and deploy apps from AI coding tools including Cursor, Claude Code, VS Code, ChatGPT, and Windsurf.
+> Deploy production apps and AI agents from Cursor, Claude Code, VS Code, Windsurf, or ChatGPT. Flat predictable pricing — your bill stays the same as your app grows.
 
-The Varity MCP Server is a development layer for AI editors. It provides SDK knowledge, development tools, and deployment automation so your AI can build complete apps with auth, database, and hosting configuration support.
+The Varity MCP Server lets your AI editor scaffold, deploy, and manage apps in production for you. Flat monthly cost per app, locked at deploy time based on hardware reserved — no usage-based billing, no surprise overages. One server, every AI client, zero commands.
+
+**Browser usage**: see the [browser usage guide](https://docs.varity.so/ai-tools/browser-usage) for Claude.ai or ChatGPT browser.
+**Quick start**: pick your editor below and run one command.
 
 ## Install
 
@@ -38,7 +41,9 @@ claude mcp add varity -- npx -y @varity-labs/mcp
 3. Command: `npx -y @varity-labs/mcp`
 4. Name: `Varity`
 
-### Windsurf / OpenClaw / Any MCP client
+### Windsurf
+
+Add to `mcp_config.json`:
 
 ```json
 {
@@ -51,90 +56,150 @@ claude mcp add varity -- npx -y @varity-labs/mcp
 }
 ```
 
-## What's Included
+### Claude.ai / ChatGPT (HTTP)
 
-### 5 SDK Resources
-
-Your AI gets complete knowledge of the Varity SDK - no searching, no guessing:
-
-| Resource | Content |
-|----------|---------|
-| `varity://sdk/database` | Collection CRUD API, QueryOptions, Document types, React hook patterns |
-| `varity://sdk/auth` | PrivyStack, usePrivy, ProtectedRoute, LoginButton, provider setup |
-| `varity://sdk/ui-components` | 52+ components with props, types, and usage examples |
-| `varity://sdk/patterns` | Canonical app patterns - file structure, CRUD pages, auth wrapping |
-| `varity://sdk/deploy` | Deployment reference, App Store submission, revenue split |
-
-### 15 Tools
-
-| Tool | Description | Transport |
-|------|-------------|-----------|
-| **Development** | | |
-| `varity_init` | Create a new app (auto-installs dependencies) | stdio |
-| `varity_install_deps` | Install npm packages | stdio |
-| `varity_add_collection` | Add database collection with types, accessor, hook, and optional page | stdio |
-| `varity_build` | Build for production | stdio |
-| `varity_dev_server` | Start/stop local dev server | stdio |
-| `varity_open_browser` | Open URL in default browser | stdio |
-| **Deployment** | | |
-| `varity_login` | Authenticate with deploy key or browser | all |
-| `varity_deploy` | Deploy to production (orchestration algorithm auto-selects hosting) | all |
-| `varity_deploy_status` | Check deployment status | all |
-| `varity_deploy_logs` | View build logs | all |
-| `varity_submit_to_store` | Submit to Varity App Store | all |
-| `varity_create_repo` | Create GitHub repo and push code | all |
-| **Info** | | |
-| `varity_doctor` | Check environment prerequisites | all |
-| `varity_search_docs` | Search tutorials and guides | all |
-| `varity_cost_calculator` | Generate deployment cost estimates | all |
-
-### 3 Workflow Prompts
-
-| Prompt | What it does |
-|--------|-------------|
-| `build-app` | Full workflow: scaffold → add collections → build pages → deploy |
-| `add-feature` | Add a feature to an existing app |
-| `deploy-and-monetize` | Build → deploy → submit to App Store |
-
-## End-to-End Workflow
-
-Describe what you want. The AI handles everything:
+Use the hosted server URL:
 
 ```
-You: "Build me a client invoice tracker and deploy it with Varity"
-AI:  ✅ Built Express API with invoice routes
-     ✅ Added database collections (clients, invoices, payments)
-     ✅ Orchestration detected dynamic app hosting requirements
-     ✅ Deployed with postgres + redis → https://invoice-tracker.varity.app
-     ✅ Submitted to App Store
+https://mcp.varity.so
 ```
 
-No terminal commands. No configuration. No DevOps.
+### Any MCP-compatible client (stdio)
 
-## What Makes This Different
+```json
+{
+  "mcpServers": {
+    "varity": {
+      "command": "npx",
+      "args": ["-y", "@varity-labs/mcp"]
+    }
+  }
+}
+```
 
-| | Traditional MCP | Varity MCP |
-|---|---|---|
-| AI knows the SDK | Searches docs | Full API reference always in context |
-| Create apps | Scaffold only | Scaffold + auto-install deps |
-| Database setup | Manual | `varity_add_collection` - types, hook, page |
-| Build | Manual `npm run build` | `varity_build` tool |
-| Deploy | Manual commands | `varity_deploy` (auto-builds first) |
-| Auth | Configure yourself | Zero-config, auto-injected |
-| Cost insight | Basic estimates | `varity_cost_calculator` estimates |
-| Store publishing | Not available | `varity_submit_to_store` available |
+## What you can do from your AI editor
+
+The MCP exposes Varity's deploy surface so your AI tool can take action — not just generate code. Try prompts like:
+
+**Deploy your own code**
+- "Deploy this project to production"
+- "Ship this app live"
+- "What would it cost to deploy this on Varity?"
+
+**Deploy a ready-made AI agent (one command, no code required)**
+- "Deploy a Telegram chatbot for me"
+- "Spin up Agent Zero"
+- "I want a Claude-compatible chat UI"
+- "What AI agents can Varity deploy?"
+
+**Manage live deployments**
+- "Show my deployments"
+- "What's the URL of my last deploy?"
+- "Stop my-app and stop billing it"
+- "Get the build logs for my deployment"
+
+**Migrate from Vercel**
+- "Migrate my Vercel app at github.com/me/my-app to Varity"
+- "Preview what changes the migration will make"
+
+**Docs and pricing**
+- "Search Varity docs for environment variables"
+- "How much would it cost to host a 5,000-user API on Varity?"
+- "What's my monthly cost going to be if my app gets traction?"
+
+## Tools
+
+| Tool | What it does |
+|---|---|
+| `varity_search_docs` | Search the Varity documentation |
+| `varity_cost_calculator` | Estimate your monthly cost before you deploy |
+| `varity_doctor` | Check that your environment is ready to deploy |
+| `varity_login` | Authenticate with your deploy key |
+| `varity_init` | Scaffold a new Next.js project |
+| `varity_install_deps` | Install project dependencies |
+| `varity_build` | Build the project |
+| `varity_open_browser` | Open a URL locally (stdio transports only) |
+| `varity_dev_server` | Start the local development server (stdio transports only) |
+| `varity_create_repo` | Create a GitHub repository and push the project |
+| `varity_deploy` | Deploy the current project to production |
+| `varity_deploy_status` | Check the status of a deployment |
+| `varity_deploy_logs` | Read build and runtime logs |
+| `varity_delete_deployment` | Stop a deployment and end its billing |
+| `varity_list_agents` | List the curated AI agent templates Varity can deploy |
+| `varity_agent_info` | Show full details for one AI agent template (env vars, ports, cost) |
+| `varity_deploy_agent` | Deploy a curated AI agent template by name |
+| `varity_migrate` | Migrate an app from Vercel to Varity |
+
+## AI agent templates
+
+Varity ships 5 curated AI agent templates that deploy with one command and no code from you:
+
+| Agent | What it is |
+|---|---|
+| `hermes` | Self-hosted Telegram chatbot powered by an LLM |
+| `openclaw` | Claude-compatible web chat UI with persistent history |
+| `agent-zero` | General-purpose AI agent framework — zero required env vars |
+| `autoresearch` | GPU-backed CUDA workstation (SSH access) |
+| `eliza-venice` | ElizaOS agent for Twitter/X automation |
+
+Ask your AI editor "what AI agents can I deploy?" or "deploy hermes for me" and it will use the agent tools above. Each agent reserves different hardware — use `varity_agent_info <name>` to see current monthly cost. Each agent also has a small set of required environment variables (e.g. a Telegram bot token, an API key) that the AI editor will prompt you for.
+
+## End-to-end example
+
+From empty folder to deployed app, all in natural language:
+
+```
+You: "Make me a simple landing page for my coffee shop and deploy it"
+AI:  Scaffolded a Next.js app, edited the home page, ran the build,
+     deployed live at https://varity.app/coffee-shop/
+
+You: "Now deploy a Telegram bot I can chat with"
+AI:  Need three things: an OpenAI API key, a Telegram bot token (get
+     one from @BotFather), and your Telegram user ID.
+You: (provides them)
+AI:  Deployed hermes agent at https://varity.app/my-bot/
+     Send a message to your bot on Telegram to chat with it.
+```
+
+## How Varity is priced
+
+- **Flat monthly cost per app**: locked at deploy time, based on the hardware your app reserves. Your bill on day 1 equals your bill on day 1000.
+- **No usage-based billing**: cost doesn't change with traffic, requests, bandwidth, or build minutes. No surprise overages.
+- **No plan tiers**: every feature is in every account; you don't pay for "Pro" to unlock anything.
+
+Ask your AI editor "how much would this app cost on Varity?" and it will use `varity_cost_calculator` to estimate before you deploy.
+
+## Transports
+
+### stdio (default)
+
+For desktop AI editors. Cursor, Claude Code, VS Code, Windsurf.
+
+```bash
+npx -y @varity-labs/mcp
+```
+
+### HTTP
+
+For browser-based AI tools. Claude.ai, ChatGPT.
+
+```bash
+npx -y @varity-labs/mcp --transport http --port 3100
+```
+
+Hosted at `https://mcp.varity.so` — connect directly from any HTTP-capable MCP client.
 
 ## Prerequisites
 
 - **Node.js** >= 18
-- **For deployment**: `pip install varitykit` + `varitykit login`
+- **For deployment**: `pip install varitykit`
 
 ## Cost
 
-Use `varity_cost_calculator` for project-specific estimates.
+Varity charges a flat monthly price per app, locked at deploy time based on the hardware reserved. Your bill doesn't grow with your traffic, requests, or build minutes. Use the `varity_cost_calculator` tool from your AI editor for a detailed estimate before you deploy.
 
 ---
 
-**Part of the [Varity SDK](https://github.com/varity-labs/varity-sdk)**.
+**Deploy any app from your AI coding tool.** Flat predictable pricing — your bill stays the same as your app grows.
 
 [Documentation](https://docs.varity.so/ai-tools/mcp-server-spec) · [GitHub](https://github.com/varity-labs/varity-mcp) · [Discord](https://discord.gg/7vWsdwa2Bg)

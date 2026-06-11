@@ -55,6 +55,5 @@ export function getConfigDir(): string {
 export const INFRASTRUCTURE = {
   GATEWAY: "https://varity.app",
   DOCS: "https://docs.varity.so",
-  APP_STORE: "https://store.varity.so",
   DEVELOPER_PORTAL: "https://developer.store.varity.so",
 } as const;

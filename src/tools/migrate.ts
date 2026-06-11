@@ -6,10 +6,15 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { execCLI, execVaritykit } from "../utils/cli-bridge.js";
 import { getDeploymentsDir } from "../utils/config.js";
-import { stripAnsi } from "../utils/strip-ansi.js";
 
 function isGitHubUrl(url: string): boolean {
   return /^https?:\/\/github\.com\/|^git@github\.com:/.test(url);
+}
+
+/** Strip ANSI escape codes from CLI output for clean parsing. */
+function stripAnsi(text: string): string {
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/\x1B\[[0-9;]*[mGKHF]/g, "").replace(/\x1B\[\?[0-9]+[hl]/g, "");
 }
 
 /** Extract the deployed URL from varitykit deploy output or the deployments dir. */
@@ -21,18 +26,19 @@ async function extractDeployUrl(output: string): Promise<string> {
     const jsonFiles = files.filter((f) => f.endsWith(".json")).sort().reverse();
     if (jsonFiles.length > 0) {
       const latest = JSON.parse(await readFile(join(deploymentsDir, jsonFiles[0]!), "utf-8"));
-      const url =
-        latest.custom_domain?.url ||
-        latest.akash?.url ||
-        latest.url ||
-        latest.ipfs?.gateway_url;
-      if (url) return url;
+      // Always surface the clean varity.app URL — never a raw provider/IPFS host.
+      if (latest.custom_domain?.url) return latest.custom_domain.url;
+      const slug = latest.custom_domain?.subdomain || latest.app_name || latest.project_name;
+      if (slug) return `https://varity.app/${slug}/`;
+      if (typeof latest.url === "string" && latest.url.startsWith("https://varity.app")) {
+        return latest.url;
+      }
     }
   } catch {
     // fall through to regex
   }
-  // Fallback: grep the output for a URL
-  const match = output.match(/https?:\/\/[^\s]+\.(?:varity\.app|akash[^\s]*)/i);
+  // Fallback: grep the output for a varity.app URL only.
+  const match = output.match(/https?:\/\/varity\.app\/[^\s)]+/i);
   return match?.[0] ?? "";
 }
 
@@ -142,7 +148,7 @@ export function registerMigrateTool(server: McpServer): void {
 
       if (cloneResult.exitCode !== 0) {
         await rm(cloneDir, { recursive: true, force: true }).catch(() => {});
-        const errText = stripAnsi(cloneResult.stderr || cloneResult.stdout);
+        const errText = cloneResult.stderr || cloneResult.stdout;
         if (errText.includes("not found") || errText.includes("does not exist") || errText.includes("Repository not found")) {
           return errorResponse(
             "REPO_NOT_FOUND",
@@ -187,7 +193,7 @@ export function registerMigrateTool(server: McpServer): void {
               : {}),
           },
           migrationSummary.nothing_to_migrate
-            ? "No Vercel-specific artifacts found — this app is already Varity-compatible."
+            ? "No Vercel-specific artifacts found, this app is already Varity-compatible."
             : `Dry run complete. ${migrationSummary.changes_applied.length} change(s) would be applied. Run with dry_run=false to migrate and deploy.`
         );
       }
@@ -206,7 +212,7 @@ export function registerMigrateTool(server: McpServer): void {
           });
           if (buildResult.exitCode !== 0) {
             await rm(cloneDir, { recursive: true, force: true }).catch(() => {});
-            const buildOutput = stripAnsi((buildResult.stdout + "\n" + buildResult.stderr)).slice(-2000);
+            const buildOutput = (buildResult.stdout + "\n" + buildResult.stderr).slice(-2000);
             return errorResponse(
               "BUILD_FAILED",
               `Migration codemods applied, but the app failed to build:\n${buildOutput}`,
@@ -215,7 +221,7 @@ export function registerMigrateTool(server: McpServer): void {
           }
         }
       } catch {
-        // package.json unreadable — proceed to deploy anyway
+        // package.json unreadable, proceed to deploy anyway
       }
 
       // Step 4: Deploy via varitykit app deploy
@@ -231,7 +237,7 @@ export function registerMigrateTool(server: McpServer): void {
         { timeout: 300_000 }
       );
 
-      const deployOutput = stripAnsi(deployResult.stdout + "\n" + deployResult.stderr);
+      const deployOutput = deployResult.stdout + "\n" + deployResult.stderr;
 
       if (deployResult.exitCode !== 0) {
         // Cleanup on deploy failure
@@ -258,14 +264,11 @@ export function registerMigrateTool(server: McpServer): void {
           warnings: migrationSummary.warnings,
           tmp_clone_cleaned: true,
           infrastructure: {
-            hosting: "Dynamic cloud hosting — auto-configured",
-            database: "Document database (included)",
-            auth: "Authentication (included)",
+            hosting: "Dynamic cloud hosting, auto-configured",
           },
           next_steps: [
             ...(deployUrl ? [`App live at: ${deployUrl}`] : []),
             "Review the warnings above and manually fix anything flagged.",
-            "To monetize: call varity_submit_to_store with the deployment ID.",
           ],
         },
         deployUrl

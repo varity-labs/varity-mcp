@@ -17,11 +17,11 @@ async function persistPortToConfig(projectPath: string, port: number): Promise<v
   try {
     const raw = await readFile(configPath, "utf-8");
     const config = JSON.parse(raw);
-    if (config.dev?.port === port) return; // already set — no write needed
+    if (config.dev?.port === port) return; // already set, no write needed
     config.dev = { ...(config.dev ?? {}), port };
     await writeFile(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
   } catch {
-    // Config missing or malformed — silently skip; port tip still shown in response
+    // Config missing or malformed, silently skip; port tip still shown in response
   }
 }
 
@@ -103,7 +103,7 @@ export function registerDevServerTool(server: McpServer): void {
         return errorResponse(
           "PATH_NOT_FOUND",
           `Project directory does not exist: ${projectPath}`,
-          "Check the path and ensure the project has been created (use varity_init first)."
+          "Check the path and ensure the project directory exists and contains a package.json."
         );
       }
 
@@ -119,32 +119,6 @@ export function registerDevServerTool(server: McpServer): void {
             "node_modules not found in the project directory.",
             "Run varity_install_deps first to install dependencies, then start the dev server again."
           );
-        }
-
-        // Proactive binary check — detect a broken/missing dev binary before spawning,
-        // giving a consistent diagnosis with varity_install_deps instead of a vague START_FAILED.
-        let devBinary: string | null = null;
-        try {
-          const pkgRaw = await readFile(resolve(projectPath, "package.json"), "utf-8");
-          const pkg = JSON.parse(pkgRaw) as { scripts?: Record<string, string> };
-          const devScript = pkg.scripts?.dev?.trim();
-          if (devScript) {
-            const cmd = devScript.split(/\s+/)[0]!;
-            if (!cmd.includes("/")) devBinary = cmd;
-          }
-        } catch { /* no package.json — proceed without binary check */ }
-
-        if (devBinary) {
-          const binPath = resolve(projectPath, "node_modules", ".bin", devBinary);
-          try {
-            await access(binPath);
-          } catch {
-            return errorResponse(
-              "MISSING_BINARIES",
-              `The dev server binary '${devBinary}' is missing or not accessible in node_modules/.bin. node_modules may be in a broken state.`,
-              "Call varity_install_deps to reinstall all dependencies, then start the dev server again."
-            );
-          }
         }
 
         // Check if a server is already running for this path (in-memory or persisted)
@@ -202,8 +176,8 @@ export function registerDevServerTool(server: McpServer): void {
         if (!pid) {
           return errorResponse(
             "START_FAILED",
-            "Failed to start the dev server — could not obtain a process ID.",
-            "Call varity_dev_server again to retry, or call varity_build to check for project errors."
+            "Failed to start the dev server, could not obtain a process ID.",
+            "Try running `npm run dev` manually in the project directory."
           );
         }
 
@@ -244,27 +218,26 @@ export function registerDevServerTool(server: McpServer): void {
               ],
               ...(portChanged
                 ? {
-                    warning: `⚠️ Port ${port} was busy — your dev server is running at http://localhost:${selectedPort}. Update any bookmarks, saved localhost links, and tutorial references from localhost:${port} to localhost:${selectedPort}.`,
+                    warning: `⚠️ Port ${port} was busy, your dev server is running at http://localhost:${selectedPort}. Update any bookmarks, saved localhost links, and tutorial references from localhost:${port} to localhost:${selectedPort}.`,
                     port_pin_tip: portPersisted
-                      ? `Port ${selectedPort} saved to varity.config.json — future starts will use this port automatically.`
+                      ? `Port ${selectedPort} saved to varity.config.json, future starts will use this port automatically.`
                       : `To always start on the same port, pass port: ${selectedPort} when calling varity_dev_server start (e.g., { action: "start", port: ${selectedPort} }).`,
                     free_port_command: freePortTip,
                   }
                 : {}),
             },
             portChanged
-              ? `⚠️ Port ${port} was busy — dev server started at http://localhost:${selectedPort}.\n\nTo open your app: call varity_open_browser({ url: "http://localhost:${selectedPort}" })\n\n${freePortTip}`
+              ? `⚠️ Port ${port} was busy, dev server started at http://localhost:${selectedPort}.\n\nTo open your app: call varity_open_browser({ url: "http://localhost:${selectedPort}" })\n\n${freePortTip}`
               : `Dev server started at http://localhost:${selectedPort}.\n\nTo open your app: call varity_open_browser({ url: "http://localhost:${selectedPort}" })`
           );
         }
 
-        // Process died during startup — binary was accessible (checked above), so this is most
-        // likely a project startup error (syntax error, missing config, etc.).
+        // Process died during startup, surface actionable causes
         runningServers.delete(projectPath);
         return errorResponse(
           "START_FAILED",
           "The dev server process exited immediately after starting.",
-          "This usually means the project has a startup error. Call varity_build to see the full error output, fix the issues reported, then try starting the dev server again."
+          "Common causes: (1) broken binary permissions, fix with `rm -rf node_modules && npm install`; (2) syntax error in the project, check TypeScript errors; (3) disk full, check with `df -h`. Run `npm run dev` in the project directory to see the full error output."
         );
       }
 
@@ -286,7 +259,7 @@ export function registerDevServerTool(server: McpServer): void {
             process.kill(entry.pid);
           }
         } catch {
-          // Process may already be gone — that's fine
+          // Process may already be gone, that's fine
         }
 
         runningServers.delete(projectPath);
