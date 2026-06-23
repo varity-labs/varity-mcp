@@ -74,12 +74,27 @@ export function registerDeployTool(server: McpServer): void {
           .int()
           .optional()
           .describe("Container listen port for an --image deploy (default 80)."),
+        volume_size: z
+          .number()
+          .int()
+          .optional()
+          .describe(
+            "Persistent volume size in GB for the app container (survives restart/redeploy). " +
+            "Use for stateful apps (databases, n8n, Ghost, etc.). Requires volume_path."
+          ),
+        volume_path: z
+          .string()
+          .optional()
+          .describe(
+            "Absolute container path to mount the persistent volume (e.g. '/data', '/home/node/.n8n'). " +
+            "Requires volume_size."
+          ),
       },
       annotations: {
         destructiveHint: true, // Deploys real infrastructure
       },
     },
-    async ({ path, repo_url, app_name, image, image_credentials, port }) => {
+    async ({ path, repo_url, app_name, image, image_credentials, port, volume_size, volume_path }) => {
       // Check if varitykit is installed, auto-install if missing
       let hasVaritykit = await isCLIAvailable("varitykit");
       if (!hasVaritykit) {
@@ -187,6 +202,14 @@ export function registerDeployTool(server: McpServer): void {
       }
       if (app_name) {
         args.push("--name", app_name);
+      }
+      // Persistent volume for the app container (Lane VOL). Pure passthrough to
+      // the varitykit --volume-size/--volume-path flags (CLI 2.1.0+).
+      if (volume_size != null) {
+        args.push("--volume-size", String(volume_size));
+      }
+      if (volume_path) {
+        args.push("--volume-path", volume_path);
       }
 
       const result = await execVaritykit("app", args, {

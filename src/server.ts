@@ -20,7 +20,7 @@ import { registerSetEnvTool } from "./tools/set-env.js";
 import { registerRedeployTool } from "./tools/redeploy.js";
 import { createOAuthProvider } from "./auth/provider.js";
 
-export const VERSION = "2.1.2";
+export const VERSION = "2.2.0";
 
 export type TransportMode = "stdio" | "http";
 
