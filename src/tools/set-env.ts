@@ -53,11 +53,29 @@ export function registerSetEnvTool(server: McpServer): void {
         );
       }
 
-      const pairs = entries.map(([k, v]) => `${k}=${v}`);
-      const args = [name, ...pairs];
-      if (replace) args.push("--replace");
+      // Enforce the documented UPPER_SNAKE_CASE rule before building argv — and reject the
+      // app name if it could be read as a flag — so no key/name can smuggle a CLI flag
+      // (argv flag injection). The gateway validates again server-side (defense in depth).
+      const KEY_RE = /^[A-Z_][A-Z0-9_]*$/;
+      for (const [k] of entries) {
+        if (!KEY_RE.test(k)) {
+          return errorResponse(
+            "INVALID_KEY",
+            `Invalid env var name: "${k}".`,
+            "Names must be UPPER_SNAKE_CASE (e.g. DATABASE_URL, FEATURE_X)."
+          );
+        }
+      }
+      if (name.startsWith("-")) {
+        return errorResponse("INVALID_NAME", `Invalid app name: "${name}".`, "App names can't start with '-'.");
+      }
 
-      const result = await execVaritykit("app", ["env", ...args], { timeout: 120_000 });
+      // `--` stops the CLI's flag parsing so positionals (name + KEY=VALUE pairs) are never
+      // interpreted as flags, even if a value contains leading dashes.
+      const pairs = entries.map(([k, v]) => `${k}=${v}`);
+      const args = ["env", ...(replace ? ["--replace"] : []), "--", name, ...pairs];
+
+      const result = await execVaritykit("app", args, { timeout: 120_000 });
 
       if (result.exitCode === 0) {
         const keys = entries.map(([k]) => k).sort();

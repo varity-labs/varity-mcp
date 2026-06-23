@@ -31,8 +31,12 @@ export function registerRedeployTool(server: McpServer): void {
           "Ask the user for the app name they want to redeploy — it's the slug in their varity.app URL."
         );
       }
+      if (name.startsWith("-")) {
+        return errorResponse("INVALID_NAME", `Invalid app name: "${name}".`, "App names can't start with '-'.");
+      }
 
-      const result = await execVaritykit("app", ["redeploy", name], { timeout: 120_000 });
+      // `--` stops the CLI's flag parsing so the app name is never read as a flag.
+      const result = await execVaritykit("app", ["redeploy", "--", name], { timeout: 120_000 });
 
       if (result.exitCode === 0) {
         return successResponse(
