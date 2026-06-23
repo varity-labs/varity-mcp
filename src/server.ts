@@ -16,9 +16,11 @@ import { registerLoginTool } from "./tools/login.js";
 import { registerMigrateTool } from "./tools/migrate.js";
 import { registerAgentTools } from "./tools/agent.js";
 import { registerDeleteDeploymentTool } from "./tools/delete-deployment.js";
+import { registerSetEnvTool } from "./tools/set-env.js";
+import { registerRedeployTool } from "./tools/redeploy.js";
 import { createOAuthProvider } from "./auth/provider.js";
 
-export const VERSION = "2.1.1";
+export const VERSION = "2.1.2";
 
 export type TransportMode = "stdio" | "http";
 
@@ -34,6 +36,7 @@ export type TransportMode = "stdio" | "http";
  *   - Discovery: search-docs, cost-calculator, doctor
  *   - Setup: install-deps, build, login
  *   - Deploy own code: deploy, deploy-status, deploy-logs, delete-deployment
+ *   - Operate: set-env, redeploy (edit config / redeploy + restart in place)
  *   - Deploy curated AI agent templates: list-agents, agent-info, deploy-agent
  *   - Local-dev (stdio only): open-browser, dev-server
  *   - Project ops: create-repo, migrate
@@ -73,6 +76,10 @@ export function createVarityServer(mode: TransportMode = "stdio"): McpServer {
   registerDeployStatusTool(server);
   registerDeployLogsTool(server);
   registerDeleteDeploymentTool(server);
+
+  // ── Operate tools (edit env + redeploy/restart in place) ──
+  registerSetEnvTool(server);
+  registerRedeployTool(server);
 
   // ── AI agent tools, curated templates with one-command deploy ──
   registerAgentTools(server);
