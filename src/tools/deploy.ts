@@ -89,12 +89,19 @@ export function registerDeployTool(server: McpServer): void {
             "Absolute container path to mount the persistent volume (e.g. '/data', '/home/node/.n8n'). " +
             "Requires volume_size."
           ),
+        private: z
+          .boolean()
+          .optional()
+          .describe(
+            "Require owner-only access behind Varity's generated password gate. " +
+            "Use for apps that should not be reachable without the returned access password."
+          ),
       },
       annotations: {
         destructiveHint: true, // Deploys real infrastructure
       },
     },
-    async ({ path, repo_url, app_name, image, image_credentials, port, volume_size, volume_path }) => {
+    async ({ path, repo_url, app_name, image, image_credentials, port, volume_size, volume_path, private: private_deploy }) => {
       // Check if varitykit is installed, auto-install if missing
       let hasVaritykit = await isCLIAvailable("varitykit");
       if (!hasVaritykit) {
@@ -211,6 +218,9 @@ export function registerDeployTool(server: McpServer): void {
       if (volume_path) {
         args.push("--volume-path", volume_path);
       }
+      if (private_deploy) {
+        args.push("--private");
+      }
 
       const result = await execVaritykit("app", args, {
         cwd,
@@ -223,6 +233,9 @@ export function registerDeployTool(server: McpServer): void {
         // Read the latest deployment record (most reliable source of URL).
         let deployUrl = "unknown";
         let deploymentId = "unknown";
+        const authPassword =
+          output.match(/Password:\s*([^\s]+)/i)?.[1] ??
+          output.match(/Private access password:\s*([^\s]+)/i)?.[1];
 
         try {
           const deploymentsDir = getDeploymentsDir();
@@ -292,10 +305,13 @@ export function registerDeployTool(server: McpServer): void {
             url: deployUrl,
             deployment_id: deploymentId,
             status: "deployed",
+            auth_username: authPassword ? "varity" : undefined,
+            auth_password: authPassword,
             share_card: cardUrl || undefined,
             share_image: cardUrl ? `${cardUrl}/image.png` : undefined,
             next_steps: [
               `App live at: ${deployUrl}`,
+              ...(authPassword ? [`Private access username: varity`, `Private access password: ${authPassword}`] : []),
               ...(cardUrl ? [`Share your deployment: ${cardUrl}`] : []),
               `Manage at: https://developer.store.varity.so`,
             ],
