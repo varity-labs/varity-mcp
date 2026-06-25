@@ -58,14 +58,6 @@ export function registerDeployLogsTool(server: McpServer): void {
           const truncated = lines.slice(-limit);
 
           const annotatedLines = truncated.map((line) => {
-            // Rewrite CLI command references to MCP equivalents so log output
-            // makes sense when read through varity_deploy_logs.
-            if (line.includes("varitykit app deploy --submit-to-store")) {
-              return line.replace(
-                /varitykit app deploy --submit-to-store/g,
-                "varity_submit_to_store (MCP tool)"
-              );
-            }
             // Annotate the "shared development database" build-phase message so
             // developers reading post-deploy logs are not misled into thinking
             // their production app lacks a private database (DX-005).

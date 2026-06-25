@@ -1,6 +1,5 @@
 import { z } from "zod";
-import { readdir, readFile, access, writeFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { readdir, readFile, access } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { execCLI, execVaritykit, isCLIAvailable } from "../utils/cli-bridge.js";
@@ -13,17 +12,6 @@ function stripAnsi(text: string): string {
   return text.replace(ANSI_RE, "");
 }
 
-/** Save build output as a log file so varity_deploy_logs can show real content. */
-async function saveBuildLog(deploymentId: string, buildOutput: string): Promise<void> {
-  try {
-    const deploymentsDir = getDeploymentsDir();
-    await mkdir(deploymentsDir, { recursive: true });
-    await writeFile(join(deploymentsDir, `${deploymentId}.log`), buildOutput, "utf-8");
-  } catch {
-    // Non-critical, don't fail deploy if log write fails
-  }
-}
-
 export function registerDeployTool(server: McpServer): void {
   server.registerTool(
     "varity_deploy",
@@ -31,9 +19,9 @@ export function registerDeployTool(server: McpServer): void {
       title: "Deploy to Production",
       description:
         "Deploy the current project to production on Varity. " +
-        "Automatically detects the framework (Next.js, React, Vue, Express, FastAPI, etc.), " +
-        "builds the project, and ships it live at https://varity.app/<name>/. " +
-        "Zero configuration required. Dramatically cheaper than Vercel / Railway / Render. " +
+        "Detects the framework, selects the right hosting, and ships it live at https://varity.app/<name>/. " +
+        "Zero configuration required. Flat hardware-reserved pricing — your bill stays the same as your app grows. " +
+        "No usage-based billing, no surprise overages. " +
         "Use this when a developer wants to deploy, publish, ship, or make their app live. " +
         "If the developer wants to deploy a curated AI agent (Telegram bot, chat UI, etc.) rather than their own code, " +
         "use varity_deploy_agent instead. To stop a deployment and its billing, use varity_delete_deployment.",
@@ -46,7 +34,7 @@ export function registerDeployTool(server: McpServer): void {
             "IMPORTANT: always pass the full absolute path to the project root, the directory " +
             "that contains package.json and varity.config.json. " +
             "If omitted, the MCP server's working directory is used (which is rarely the correct project root). " +
-            "Use the project_path returned by varity_init as the value here."
+            "Pass the absolute path to the project root (the directory that contains package.json)."
           ),
         repo_url: z
           .string()
@@ -65,12 +53,55 @@ export function registerDeployTool(server: McpServer): void {
             "If omitted, the project directory name is used. " +
             "Use a different app_name than the directory to create named environments (staging, canary, etc.)."
           ),
+        image: z
+          .string()
+          .optional()
+          .describe(
+            "Deploy a prebuilt Docker/OCI image directly (e.g. 'ghcr.io/you/app:latest') instead of " +
+            "building from source. Use when the developer has a container image rather than a repo/project. " +
+            "Mutually exclusive with repo_url."
+          ),
+        image_credentials: z
+          .object({
+            host: z.string().describe("registry host, e.g. ghcr.io or docker.io"),
+            username: z.string(),
+            password: z.string(),
+          })
+          .optional()
+          .describe("Pull credentials for a PRIVATE image registry. Omit for public images."),
+        port: z
+          .number()
+          .int()
+          .optional()
+          .describe("Container listen port for an --image deploy (default 80)."),
+        volume_size: z
+          .number()
+          .int()
+          .optional()
+          .describe(
+            "Persistent volume size in GB for the app container (survives restart/redeploy). " +
+            "Use for stateful apps (databases, n8n, Ghost, etc.). Requires volume_path."
+          ),
+        volume_path: z
+          .string()
+          .optional()
+          .describe(
+            "Absolute container path to mount the persistent volume (e.g. '/data', '/home/node/.n8n'). " +
+            "Requires volume_size."
+          ),
+        private: z
+          .boolean()
+          .optional()
+          .describe(
+            "Require owner-only access behind Varity's generated password gate. " +
+            "Use for apps that should not be reachable without the returned access password."
+          ),
       },
       annotations: {
         destructiveHint: true, // Deploys real infrastructure
       },
     },
-    async ({ path, repo_url, app_name }) => {
+    async ({ path, repo_url, app_name, image, image_credentials, port, volume_size, volume_path, private: private_deploy }) => {
       // Check if varitykit is installed, auto-install if missing
       let hasVaritykit = await isCLIAvailable("varitykit");
       if (!hasVaritykit) {
@@ -147,216 +178,65 @@ export function registerDeployTool(server: McpServer): void {
         return errorResponse(
           "PATH_NOT_FOUND",
           `Project directory does not exist: ${cwd}`,
-          "Check the path and ensure the project has been created (use varity_init first)."
+          "Check the path and ensure the project directory exists and contains a package.json."
         );
       }
 
-      // Auto-build before deploying
-      let buildSkipped = true;
-      // Capture build output so we can save it as a log after deploy succeeds
-      let capturedBuildOutput = "";
-      try {
-        const pkgRaw = await readFile(`${cwd}/package.json`, "utf-8");
-        const pkg = JSON.parse(pkgRaw);
-        if (pkg.scripts?.build) {
-          buildSkipped = false;
-          const buildResult = await execCLI("npm", ["run", "build"], {
-            cwd,
-            timeout: 300_000,
-            // Increase Node.js heap to 4 GB to avoid OOM kills on large dependency trees
-            env: { ...process.env, NODE_OPTIONS: "--max-old-space-size=4096" },
-          });
-          // Capture full build output for log saving regardless of success/failure
-          capturedBuildOutput = (buildResult.stdout || "") + "\n" + (buildResult.stderr || "");
-
-          if (buildResult.exitCode !== 0) {
-            const rawTail = capturedBuildOutput.slice(-2000);
-            // Save failed build log so varity_deploy_logs can show it
-            await saveBuildLog(`build-failed-${Date.now()}`, capturedBuildOutput);
-            const fixHint =
-              capturedBuildOutput.includes("Killed") || capturedBuildOutput.includes("out of memory") || capturedBuildOutput.includes("heap out of memory")
-                ? "The build ran out of memory. To fix:\n1. Close other applications to free RAM and try again.\n2. Set NODE_OPTIONS=--max-old-space-size=2048 in your terminal environment before deploying.\n3. In a cloud IDE or container: upgrade to a larger instance type (Next.js builds need ~2 GB free RAM)."
-                : (capturedBuildOutput.includes("PageNotFoundError") || capturedBuildOutput.includes("Cannot find module for page"))
-                ? "Clear your Next.js build cache: rm -rf .next, then try deploying again. This happens when a previous build was interrupted. Also run varity_install_deps to ensure all dependencies are installed."
-                : (capturedBuildOutput.includes("Cannot find module") || capturedBuildOutput.includes("Module not found")) && !capturedBuildOutput.includes("for page")
-                ? "A required dependency is missing. Run: npm install --legacy-peer-deps in your project directory, then try deploying again. If your next.config.js is missing the resolve.alias stubs, recreate it from a fresh varity_init project."
-                : capturedBuildOutput.includes("Type error") || capturedBuildOutput.includes("TypeScript")
-                ? "Fix the TypeScript errors shown above, then try deploying again."
-                : "Check the build errors above, fix them, and try deploying again.";
-            return errorResponse(
-              "BUILD_FAILED",
-              `Local build failed before deploy. Build output:\n${rawTail}`,
-              fixHint
-            );
-          }
+      // Pure passthrough to `varitykit app deploy`. The CLI + deploy-api are the
+      // single hosting authority: framework detection, static-vs-dynamic hosting
+      // selection, sidecar auto-config, build, and provider selection all happen
+      // server-side. The MCP asserts NO hosting opinion — it only forwards the
+      // project path, the (optional) repo URL, and the (optional) app name.
+      // `--mode auto` / `--hosting auto` are the CLI defaults, so we pass neither.
+      const args = ["deploy"];
+      if (repo_url) {
+        args.push("--repo-url", repo_url);
+      }
+      if (image) {
+        // Docker-image source: forward to the CLI, which routes it to the
+        // deploy-api's native `image:` path (no clone/build).
+        args.push("--image", image);
+        if (image_credentials) {
+          args.push(
+            "--image-registry", image_credentials.host,
+            "--image-username", image_credentials.username,
+            "--image-password", image_credentials.password,
+          );
         }
-      } catch (err: unknown) {
-        const isFileError = err instanceof Error && (err as NodeJS.ErrnoException).code === 'ENOENT';
-        const isParseError = err instanceof SyntaxError;
-        if (!isFileError && !isParseError) {
-          throw err;
+        if (port) {
+          args.push("--port", String(port));
         }
       }
-
-      const args = ["deploy", "--mode", "auto"];
-
-      // Pre-detect framework from package.json to avoid varitykit's internal detection failing.
-      // This ensures projects scaffolded by varity_init always deploy successfully.
-      let detectedHosting: "static" | "dynamic" | "unknown" = "unknown";
-      let orchestrationSummary = "Hosting: Auto-detected";
-      try {
-        const pkgForDeploy = JSON.parse(await readFile(`${cwd}/package.json`, "utf-8"));
-        const deps = { ...pkgForDeploy.dependencies, ...pkgForDeploy.devDependencies };
-        // Detect server frameworks → dynamic (Akash)
-        const dynamicFrameworks = ["express", "fastify", "@nestjs/core", "koa", "hapi", "hono"];
-        const hasDynamicFramework = dynamicFrameworks.some(f => f in deps);
-
-        if (hasDynamicFramework) {
-          detectedHosting = "dynamic";
-          orchestrationSummary = "Detected: Dynamic app → Hosting: Cloud compute (auto-configured)";
-        } else if ("next" in deps) {
-          let isStatic = false;
-          try {
-            const nextCfg = await readFile(`${cwd}/next.config.js`, "utf-8");
-            isStatic = nextCfg.includes("output: 'export'") || nextCfg.includes('output: "export"');
-          } catch { /* No next.config.js, assume dynamic */ }
-          detectedHosting = isStatic ? "static" : "dynamic";
-          orchestrationSummary = isStatic
-            ? "Detected: Next.js static app → Hosting: Global CDN"
-            : "Detected: Dynamic Next.js app → Hosting: Cloud compute (auto-configured)";
-        } else {
-          detectedHosting = "dynamic";
-          orchestrationSummary = "Detected: Custom app → Hosting: Cloud compute (auto-configured)";
-        }
-
-        // Push hosting flag for ALL detection paths
-        args.push("--hosting", detectedHosting);
-
-        // For ALL dynamic (Akash) deployments, resolve and pass the GitHub repo URL
-        if (detectedHosting === "dynamic") {
-          let resolvedRepoUrl = repo_url || "";
-          if (!resolvedRepoUrl) {
-            const gitRemoteResult = await execCLI("git", ["remote", "get-url", "origin"], { cwd, timeout: 5000 });
-            if (gitRemoteResult.exitCode === 0 && gitRemoteResult.stdout.trim()) {
-              // Strip any embedded token (https://TOKEN@github.com/...) before storing
-              resolvedRepoUrl = gitRemoteResult.stdout.trim().replace(/^(https?:\/\/)[^@]+@/, "$1");
-            }
-          }
-          if (resolvedRepoUrl) {
-            const cleanRepoUrl = resolvedRepoUrl.replace(/https:\/\/[^@]+@/, "https://");
-            args.push("--repo-url", cleanRepoUrl);
-            try {
-              const configPath = `${cwd}/varity.config.json`;
-              let config: Record<string, unknown> = {};
-              try { config = JSON.parse(await readFile(configPath, "utf-8")); } catch { /* new config */ }
-              config.github_repo = cleanRepoUrl;
-              await writeFile(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
-            } catch { /* non-critical */ }
-          } else {
-            orchestrationSummary += " | ⚠️ No GitHub repo detected, create one first with varity_create_repo";
-          }
-        }
-      } catch {
-        // No package.json, check for Python project indicators
-        const pythonIndicators = [
-          "requirements.txt",
-          "pyproject.toml",
-          "setup.py",
-          "setup.cfg",
-          "Pipfile",
-          "app.py",
-          "main.py",
-        ];
-        let isPython = false;
-        let pythonEntry = "";
-        for (const indicator of pythonIndicators) {
-          try {
-            await access(join(cwd, indicator));
-            isPython = true;
-            pythonEntry = indicator;
-            break;
-          } catch { /* not found */ }
-        }
-
-        if (isPython) {
-          detectedHosting = "dynamic";
-          orchestrationSummary = `Detected: Python app (${pythonEntry}) → Hosting: Cloud compute (auto-configured)`;
-          args.push("--hosting", "dynamic");
-
-          let resolvedRepoUrl = repo_url || "";
-          if (!resolvedRepoUrl) {
-            const gitRemoteResult = await execCLI("git", ["remote", "get-url", "origin"], { cwd, timeout: 5000 });
-            if (gitRemoteResult.exitCode === 0 && gitRemoteResult.stdout.trim()) {
-              resolvedRepoUrl = gitRemoteResult.stdout.trim();
-            }
-          }
-          if (resolvedRepoUrl) {
-            args.push("--repo-url", resolvedRepoUrl);
-            try {
-              const configPath = `${cwd}/varity.config.json`;
-              let config: Record<string, unknown> = {};
-              try { config = JSON.parse(await readFile(configPath, "utf-8")); } catch { /* new config */ }
-              config.github_repo = resolvedRepoUrl;
-              await writeFile(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
-            } catch { /* non-critical */ }
-          } else {
-            orchestrationSummary += " | ⚠️ No GitHub repo detected, create one first with varity_create_repo";
-          }
-        }
-        // If not Python either, let varitykit detect (args already has --mode auto)
-      }
-
-      // If the MCP already ran a successful build above, tell varitykit to skip its own build.
-      // This prevents a redundant second build (which can OOM on memory-constrained machines)
-      // and speeds up deploys significantly. varitykit uploads the existing build output directly.
-      if (!buildSkipped) {
-        args.push("--skip-build");
-      }
-
-      // For dynamic hosting (Akash): push the locally-built output to the GitHub repo
-      // so the Akash container can git clone and run `npm start` without rebuilding.
-      // This is critical, building inside the Akash container is slow and fragile.
-      if (detectedHosting === "dynamic" && !buildSkipped) {
-        try {
-          // Check if this is a git repo with a remote
-          const gitRemote = await execCLI("git", ["remote", "get-url", "origin"], { cwd, timeout: 5000 });
-          if (gitRemote.exitCode === 0 && gitRemote.stdout.trim()) {
-            // Add the build output (.next/) and commit
-            await execCLI("git", ["add", "-A"], { cwd, timeout: 10000 });
-            const commitResult = await execCLI("git", ["commit", "-m", "Build output for deployment", "--allow-empty"], { cwd, timeout: 10000 });
-            if (commitResult.exitCode === 0) {
-              const pushResult = await execCLI("git", ["push", "origin", "main"], { cwd, timeout: 30000 });
-              if (pushResult.exitCode !== 0) {
-                // Try pushing to master if main doesn't exist
-                await execCLI("git", ["push", "origin", "master"], { cwd, timeout: 30000 });
-              }
-            }
-          }
-        } catch {
-          // Git push failed, continue with deploy anyway, Akash will build from source
-        }
-      }
-
       if (app_name) {
         args.push("--name", app_name);
+      }
+      // Persistent volume for the app container (Lane VOL). Pure passthrough to
+      // the varitykit --volume-size/--volume-path flags (CLI 2.1.0+).
+      if (volume_size != null) {
+        args.push("--volume-size", String(volume_size));
+      }
+      if (volume_path) {
+        args.push("--volume-path", volume_path);
+      }
+      if (private_deploy) {
+        args.push("--private");
       }
 
       const result = await execVaritykit("app", args, {
         cwd,
-        timeout: 300_000, // 5 minutes for upload + deploy (no rebuild needed)
+        timeout: 300_000, // 5 minutes for build + deploy
       });
 
       if (result.exitCode === 0) {
-        // Parse deploy output for URL and metadata
         const output = stripAnsi(result.stdout + "\n" + result.stderr);
 
-        // Try to read the latest deployment record (most reliable source of URL)
+        // Read the latest deployment record (most reliable source of URL).
         let deployUrl = "unknown";
-        let buildSize = "unknown";
-        let fileCount = "unknown";
         let deploymentId = "unknown";
+        const authPassword =
+          output.match(/Password:\s*([^\s]+)/i)?.[1] ??
+          output.match(/Private access password:\s*([^\s]+)/i)?.[1];
 
-        let ipfsUrl: string | undefined;
         try {
           const deploymentsDir = getDeploymentsDir();
           const files = await readdir(deploymentsDir);
@@ -366,24 +246,20 @@ export function registerDeployTool(server: McpServer): void {
               await readFile(`${deploymentsDir}/${jsonFiles[0]}`, "utf-8")
             );
             // Prefer the clean varity.app custom domain URL over raw provider URLs.
-            // Check plain `url` before `akash.url` so a pre-resolved canonical URL wins.
             const rawUrl =
               latest.custom_domain?.url ||
               latest.url ||
-              latest.akash?.url ||
               latest.ipfs?.gateway_url ||
               "unknown";
 
-            // Canonicalize any raw provider URL (IPFS hash, Akash ingress, etc.) to
-            // varity.app, matching the same logic used in varity_deploy_status.
+            // Canonicalize any raw provider URL (IPFS hash, provider ingress, etc.)
+            // to varity.app, matching the logic used in varity_deploy_status.
             const isRawIpfs =
               rawUrl.includes("ipfs.io/ipfs/") ||
               rawUrl.includes("ipfscdn.");
             const isRawProvider =
               isRawIpfs || (rawUrl !== "unknown" && !rawUrl.startsWith("https://varity.app"));
             if (isRawProvider) {
-              if (isRawIpfs) ipfsUrl = rawUrl; // preserve as secondary
-              // Source the app slug from the deployment record first
               const subdomain =
                 latest.custom_domain?.subdomain ||
                 latest.app_name ||
@@ -391,7 +267,6 @@ export function registerDeployTool(server: McpServer): void {
               if (subdomain) {
                 deployUrl = `https://varity.app/${subdomain}/`;
               } else {
-                // Fall back to reading the project's package.json name
                 try {
                   const pkgJson = JSON.parse(await readFile(`${cwd}/package.json`, "utf-8"));
                   const pkgName: string | undefined = pkgJson.name;
@@ -408,21 +283,7 @@ export function registerDeployTool(server: McpServer): void {
               deployUrl = rawUrl;
             }
 
-            buildSize = latest.build?.size_mb
-              ? `${latest.build.size_mb.toFixed(1)} MB`
-              : "unknown";
-            fileCount = String(latest.build?.files ?? latest.ipfs?.file_count ?? "unknown");
             deploymentId = latest.deployment_id || jsonFiles[0]!.replace(".json", "");
-            // Save the build log so varity_deploy_logs can show real output.
-            // Always include the varitykit deploy output; prepend the npm build
-            // phase when it ran so developers see the full picture in one log.
-            if (deploymentId !== "unknown") {
-              const logContent = [
-                ...(capturedBuildOutput.trim() ? [`[Build Phase]\n${capturedBuildOutput}`] : []),
-                `[Deploy Phase]\n${output}`,
-              ].join("\n\n");
-              await saveBuildLog(deploymentId, logContent);
-            }
           }
         } catch {
           // Fallback to regex parsing of CLI output
@@ -439,68 +300,23 @@ export function registerDeployTool(server: McpServer): void {
           cardUrl = `https://varity.app/card/${varityMatch[1]}`;
         }
 
-        // Extract Akash-specific info from deployment record
-        let providerUrl: string | undefined;
-        let akashDseq: string | undefined;
-        try {
-          const deploymentsDir2 = getDeploymentsDir();
-          const files2 = await readdir(deploymentsDir2);
-          const latestJson = files2.filter((f) => f.endsWith(".json")).sort().reverse()[0];
-          if (latestJson) {
-            const rec = JSON.parse(await readFile(`${deploymentsDir2}/${latestJson}`, "utf-8"));
-            providerUrl = rec.akash?.url;
-            akashDseq = rec.akash?.dseq;
-          }
-        } catch { /* non-critical */ }
-
-        // For containerized (Akash) deployments the deployment record tracks neither
-        // static file counts nor a pre-computed build size, those fields only exist
-        // for CDN-hosted static builds.  Surface meaningful labels instead of the
-        // uninitialized-looking "unknown" / "0" defaults.
-        if (detectedHosting === "dynamic") {
-          if (buildSize === "unknown") {
-            try {
-              const duResult = await execCLI("du", ["-sh", cwd], { timeout: 10_000 });
-              if (duResult.exitCode === 0 && duResult.stdout.trim()) {
-                const sizeMatch = duResult.stdout.trim().match(/^(\S+)/);
-                if (sizeMatch) buildSize = sizeMatch[1]!;
-              }
-            } catch { /* non-critical */ }
-            if (buildSize === "unknown") buildSize = "N/A (containerized)";
-          }
-          if (fileCount === "0" || fileCount === "unknown") {
-            fileCount = "N/A (containerized)";
-          }
-        }
-
         return successResponse(
           {
             url: deployUrl,
             deployment_id: deploymentId,
             status: "deployed",
-            build_size: buildSize,
-            files: fileCount,
+            auth_username: authPassword ? "varity" : undefined,
+            auth_password: authPassword,
             share_card: cardUrl || undefined,
             share_image: cardUrl ? `${cardUrl}/image.png` : undefined,
-            orchestration: orchestrationSummary,
-            infrastructure: {
-              hosting: detectedHosting === "static"
-                ? "Global CDN, served from 30+ edge locations worldwide (auto-selected)"
-                : detectedHosting === "dynamic"
-                ? "Cloud compute, dedicated CPU/RAM, auto-configured (auto-selected)"
-                : "Varity (auto-selected)",
-              database: "Document database (included)",
-              auth: "Authentication (included)",
-              ...(providerUrl ? { provider_url: providerUrl } : {}),
-              ...(akashDseq ? { deployment_id: akashDseq } : {}),
-            },
             next_steps: [
               `App live at: ${deployUrl}`,
+              ...(authPassword ? [`Private access username: varity`, `Private access password: ${authPassword}`] : []),
               ...(cardUrl ? [`Share your deployment: ${cardUrl}`] : []),
               `Manage at: https://developer.store.varity.so`,
             ],
           },
-          `Deployed successfully! ${orchestrationSummary}. Live at: ${deployUrl}${cardUrl ? ` | Share: ${cardUrl}` : ""}`
+          `Deployed successfully! Live at: ${deployUrl}${cardUrl ? ` | Share: ${cardUrl}` : ""}`
         );
       }
 

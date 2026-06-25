@@ -26,18 +26,19 @@ async function extractDeployUrl(output: string): Promise<string> {
     const jsonFiles = files.filter((f) => f.endsWith(".json")).sort().reverse();
     if (jsonFiles.length > 0) {
       const latest = JSON.parse(await readFile(join(deploymentsDir, jsonFiles[0]!), "utf-8"));
-      const url =
-        latest.custom_domain?.url ||
-        latest.akash?.url ||
-        latest.url ||
-        latest.ipfs?.gateway_url;
-      if (url) return url;
+      // Always surface the clean varity.app URL — never a raw provider/IPFS host.
+      if (latest.custom_domain?.url) return latest.custom_domain.url;
+      const slug = latest.custom_domain?.subdomain || latest.app_name || latest.project_name;
+      if (slug) return `https://varity.app/${slug}/`;
+      if (typeof latest.url === "string" && latest.url.startsWith("https://varity.app")) {
+        return latest.url;
+      }
     }
   } catch {
     // fall through to regex
   }
-  // Fallback: grep the output for a URL
-  const match = output.match(/https?:\/\/[^\s]+\.(?:varity\.app|akash[^\s]*)/i);
+  // Fallback: grep the output for a varity.app URL only.
+  const match = output.match(/https?:\/\/varity\.app\/[^\s)]+/i);
   return match?.[0] ?? "";
 }
 
@@ -264,13 +265,10 @@ export function registerMigrateTool(server: McpServer): void {
           tmp_clone_cleaned: true,
           infrastructure: {
             hosting: "Dynamic cloud hosting, auto-configured",
-            database: "Document database (included)",
-            auth: "Authentication (included)",
           },
           next_steps: [
             ...(deployUrl ? [`App live at: ${deployUrl}`] : []),
             "Review the warnings above and manually fix anything flagged.",
-            "To publish: call varity_submit_to_store with the deployment ID.",
           ],
         },
         deployUrl

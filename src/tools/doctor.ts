@@ -29,7 +29,7 @@ export function registerDoctorTool(server: McpServer): void {
       description:
         "Check if the developer's environment is ready to build and deploy apps with Varity. " +
         "Verifies Node.js, npm, varitykit CLI, and authentication are properly configured. " +
-        "Run this before varity_init or varity_deploy to catch missing prerequisites early.",
+        "Run this before varity_deploy to catch missing prerequisites early.",
       inputSchema: {},
       annotations: {
         readOnlyHint: true,
@@ -296,7 +296,7 @@ export function registerDoctorTool(server: McpServer): void {
             ready: true,
             cli_deploy_ready: false,
             checks,
-            note: `Development tools (varity_init, varity_build, varity_dev_server) are ready. Important: varity_deploy also requires Python 3.10+ and a working varitykit CLI, fix the following ${cliIssues.length} issue${cliIssues.length === 1 ? "" : "s"} before deploying:`,
+            note: `Development tools (varity_build, varity_dev_server) are ready. Important: varity_deploy also requires Python 3.10+ and a working varitykit CLI, fix the following ${cliIssues.length} issue${cliIssues.length === 1 ? "" : "s"} before deploying:`,
             cli_issues: cliFixList,
           },
           `Ready for development (init, build, dev server work). Fix ${cliIssues.length} issue${cliIssues.length === 1 ? "" : "s"} before deploying: ${cliFixList.join("; ")}`

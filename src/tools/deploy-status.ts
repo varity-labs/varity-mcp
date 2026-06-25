@@ -65,7 +65,6 @@ async function readDeployments(): Promise<DeploymentRecord[]> {
           data.custom_domain?.url ||   // clean varity.app URL registered at deploy time
           data.url ||
           data.deployment_url ||
-          data.akash?.url ||
           data.ipfs?.gateway_url ||
           "unknown";
         // Convert raw storage URLs to clean varity.app/{app-name}/, use app name slug, never the deployment ID

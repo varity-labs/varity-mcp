@@ -75,7 +75,27 @@ export function registerInstallDepsTool(server: McpServer): void {
         return errorResponse(
           "PATH_NOT_FOUND",
           `Project directory does not exist: ${cwd}`,
-          "Check the path and ensure the project has been created (use varity_init first)."
+          "Check the path and ensure the project directory exists and contains a package.json."
+        );
+      }
+
+      // Python projects (FastAPI/Django/Flask) install via pip, not npm. Detect
+      // pyproject.toml / requirements.txt first and short-circuit to pip.
+      const hasPyproject = await access(resolve(cwd, "pyproject.toml")).then(() => true).catch(() => false);
+      const hasRequirements = await access(resolve(cwd, "requirements.txt")).then(() => true).catch(() => false);
+      if (hasPyproject || hasRequirements) {
+        const pipArgs = hasPyproject ? ["install", "-e", "."] : ["install", "-r", "requirements.txt"];
+        const py = await execCLI("pip", pipArgs, { cwd, timeout: 120_000 });
+        if (py.exitCode === 0) {
+          return successResponse(
+            { framework: "python", installer: "pip" },
+            "Python dependencies installed."
+          );
+        }
+        return errorResponse(
+          "PIP_INSTALL_FAILED",
+          `pip install failed:\n${((py.stdout || "") + "\n" + (py.stderr || "")).slice(-2000)}`,
+          "Ensure Python 3.10+ and pip are installed (run varity_doctor), then retry."
         );
       }
 
@@ -295,7 +315,7 @@ export function registerInstallDepsTool(server: McpServer): void {
         return errorResponse(
           "NO_PACKAGE_JSON",
           `No package.json found in: ${cwd}`,
-          "Ensure you are in a project directory with a package.json file. Use varity_init to create a new project."
+          "Ensure you are in a project directory with a package.json file."
         );
       }
 

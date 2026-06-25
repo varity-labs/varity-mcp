@@ -73,9 +73,8 @@ OPTIONS:
 
 TOOLS:
   varity_search_docs       Search Varity documentation
-  varity_cost_calculator   Compare costs vs Vercel/Render/Railway
-  varity_init              Create a new production app (stdio only)
-  varity_create_repo       Create GitHub repo with template (HTTP/stdio)
+  varity_cost_calculator   Compare your flat monthly cost vs usage-metered hosting
+  varity_create_repo       Create a GitHub repo from your local project (HTTP/stdio)
   varity_deploy            Deploy to production
   varity_deploy_status     Check deployment status
   varity_deploy_logs       Read build/deployment logs

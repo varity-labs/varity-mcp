@@ -1,37 +1,52 @@
 # Dependencies
 node_modules/
+package-lock.json
 
 # Build output
 dist/
-
-# Environment variables / secrets (never commit real values)
-.env
-.env.*
-!.env.example
-*.pem
-*.key
-*.p12
-credentials.json
-
-# Caches
-.turbo/
-.pytest_cache/
-.cache/
 *.tsbuildinfo
 
+# Environment
+.env
+.env.local
+.env.production
+
 # Logs
+logs/
 *.log
 npm-debug.log*
 
-# OS / editor
+# OS
 .DS_Store
 Thumbs.db
+
+# IDE
 .vscode/
 .idea/
 *.swp
+*.swo
+*~
 
-# Packed tarballs and internal scratch (never in the public repo)
-*.tgz
+# Testing
+coverage/
+.nyc_output/
+
+# Misc
+.cache/
+temp/
+tmp/
+
+# Internal planning docs (keep in SDK monorepo only)
+FUTURE_IMPLEMENTATIONS.md
+SENTRY_SETUP.md
+SUBMIT_NOW.md
+WORLD_CLASS_*.md
+TEST_RESULTS.md
+MARKETPLACE_SUBMISSIONS.md
+PRE_PUBLISH_CHECKLIST.md
+BROWSER_USAGE.md
+
+# Infrastructure (do not commit)
 deploy.yaml
 Dockerfile
 .dockerignore

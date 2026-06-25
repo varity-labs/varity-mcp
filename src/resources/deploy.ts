@@ -65,15 +65,15 @@ Varity automatically picks the right infrastructure for your app:
 
 | Your app type | Detected as | What you get |
 |--------------|------------|--------------|
-| Next.js with \`output: 'export'\` | Static | Global CDN, 30+ edge locations worldwide, fastest, cheapest, ~$4/mo |
+| Next.js with \`output: 'export'\` | Static | Global CDN, 30+ edge locations worldwide, fastest, ~$4/mo flat |
 | Next.js with API routes or SSR | Dynamic | Cloud compute, 2 vCPU, 4 GB RAM, distributed across multiple providers |
 | Any app without \`output: 'export'\` | Dynamic | Cloud compute with auto-scaling across providers |
 
 **What runs your static app:** Files are distributed across a global edge network with nodes in multiple regions for fast delivery and automatic failover. Varity manages CDN configuration, cache invalidation, and routing automatically, you never configure the underlying infrastructure.
 
-**What runs your dynamic app:** Your app runs on Varity's managed cloud network, distributed across multiple independent compute providers for reliability and redundancy. Varity handles provider selection, failover, and subdomain routing automatically. You never configure any of this. The deploy logs will confirm which hosting mode was selected.
+**What runs your dynamic app:** Your app runs on Varity's managed cloud network with built-in reliability and redundancy. Varity handles where and how it runs, failover, and subdomain routing automatically. You never configure any of this. The deploy logs will confirm which hosting mode was selected.
 
-> **Bottom line for both hosting modes:** You specify what to deploy, Varity handles where and how. Provider selection, failover, and routing are fully managed, no configuration required.
+> **Bottom line for both hosting modes:** You specify what to deploy, Varity handles where and how — fully managed, no configuration required.
 
 **FAQ, "What actually runs my app?"** Varity selects from a pool of enterprise cloud providers automatically, you never need to know which one, configure one, or sign up for any external hosting account.
 
@@ -82,7 +82,7 @@ Varity automatically picks the right infrastructure for your app:
 2. Change \`"hosting": "static"\` to \`"hosting": "dynamic"\` in \`varity.config.json\`
 3. Re-deploy, Varity will provision compute instead of CDN
 
-> **Note:** Static export is the default because it's cheapest and fastest for most SaaS dashboards. Only switch to dynamic when you actually need API routes or SSR.
+> **Note:** Static export is the default because it's the fastest, flat-priced option for most SaaS dashboards. Only switch to dynamic when you actually need API routes or SSR.
 
 **Confirming which mode was used:** The \`varity_deploy\` response includes an \`"orchestration"\` field that states the detected mode, e.g.:
 \`\`\`
@@ -99,8 +99,8 @@ varity_deploy({ path: "/home/user/projects/my-app" })
 \`\`\`
 
 - **Always pass \`path\` explicitly**, if omitted, the MCP server's own working directory is used, which is rarely the user's project directory.
-- Use the \`project_path\` value returned by \`varity_init\` as the \`path\` value for \`varity_deploy\`.
-- The \`path\` parameter works the same way for \`varity_build\`, \`varity_dev_server\`, and \`varity_add_collection\`.
+- Pass the absolute path to the project root (the directory that contains \`package.json\`) as the \`path\` value for \`varity_deploy\`.
+- The \`path\` parameter works the same way for \`varity_build\` and \`varity_dev_server\`.
 
 ### Log Availability (what varity_deploy_logs returns)
 
@@ -131,21 +131,18 @@ The \`varity_deploy\` MCP tool returns a structured JSON object. Here are all th
 
 ## Billing
 
-Varity bills one flat monthly cost per app, based on the hardware you reserve (see Cost Comparison below). Add a payment method once, then deploy. The bill does not change with traffic, bandwidth, or invocations. Stop paying for a deployment by deleting it.
+Varity bills one flat monthly cost per app, based on the hardware you reserve. Add a payment method once, then deploy. The bill does not change with traffic, bandwidth, requests, or build minutes. Stop paying for a deployment by deleting it.
 
-## Cost Comparison
+## Pricing model
 
-Varity charges one flat monthly cost per app, based on the hardware you reserve. Your bill does not change with traffic, bandwidth, invocations, or build minutes. Vercel, Render, and Railway bill on usage, so their cost climbs as your app gets traction.
+Varity charges flat monthly per app, scoped to the hardware reserved (static / web app / web app + database / AI CPU / GPU tiers). The rest of the industry meters every dimension — request volume, bandwidth, build minutes, invocations — so their bills typically grow 5-40× as the app gets traction. Varity's doesn't move.
 
-| App | Varity (flat) | Vercel | Render | Railway |
-|-----|---------------|--------|--------|---------|
-| Static site | $5/mo | $20/mo | $7/mo | $25/mo |
-| Web app (no database) | $6/mo | $20/mo | $7/mo | $25/mo |
-| Web app + database | $6/mo | $40/mo | $14/mo | $35/mo |
-| AI agent (CPU) | $7/mo | $40/mo | $14/mo | $35/mo |
-| AI agent or model (GPU) | $458/mo | n/a | n/a | n/a |
+**Same app, monthly cost over 12 months:**
+- Month 1 (low traffic): free/hobby tiers elsewhere can start at $0; Varity's flat price wins as traffic grows
+- Month 6 (1K users): Varity stays flat; usage-metered hosting + managed-services stack typically runs 4-5× higher
+- Month 12+ (10K+ users): Varity stays flat; usage-metered hosting typically runs 10-50× higher
 
-Varity is 60-80% cheaper than Vercel, Render, or Railway at launch, and the gap widens as your app grows because their bills scale with traffic while yours stays flat. Varity is also the only one of the four that runs GPU workloads at all. For a live per-deployment estimate, use \`varity_cost_calculator\`.
+For current per-tier pricing, use \`varity_cost_calculator\` (returns live rates) or check varity.app/pricing.
 
 ## Common Commands
 
@@ -204,15 +201,14 @@ Varity is backed by enterprise-grade distributed infrastructure with redundancy 
 - **Deploy failed mid-way (network dropped during upload)**: Re-running \`varity_deploy\` is always safe, it creates a fresh deployment version and does not corrupt or affect any previous deployment. Your database and auth credentials are never modified by a failed deploy. If you want to check whether a deployment ID was assigned before the failure, run \`varity_deploy_status\`, if a status is returned, the upload started but may not have completed. Either way, simply re-run \`varity_deploy\` to get a new, clean deployment.
 - **Build fails**: Check \`varitykit doctor\` for missing dependencies
 - **Build killed (out of memory)**: Next.js 15 builds peak at ~3 GB of RAM. If \`varity_build\` or \`varity_deploy\` is killed by the OS, close other applications to free memory and try again. Run \`varity_doctor\`, it now checks free RAM against the 3 GB threshold and warns before you attempt a build. Note: \`varity_deploy\` runs the same local build as \`varity_build\`, so the same memory limit applies to both, freeing RAM is the fix, not switching tools.
-- **"Module not found" during build**: A required dependency is missing. In MCP tools, call \`varity_install_deps\` to reinstall all dependencies. For the specific \`@tanstack/react-query\` peer dep issue (caused by wagmi hoisting), call \`varity_install_deps({ packages: ['@tanstack/react-query'] })\`. If your \`next.config.js\` is missing the \`resolve.alias\` stubs for optional UI Kit sub-modules, the easiest fix is to compare it against a fresh project created with \`varity_init\`.
-- **next.config.js**: Ensure \`output: 'export'\`, \`images: { unoptimized: true }\`, \`trailingSlash: true\`
-- **Build output shows ~700 kB first-load JS**: This is expected for Varity apps, the auth and dashboard infrastructure accounts for most of that. Source maps are already disabled by default (\`productionBrowserSourceMaps: false\`). In production, Next.js code-splits JS across routes so users only download what each page needs, the ~700 kB figure is not all loaded at once. No action required.
+- **"Module not found" during build**: A required dependency is missing. Call \`varity_install_deps\` to reinstall all dependencies, then build again.
+- **next.config.js (static export)**: Ensure \`output: 'export'\`, \`images: { unoptimized: true }\`, \`trailingSlash: true\`
 - **Large bundle**: Disable source maps with \`productionBrowserSourceMaps: false\` and \`devtool: false\`
 - **PageNotFoundError / Cannot find module for page**: Clear your Next.js build cache (\`rm -rf .next\`) and try again, this happens when a previous build was interrupted. Then run \`varity_install_deps\` to ensure all dependencies are installed.
 
 ## Create GitHub Repository (60-Second Start)
 
-\`varity_create_repo\` creates a new GitHub repository pre-configured with the Varity SaaS template. The repo is immediately usable, no local setup required.
+\`varity_create_repo\` pushes your local project to a new GitHub repository, ready to deploy. Useful when you have code locally but no repo yet.
 
 **Requirements:**
 - A GitHub token (one of):
@@ -227,22 +223,20 @@ varity_create_repo({ name: "my-app", github_token: "ghp_..." })
 \`\`\`
 
 **What you get:**
-- A new GitHub repo named \`my-app\` under your account
-- The full Varity SaaS starter template pre-loaded (auth, database, payments UI)
-- A one-click open link for **Gitpod**, **StackBlitz**, or **GitHub Codespaces**, start coding in the browser instantly, no local install needed
+- A new GitHub repo named \`my-app\` under your account, with your local project code pushed to it
+- A GitHub URL you can pass straight to \`varity_deploy\`
 
 **Typical flow:**
-1. \`varity_create_repo({ name: "my-app" })\`, creates the repo
-2. Open in Codespaces or Gitpod using the returned URL
-3. \`varity_install_deps\` → \`varity_dev_server\` → \`varity_deploy\`
+1. \`varity_create_repo({ name: "my-app", path: "/path/to/project" })\`, creates the repo and pushes your code
+2. \`varity_deploy\`, deploys it live
 
 > **Name conflicts:** If the requested repository name is already taken on GitHub, \`varity_create_repo\` automatically appends a numeric suffix (e.g., \`my-app\` → \`my-app-2\`). The actual repo name is always returned in the response, check it before sharing links or pushing code.
 
 ## When to Use varity_install_deps
 
-\`varity_init\` installs dependencies automatically, you don't need to call \`varity_install_deps\` after init. Call it manually in these situations:
+Call \`varity_install_deps\` to install your project's dependencies. Common situations:
 
-- **After \`varity_create_repo\` + cloning**, the cloned repo has no \`node_modules\`
+- **After cloning a repo**, the cloned repo has no \`node_modules\`
 - **After adding a new npm package**, e.g., you ran \`npm install some-library\` and the lockfile changed
 - **After editing \`package.json\` manually**, to sync installed modules with the updated dependency list
 - **After a \`git pull\`**, if dependencies changed in the upstream commit

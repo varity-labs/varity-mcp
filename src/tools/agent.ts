@@ -14,7 +14,6 @@ import { execVaritykit } from "../utils/cli-bridge.js";
 interface AgentMeta {
   name: string;
   description: string;
-  primary_image: string;
   required_env: string[];
   optional_env: string[];
   exposed_ports: number[];
@@ -34,7 +33,6 @@ const AGENTS: Record<string, AgentMeta> = {
     description:
       "Self-hosted Telegram chatbot powered by an LLM (default: MiniMax-M2.5 via a hosted endpoint). " +
       "Connect a Telegram bot token and an LLM endpoint and chat with users through Telegram.",
-    primary_image: "ghcr.io/sandeep-narahari/hermes-agent-akash:sha-0e91691",
     required_env: ["OPENAI_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_ALLOWED_USERS"],
     optional_env: ["OPENAI_BASE_URL", "LLM_MODEL", "GATEWAY_ALLOW_ALL_USERS", "HERMES_HOME"],
     exposed_ports: [8080],
@@ -50,7 +48,6 @@ const AGENTS: Record<string, AgentMeta> = {
     description:
       "Self-hosted Claude-compatible chat UI with persistent conversation storage. " +
       "Web app exposed on a single port; you set a setup password on first run.",
-    primary_image: "ghcr.io/zjuuu/openclaw-docker:openclaw-v2026.4.21",
     required_env: ["SETUP_PASSWORD"],
     optional_env: ["OPENCLAW_CONFIG_PATH"],
     exposed_ports: [8080],
@@ -66,7 +63,6 @@ const AGENTS: Record<string, AgentMeta> = {
     description:
       "General-purpose AI agent framework runnable with zero configuration. " +
       "Web UI on port 80. Useful for evaluating agent frameworks without committing to a stack.",
-    primary_image: "agent0ai/agent-zero:v0.9.8",
     required_env: [],
     optional_env: [],
     exposed_ports: [80],
@@ -83,7 +79,6 @@ const AGENTS: Record<string, AgentMeta> = {
       "GPU-backed research environment based on nvidia/cuda, SSH-accessible Linux box " +
       "for running CUDA workloads. Heavy resource footprint (8 CPU, 32Gi RAM, GPU). " +
       "Access is via SSH only, not HTTP.",
-    primary_image: "nvidia/cuda:12.6.2-devel-ubuntu22.04",
     required_env: ["SSH_PUBKEY"],
     optional_env: ["NVIDIA_VISIBLE_DEVICES"],
     exposed_ports: [22],
@@ -102,7 +97,6 @@ const AGENTS: Record<string, AgentMeta> = {
       "ElizaOS AI agent framework configured with Venice (uncensored) LLM models, " +
       "designed for Twitter/X automation. Posts on a schedule, replies to mentions, " +
       "runs LLM-driven character interactions. Requires a Twitter account and a Venice API key.",
-    primary_image: "kylecohen01/venice_eliza:1.1",
     required_env: [
       "TWITTER_USERNAME",
       "TWITTER_PASSWORD",
@@ -198,7 +192,6 @@ export function registerAgentTools(server: McpServer): void {
       return successResponse(
         { slug: name, ...agent },
         `${agent.name}\n\n${agent.description}\n\n` +
-          `Image: ${agent.primary_image}\n` +
           `Access: ${agent.access}\n` +
           `Exposed ports: ${agent.exposed_ports.join(", ")}\n` +
           `Resources: cpu=${agent.resources.cpu}, memory=${agent.resources.memory}, storage=${agent.resources.storage}\n` +

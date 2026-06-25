@@ -12,7 +12,7 @@ export function registerDeleteDeploymentTool(server: McpServer): void {
         "Delete an existing Varity deployment by name and stop its billing immediately. " +
         "Use this when a developer says 'stop my <name>', 'shut down my deployment', 'I'm done with <name>', " +
         "'delete <name>', or when they no longer need a running app or agent. " +
-        "This closes the underlying compute lease and removes the deployment record, so usage charges stop accruing right away. " +
+        "This shuts down the running app and releases its reserved hardware, so charges stop accruing right away. " +
         "Static (CDN-hosted) deployments also stop being billed after delete. " +
         "Use varity_deploy_status or list deployments at https://varity.app/dashboard to confirm the name first if the developer is unsure.",
       inputSchema: {

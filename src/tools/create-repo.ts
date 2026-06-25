@@ -1,11 +1,9 @@
 /**
- * varity_create_repo - Create GitHub repo and push current project to it
+ * varity_create_repo - Create a GitHub repo and push the local project to it.
  *
- * For custom apps (the primary use case): creates an empty repo and pushes
- * the local project directory to GitHub. This is required for Akash dynamic
- * deployments which git clone the repo at runtime.
- *
- * For template-only usage (secondary): creates a repo from the SaaS template.
+ * Creates an empty repository and pushes the local project directory to GitHub.
+ * A GitHub URL is required for dynamic deployments, so this is the bridge when a
+ * developer has code locally but no repository yet.
  */
 
 import { z } from "zod";
@@ -45,45 +43,6 @@ async function createEmptyGitHubRepo(
       auto_init: false,
     }),
   });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: response.statusText })) as { message?: string };
-    if (response.status === 422 && error.message?.includes("already exists")) {
-      throw new Error(`Repository '${name}' already exists`);
-    }
-    throw new Error(error.message || `GitHub API error: ${response.statusText}`);
-  }
-
-  return response.json();
-}
-
-/**
- * Create GitHub repository from template (legacy, used when no local path provided).
- */
-async function createRepoFromTemplate(
-  name: string,
-  description: string | undefined,
-  visibility: "public" | "private",
-  token: string
-): Promise<GitHubRepo> {
-  const templateRepo = "varity-labs/varity-saas-template";
-  const response = await fetch(
-    `https://api.github.com/repos/${templateRepo}/generate`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `token ${token}`,
-        Accept: "application/vnd.github.v3+json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        name,
-        description: description || `Varity app - ${name}`,
-        private: visibility === "private",
-        include_all_branches: false,
-      }),
-    }
-  );
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ message: response.statusText })) as { message?: string };
@@ -211,11 +170,10 @@ export function registerCreateRepoTool(server: McpServer): void {
     {
       title: "Create GitHub Repository",
       description:
-        "Create a new GitHub repository and push the current project to it. " +
-        "For custom apps (the primary use case): pass the 'path' parameter with the local project directory, " +
-        "this creates an empty repo and pushes your actual code to GitHub. " +
-        "The GitHub URL is required for dynamic deployments, always call this before varity_deploy. " +
-        "For template-based quick-start: omit 'path' to create from the Varity SaaS template. " +
+        "Create a new GitHub repository and push your local project to it. " +
+        "Pass the 'path' parameter with the local project directory — this creates an empty repo " +
+        "and pushes your actual code to GitHub. " +
+        "The GitHub URL is required for dynamic deployments, so call this before varity_deploy when you have code locally but no repo yet. " +
         "Requires a GitHub personal access token (classic) with repo scope from https://github.com/settings/tokens.",
       inputSchema: {
         name: z
@@ -230,9 +188,8 @@ export function registerCreateRepoTool(server: McpServer): void {
           .optional()
           .describe(
             "Absolute path to the local project directory to push to GitHub " +
-            "(e.g. '/home/user/my-app'). When provided, pushes the actual project code. " +
-            "Required for custom apps that will use varity_deploy with dynamic hosting. " +
-            "If omitted, creates a repo from the Varity SaaS template instead."
+            "(e.g. '/home/user/my-app'). Pushes the actual project code. " +
+            "Required for apps that will use varity_deploy with dynamic hosting."
           ),
         visibility: z.enum(["public", "private"]).default("public").describe("Repository visibility"),
         github_token: z
@@ -340,42 +297,10 @@ export function registerCreateRepoTool(server: McpServer): void {
           );
 
         } else {
-          // === SECONDARY FLOW: Create from SaaS template (no local project) ===
-          const { repo, usedName, wasTaken } = await createRepoWithRetry(
-            (n) => createRepoFromTemplate(n, description, visibility, token!),
-            name
-          );
-
-          const gitpodUrl = `https://gitpod.io/#${repo.html_url}`;
-          const stackblitzUrl = `https://stackblitz.com/github/${repo.full_name}`;
-          const codespaceUrl = `https://github.com/codespaces/new?hide_repo_select=true&ref=main&repo=${repo.full_name}`;
-          const nameNote = wasTaken
-            ? `⚠️ '${name}' was already taken, repository created as '${usedName}'.`
-            : undefined;
-
-          return successResponse(
-            {
-              repository: {
-                name: repo.full_name,
-                url: repo.html_url,
-                clone_url: repo.clone_url,
-                ssh_url: repo.ssh_url,
-              },
-              template: "saas-starter",
-              ...(nameNote ? { name_collision_note: nameNote } : {}),
-              quick_start: {
-                gitpod: gitpodUrl,
-                stackblitz: stackblitzUrl,
-                codespace: codespaceUrl,
-              },
-              next_steps: [
-                ...(nameNote ? [`⚠️ Repo created as '${usedName}', use this name everywhere`] : []),
-                `Option A, Local: (1) Clone: git clone ${repo.clone_url}, (2) varity_install_deps, (3) varity_dev_server`,
-                `Option B, Browser IDE: Open ${gitpodUrl}`,
-                "Then deploy: varity_deploy",
-              ],
-            },
-            `Repository created: ${repo.html_url}${nameNote ? `, ${nameNote}` : ""}`
+          return errorResponse(
+            "PATH_REQUIRED",
+            "A project path is required.",
+            "Pass the 'path' parameter with your local project directory so its code can be pushed to the new GitHub repository."
           );
         }
       } catch (error) {

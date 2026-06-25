@@ -103,7 +103,7 @@ export function registerDevServerTool(server: McpServer): void {
         return errorResponse(
           "PATH_NOT_FOUND",
           `Project directory does not exist: ${projectPath}`,
-          "Check the path and ensure the project has been created (use varity_init first)."
+          "Check the path and ensure the project directory exists and contains a package.json."
         );
       }
 
