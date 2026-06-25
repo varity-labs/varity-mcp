@@ -2,8 +2,8 @@
 
 The CANONICAL home of **`@varity-labs/mcp`** (npm, public repo) — the thin MCP server that shells to `varitykit`. Same engine, no second implementation; the orchestration lives in `varitykit` / the gateway, never here.
 
-## STATUS (verified 2026-06-09)
-Live and published to npm (`latest` + `beta`). Develop MCP changes HERE, then sync them into the in-repo mirror at `../varity-sdk-private/packages/cli/varity-mcp/` — keep both aligned on every change. For the published version + tool count, see the manifest `product.packages."@varity-labs/mcp"` (do not restate here).
+## STATUS (verified 2026-06-24)
+Live and published to npm (`latest`). Develop MCP changes HERE only. Do not sync into the frozen in-repo mirror at `../varity-sdk-private/packages/cli/varity-mcp/`; that mirror is unmaintained and out of product scope. For the published version + tool count, see the manifest `product.packages."@varity-labs/mcp"` (do not restate here).
 
 ## WIRES IN
 - **Downstream (this calls):** shells `varitykit` for every deploy operation; `varity_cost_calculator` hits the gateway `/api/pricing`. It does NOT talk to Akash/IPFS/db-proxy directly — those are reached only through `varitykit` / the gateway.
@@ -20,7 +20,7 @@ Live and published to npm (`latest` + `beta`). Develop MCP changes HERE, then sy
 ## Repo-specific operational facts
 - Build: `npm run build` (tsc). Dev: `npm run dev` (tsc --watch). HTTP transport: `npm run start:http` (port 3100).
 - Bin: `varity-mcp` → `dist/index.js`.
-- Publish (founder action): bump BOTH `package.json` version AND `src/server.ts` `VERSION`, `npm publish --tag beta --access public`, then sync the change into the in-repo mirror.
+- Publish (founder action): bump BOTH `package.json` version AND `src/server.ts` `VERSION`, then `npm publish --access public` for the stable `latest` release. Use `--tag beta` only for an intentional prerelease.
 
 ## IGNORE-HERE (dormant / out of scope)
 - Any tool/description referencing the App Store / submit-to-store, the SDK / ui-kit / types, `create-varity-app`, or SaaS-template scaffolding — dormant `sdk_pre_investment`, not the product, never promoted to users.

@@ -4,9 +4,11 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/varity-labs/varity-mcp/blob/main/LICENSE)
 [![Status: Beta](https://img.shields.io/badge/Status-Beta-yellow.svg)](https://github.com/varity-labs/varity-mcp)
 
-> Deploy production apps and AI agents from Cursor, Claude Code, VS Code, Windsurf, or ChatGPT. Flat predictable pricing — your bill stays the same as your app grows.
+> The published Varity MCP package for Cursor, Claude Code, VS Code, Windsurf, and other MCP clients.
 
-The Varity MCP Server lets your AI editor build, deploy, and manage apps in production for you. Flat monthly cost per app, locked at deploy time based on hardware reserved — no usage-based billing, no surprise overages. One server, every AI client, zero commands.
+This repository contains only `@varity-labs/mcp`, the npm MCP server. It is a thin tool wrapper around `varitykit` and Varity's gateway APIs; it is not the Python CLI, the portal, the dormant SDK, or an app-store package.
+
+The Varity MCP Server lets your AI editor build, deploy, and manage supported apps in production for you. Flat monthly cost per app, locked at deploy time based on hardware reserved — no usage-based billing, no surprise overages. One server, every AI client, zero commands.
 
 **Browser usage**: see the [browser usage guide](https://docs.varity.so/ai-tools/browser-usage) for Claude.ai or ChatGPT browser.
 **Quick start**: pick your editor below and run one command.
@@ -124,6 +126,8 @@ The MCP exposes Varity's deploy surface so your AI tool can take action — not 
 | `varity_deploy_status` | Check the status of a deployment |
 | `varity_deploy_logs` | Read build and runtime logs |
 | `varity_delete_deployment` | Stop a deployment and end its billing |
+| `varity_set_env` | Set or replace environment variables on a live deployment, then redeploy |
+| `varity_redeploy` | Restart or redeploy an existing deployment in place |
 | `varity_list_agents` | List the curated AI agent templates Varity can deploy |
 | `varity_agent_info` | Show full details for one AI agent template (env vars, ports, cost) |
 | `varity_deploy_agent` | Deploy a curated AI agent template by name |
@@ -199,6 +203,6 @@ Varity charges a flat monthly price per app, locked at deploy time based on the 
 
 ---
 
-**Deploy any app from your AI coding tool.** Flat predictable pricing — your bill stays the same as your app grows.
+**Deploy supported apps from your AI coding tool.** Flat predictable pricing — your bill stays the same as your app grows.
 
 [Documentation](https://docs.varity.so/ai-tools/mcp-server-spec) · [GitHub](https://github.com/varity-labs/varity-mcp) · [Discord](https://discord.gg/7vWsdwa2Bg)

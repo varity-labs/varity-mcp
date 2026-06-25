@@ -1,7 +1,7 @@
 {
   "name": "@varity-labs/mcp",
   "version": "2.3.0",
-  "description": "Varity MCP Server: deploy any app from Cursor, Claude Code, VS Code, Windsurf, or ChatGPT. Flat predictable pricing — your bill stays the same as your app grows.",
+  "description": "Varity MCP Server: deploy and operate supported Varity apps from Cursor, Claude Code, VS Code, Windsurf, or ChatGPT.",
   "type": "module",
   "bin": {
     "varity-mcp": "./dist/index.js"
@@ -36,8 +36,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/varity-labs/varity-mcp.git",
-    "directory": "packages/cli/varity-mcp"
+    "url": "git+https://github.com/varity-labs/varity-mcp.git"
   },
   "homepage": "https://docs.varity.so/ai-tools/mcp-server-spec",
   "bugs": {

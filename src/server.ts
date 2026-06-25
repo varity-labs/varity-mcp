@@ -27,10 +27,9 @@ export type TransportMode = "stdio" | "http";
 /**
  * Create and configure the Varity MCP Server.
  *
- * Varity lets developers deploy any app — websites, APIs, AI agents — in 60 seconds
- * with flat hardware-reserved pricing that doesn't spike with traffic. This MCP server
- * exposes that deploy surface to AI coding tools (Cursor, Claude Code, Codex, etc.) so
- * they can scaffold, build, and ship apps for the user.
+ * This package is the published Varity MCP server. It exposes Varity's supported
+ * deploy and operate surface to AI coding tools (Cursor, Claude Code, Codex, etc.)
+ * so they can scaffold, build, ship, and manage apps for the user.
  *
  * Tool surface:
  *   - Discovery: search-docs, cost-calculator, doctor
