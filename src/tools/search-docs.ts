@@ -3,7 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { INFRASTRUCTURE } from "../utils/config.js";
 
-// Thin proxy to the LIVE documentation. The package ships no embedded doc corpus —
+// Thin proxy to the LIVE documentation. The package ships no embedded doc corpus.
 // content is fetched from docs.varity.so at runtime (cached for the process), so the
 // docs are always current and nothing goes stale inside the published package.
 

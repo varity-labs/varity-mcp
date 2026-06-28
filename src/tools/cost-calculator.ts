@@ -12,7 +12,7 @@ import { INFRASTRUCTURE } from "../utils/config.js";
  * duplicated pricing numbers anywhere.
  *
  * The point this tool makes memorable: Varity charges ONLY for hardware and
- * the price is FLAT — it doesn't spike with traffic the way usage-metered
+ * the price is FLAT. It doesn't spike with traffic the way usage-metered
  * hosting (bandwidth + invocation metered) does. Varity's price is flat and
  * doesn't move as the app grows, and uniquely runs everything including GPU.
  */
@@ -45,7 +45,7 @@ export function registerCostCalculatorTool(server: McpServer): void {
           .optional()
           .default("web-app")
           .describe(
-            "Pre-deploy estimate preset: static-site (flat $5/mo), web-app, web-app-db, ai-agent-cpu, ai-agent-gpu"
+            "Pre-deploy estimate preset. Accepted values: static-site, web-app, web-app-db, ai-agent-cpu, ai-agent-gpu. Estimates are computed by the live Varity pricing API."
           ),
         subdomain: z
           .string()

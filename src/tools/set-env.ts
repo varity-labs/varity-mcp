@@ -12,7 +12,7 @@ export function registerSetEnvTool(server: McpServer): void {
         "Set or update environment variables (config + secrets) on an app that is ALREADY deployed, " +
         "then redeploy it in place. Use this when a developer says 'add an env var to <name>', " +
         "'change the API key on <name>', 'set DATABASE_URL on my app', or 'update the config and redeploy'. " +
-        "The variables are applied to the SAME deployment — same URL, same reserved hardware, no new bid — " +
+        "The variables are applied to the SAME deployment. Same URL, same reserved hardware, no new bid. " +
         "so the change goes live in about a minute with no downtime churn. By default the new variables are " +
         "MERGED over the existing set; pass replace=true to overwrite the entire set. Variable values are " +
         "write-only and are never echoed back. To create a NEW deployment instead, use varity_deploy.",
@@ -41,7 +41,7 @@ export function registerSetEnvTool(server: McpServer): void {
         return errorResponse(
           "MISSING_NAME",
           "Deployment name is required.",
-          "Ask the user for the app name they want to update — it's the slug in their varity.app URL."
+          "Ask the user for the app name they want to update. It is the slug in their varity.app URL."
         );
       }
       const entries = Object.entries(env ?? {});
@@ -53,8 +53,8 @@ export function registerSetEnvTool(server: McpServer): void {
         );
       }
 
-      // Enforce the documented UPPER_SNAKE_CASE rule before building argv — and reject the
-      // app name if it could be read as a flag — so no key/name can smuggle a CLI flag
+      // Enforce the documented UPPER_SNAKE_CASE rule before building argv, and reject the
+      // app name if it could be read as a flag, so no key/name can smuggle a CLI flag
       // (argv flag injection). The gateway validates again server-side (defense in depth).
       const KEY_RE = /^[A-Z_][A-Z0-9_]*$/;
       for (const [k] of entries) {
@@ -82,7 +82,7 @@ export function registerSetEnvTool(server: McpServer): void {
         return successResponse(
           { name, updated_keys: keys, replaced: Boolean(replace) },
           `Updated ${keys.length} variable(s) on "${name}" (${keys.join(", ")}). ` +
-            `Redeploying in place on the same hardware — the change goes live in about a minute. ` +
+            `Redeploying in place on the same hardware. The change goes live in about a minute. ` +
             `Values are not shown back for security.`
         );
       }

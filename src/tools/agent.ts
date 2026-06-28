@@ -127,11 +127,11 @@ export function registerAgentTools(server: McpServer): void {
       title: "List Available AI Agent Templates",
       description:
         "List the curated AI agent templates Varity can deploy with one command. " +
-        "Available agents: hermes (Telegram bot, ~$16/mo), openclaw (Claude-compatible chat, ~$38/mo), " +
-        "agent-zero (general-purpose, zero config, ~$14/mo), autoresearch (GPU CUDA workstation, ~$280/mo), " +
-        "eliza-venice (Twitter automation, ~$168/mo). " +
+        "Available agents: hermes (Telegram bot), openclaw (Claude-compatible chat), " +
+        "agent-zero (general-purpose, zero config), autoresearch (GPU CUDA workstation), " +
+        "eliza-venice (Twitter automation). " +
         "Use this when a developer asks 'what AI agents can I deploy?' or wants to compare options. " +
-        "Returns name, description, estimated monthly cost, required environment variables, exposed ports, and resource footprint. " +
+        "Returns name, description, current estimate fields, required environment variables, exposed ports, and resource footprint. " +
         "After picking one, deploy with varity_deploy_agent.",
       inputSchema: {},
     },

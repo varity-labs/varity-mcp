@@ -156,7 +156,7 @@ export function registerDevServerTool(server: McpServer): void {
         if (!portFound) {
           return errorResponse(
             "PORT_IN_USE",
-            `Ports ${port}–${port + 99} are all in use.`,
+            `Ports ${port}-${port + 99} are all in use.`,
             "Try port 4000 specifically (pass port: 4000), or free up a port and try again."
           );
         }

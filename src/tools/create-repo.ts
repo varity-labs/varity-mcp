@@ -171,7 +171,7 @@ export function registerCreateRepoTool(server: McpServer): void {
       title: "Create GitHub Repository",
       description:
         "Create a new GitHub repository and push your local project to it. " +
-        "Pass the 'path' parameter with the local project directory — this creates an empty repo " +
+        "Pass the 'path' parameter with the local project directory. This creates an empty repo " +
         "and pushes your actual code to GitHub. " +
         "The GitHub URL is required for dynamic deployments, so call this before varity_deploy when you have code locally but no repo yet. " +
         "Requires a GitHub personal access token (classic) with repo scope from https://github.com/settings/tokens.",

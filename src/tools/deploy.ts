@@ -20,7 +20,7 @@ export function registerDeployTool(server: McpServer): void {
       description:
         "Deploy the current project to production on Varity. " +
         "Detects the framework, selects the right hosting, and ships it live at https://varity.app/<name>/. " +
-        "Zero configuration required. Flat hardware-reserved pricing — your bill stays the same as your app grows. " +
+        "Zero configuration required. Flat hardware-reserved pricing. Your bill stays the same as your app grows. " +
         "No usage-based billing, no surprise overages. " +
         "Use this when a developer wants to deploy, publish, ship, or make their app live. " +
         "If the developer wants to deploy a curated AI agent (Telegram bot, chat UI, etc.) rather than their own code, " +
@@ -178,7 +178,7 @@ export function registerDeployTool(server: McpServer): void {
       // Pure passthrough to `varitykit app deploy`. The CLI + deploy-api are the
       // single hosting authority: framework detection, static-vs-dynamic hosting
       // selection, sidecar auto-config, build, and provider selection all happen
-      // server-side. The MCP asserts NO hosting opinion — it only forwards the
+      // server-side. The MCP asserts NO hosting opinion. It only forwards the
       // project path, the (optional) repo URL, and the (optional) app name.
       // `--mode auto` / `--hosting auto` are the CLI defaults, so we pass neither.
       const args = ["deploy"];

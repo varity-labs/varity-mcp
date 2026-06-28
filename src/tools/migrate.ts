@@ -26,7 +26,7 @@ async function extractDeployUrl(output: string): Promise<string> {
     const jsonFiles = files.filter((f) => f.endsWith(".json")).sort().reverse();
     if (jsonFiles.length > 0) {
       const latest = JSON.parse(await readFile(join(deploymentsDir, jsonFiles[0]!), "utf-8"));
-      // Always surface the clean varity.app URL — never a raw provider/IPFS host.
+      // Always surface the clean varity.app URL. Never a raw provider/IPFS host.
       if (latest.custom_domain?.url) return latest.custom_domain.url;
       const slug = latest.custom_domain?.subdomain || latest.app_name || latest.project_name;
       if (slug) return `https://varity.app/${slug}/`;

@@ -10,9 +10,9 @@ export function registerRedeployTool(server: McpServer): void {
       title: "Redeploy or Restart an Existing Deployment In Place",
       description:
         "Redeploy or restart an app that is ALREADY deployed, in place. Use this when a developer says " +
-        "'redeploy <name>', 'restart <name>', 'my app is stuck — restart it', or 'pull the latest image and " +
-        "redeploy'. The app is re-deployed on the SAME deployment — same URL, same reserved hardware, no new " +
-        "bid — re-pulling the image (or rebuilding from source) and restarting the container, so it goes live " +
+        "'redeploy <name>', 'restart <name>', 'my app is stuck, restart it', or 'pull the latest image and " +
+        "redeploy'. The app is re-deployed on the SAME deployment. Same URL, same reserved hardware, no new " +
+        "bid. It re-pulls the image (or rebuilds from source) and restarts the container, so it goes live " +
         "in about a minute with no URL change. To change env vars at the same time, use varity_set_env. To " +
         "create a NEW deployment instead, use varity_deploy.",
       inputSchema: {
@@ -28,7 +28,7 @@ export function registerRedeployTool(server: McpServer): void {
         return errorResponse(
           "MISSING_NAME",
           "Deployment name is required.",
-          "Ask the user for the app name they want to redeploy — it's the slug in their varity.app URL."
+          "Ask the user for the app name they want to redeploy. It is the slug in their varity.app URL."
         );
       }
       if (name.startsWith("-")) {
@@ -41,7 +41,7 @@ export function registerRedeployTool(server: McpServer): void {
       if (result.exitCode === 0) {
         return successResponse(
           { name, action: "redeploy" },
-          `Redeploying "${name}" in place on the same hardware and URL — it goes live in about a minute.`
+          `Redeploying "${name}" in place on the same hardware and URL. It goes live in about a minute.`
         );
       }
 
