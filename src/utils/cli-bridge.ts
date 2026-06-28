@@ -90,7 +90,7 @@ export async function execNpx(
 export async function execVaritykit(
   subcommand: string,
   args: string[] = [],
-  options: { timeout?: number; cwd?: string } = {}
+  options: { timeout?: number; cwd?: string; env?: NodeJS.ProcessEnv } = {}
 ): Promise<CLIResult> {
   const result = await execCLI("varitykit", [subcommand, ...args], options);
   if (

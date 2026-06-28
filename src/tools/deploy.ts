@@ -74,6 +74,32 @@ export function registerDeployTool(server: McpServer): void {
           .int()
           .optional()
           .describe("Container listen port for an --image deploy (default 80)."),
+        command: z
+          .array(z.string())
+          .optional()
+          .describe("Advanced runtime override: container command/argv for image or Dockerfile deploys."),
+        args: z
+          .array(z.string())
+          .optional()
+          .describe("Advanced runtime override: additional command arguments."),
+        health_path: z
+          .string()
+          .optional()
+          .describe("Advanced runtime override: HTTP startup health path, for example '/health'."),
+        memory_mb: z
+          .number()
+          .int()
+          .optional()
+          .describe("Advanced runtime override: reserved memory in MiB."),
+        cpu_units: z
+          .number()
+          .optional()
+          .describe("Advanced runtime override: reserved CPU units."),
+        storage_mb: z
+          .number()
+          .int()
+          .optional()
+          .describe("Advanced runtime override: reserved storage in MiB."),
         volume_size: z
           .number()
           .int()
@@ -94,7 +120,22 @@ export function registerDeployTool(server: McpServer): void {
         destructiveHint: true, // Deploys real infrastructure
       },
     },
-    async ({ path, repo_url, app_name, image, image_credentials, port, volume_size, volume_path }) => {
+    async ({
+      path,
+      repo_url,
+      app_name,
+      image,
+      image_credentials,
+      port,
+      command,
+      args: runtime_args,
+      health_path,
+      memory_mb,
+      cpu_units,
+      storage_mb,
+      volume_size,
+      volume_path,
+    }) => {
       // Check if varitykit is installed, auto-install if missing
       let hasVaritykit = await isCLIAvailable("varitykit");
       if (!hasVaritykit) {
@@ -200,6 +241,28 @@ export function registerDeployTool(server: McpServer): void {
           args.push("--port", String(port));
         }
       }
+      if (command) {
+        for (const part of command) {
+          args.push("--command", part);
+        }
+      }
+      if (runtime_args) {
+        for (const part of runtime_args) {
+          args.push("--arg", part);
+        }
+      }
+      if (health_path) {
+        args.push("--health-path", health_path);
+      }
+      if (memory_mb != null) {
+        args.push("--memory-mb", String(memory_mb));
+      }
+      if (cpu_units != null) {
+        args.push("--cpu-units", String(cpu_units));
+      }
+      if (storage_mb != null) {
+        args.push("--storage-mb", String(storage_mb));
+      }
       if (app_name) {
         args.push("--name", app_name);
       }
@@ -214,6 +277,7 @@ export function registerDeployTool(server: McpServer): void {
 
       const result = await execVaritykit("app", args, {
         cwd,
+        env: { VARITY_CLIENT_SURFACE: "mcp" },
         timeout: 300_000, // 5 minutes for build + deploy
       });
 
