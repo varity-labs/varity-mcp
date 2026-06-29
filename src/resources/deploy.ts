@@ -149,8 +149,9 @@ For current per-tier pricing, use \`varity_cost_calculator\` (returns live rates
 \`\`\`bash
 varitykit login              # Authenticate
 varitykit doctor             # Check environment setup
-varitykit init               # Initialize a new app from template
+varitykit app templates      # List certified deploy templates
 varitykit app deploy         # Build and deploy
+varitykit app deploy --template <id>  # Deploy a certified template
 varitykit app list           # List your deployed apps
 varitykit deploy status      # Check deployment status
 varitykit deploy logs        # View deployment logs
@@ -242,4 +243,3 @@ Call \`varity_install_deps\` to install your project's dependencies. Common situ
 - **After a \`git pull\`**, if dependencies changed in the upstream commit
 - **When \`varity_build\` reports "Module not found"**, a missing dependency; re-running install often fixes it
 `;
-

@@ -88,11 +88,10 @@ The MCP exposes Varity's deploy surface so your AI tool can take action — not 
 - "Ship this app live"
 - "What would it cost to deploy this on Varity?"
 
-**Deploy a ready-made AI agent (one command, no code required)**
-- "Deploy a Telegram chatbot for me"
+**Deploy a certified template (one command, no code required)**
+- "What templates can Varity deploy?"
 - "Spin up Agent Zero"
-- "I want a Claude-compatible chat UI"
-- "What AI agents can Varity deploy?"
+- "Deploy a private app template for me"
 
 **Manage live deployments**
 - "Show my deployments"
@@ -128,24 +127,19 @@ The MCP exposes Varity's deploy surface so your AI tool can take action — not 
 | `varity_delete_deployment` | Stop a deployment and end its billing |
 | `varity_set_env` | Set or replace environment variables on a live deployment, then redeploy |
 | `varity_redeploy` | Restart or redeploy an existing deployment in place |
-| `varity_list_agents` | List the curated AI agent templates Varity can deploy |
-| `varity_agent_info` | Show full details for one AI agent template (env vars, ports, cost) |
-| `varity_deploy_agent` | Deploy a curated AI agent template by name |
+| `varity_list_templates` | List certified gateway-owned Varity templates |
+| `varity_template_info` | Show full details for one certified template |
+| `varity_deploy_template` | Deploy a certified template by ID |
+| `varity_list_agents` | Backward-compatible alias for `varity_list_templates` |
+| `varity_agent_info` | Backward-compatible alias for `varity_template_info` |
+| `varity_deploy_agent` | Backward-compatible alias for `varity_deploy_template` |
 | `varity_migrate` | Migrate an app from Vercel to Varity |
 
-## AI agent templates
+## Templates
 
-Varity ships 5 curated AI agent templates that deploy with one command and no code from you:
+Varity templates come from the gateway-owned certified catalog. Ask your AI editor "what templates can I deploy?" or "deploy Agent Zero for me" and it will list the live catalog, inspect the selected template contract, and deploy it through `varitykit app deploy --template <id>`.
 
-| Agent | What it is |
-|---|---|
-| `hermes` | Self-hosted Telegram chatbot powered by an LLM |
-| `openclaw` | Claude-compatible web chat UI with persistent history |
-| `agent-zero` | General-purpose AI agent framework — zero required env vars |
-| `autoresearch` | GPU-backed CUDA workstation (SSH access) |
-| `eliza-venice` | ElizaOS agent for Twitter/X automation |
-
-Ask your AI editor "what AI agents can I deploy?" or "deploy hermes for me" and it will use the agent tools above. Each agent reserves different hardware — use `varity_agent_info <name>` to see current monthly cost. Each agent also has a small set of required environment variables (e.g. a Telegram bot token, an API key) that the AI editor will prompt you for.
+Each template reserves different hardware. Use `varity_template_info` to see the required environment variables, private/public access mode, resources, hardware profile, and certification state before deploying.
 
 ## End-to-end example
 
@@ -156,12 +150,9 @@ You: "Make me a simple landing page for my coffee shop and deploy it"
 AI:  Wrote the landing page, ran the build, deployed live at
      https://varity.app/coffee-shop/
 
-You: "Now deploy a Telegram bot I can chat with"
-AI:  Need three things: an OpenAI API key, a Telegram bot token (get
-     one from @BotFather), and your Telegram user ID.
-You: (provides them)
-AI:  Deployed hermes agent at https://varity.app/my-bot/
-     Send a message to your bot on Telegram to chat with it.
+You: "Now deploy Agent Zero"
+AI:  Agent Zero is certified and does not require environment variables.
+AI:  Deployed Agent Zero at https://varity.app/my-agent/
 ```
 
 ## How Varity is priced

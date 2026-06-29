@@ -20,7 +20,7 @@ import { registerSetEnvTool } from "./tools/set-env.js";
 import { registerRedeployTool } from "./tools/redeploy.js";
 import { createOAuthProvider } from "./auth/provider.js";
 
-export const VERSION = "2.3.0";
+export const VERSION = "2.3.5";
 
 export type TransportMode = "stdio" | "http";
 
@@ -36,7 +36,7 @@ export type TransportMode = "stdio" | "http";
  *   - Setup: install-deps, build, login
  *   - Deploy own code: deploy, deploy-status, deploy-logs, delete-deployment
  *   - Operate: set-env, redeploy (edit config / redeploy + restart in place)
- *   - Deploy curated AI agent templates: list-agents, agent-info, deploy-agent
+ *   - Deploy certified templates: list-templates, template-info, deploy-template
  *   - Local-dev (stdio only): open-browser, dev-server
  *   - Project ops: create-repo, migrate
  */
@@ -80,7 +80,7 @@ export function createVarityServer(mode: TransportMode = "stdio"): McpServer {
   registerSetEnvTool(server);
   registerRedeployTool(server);
 
-  // ── AI agent tools, curated templates with one-command deploy ──
+  // ── Template tools (gateway-owned certified catalog, plus legacy aliases) ──
   registerAgentTools(server);
   registerMigrateTool(server);
 

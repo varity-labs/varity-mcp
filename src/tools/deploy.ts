@@ -23,8 +23,8 @@ export function registerDeployTool(server: McpServer): void {
         "Zero configuration required. Flat hardware-reserved pricing. Your bill stays the same as your app grows. " +
         "No usage-based billing, no surprise overages. " +
         "Use this when a developer wants to deploy, publish, ship, or make their app live. " +
-        "If the developer wants to deploy a curated AI agent (Telegram bot, chat UI, etc.) rather than their own code, " +
-        "use varity_deploy_agent instead. To stop a deployment and its billing, use varity_delete_deployment.",
+        "If the developer wants to deploy a certified template rather than their own code, " +
+        "use varity_deploy_template instead. To stop a deployment and its billing, use varity_delete_deployment.",
       inputSchema: {
         path: z
           .string()

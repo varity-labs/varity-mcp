@@ -20,7 +20,7 @@ export function registerDeleteDeploymentTool(server: McpServer): void {
           .string()
           .describe(
             "The subdomain / app name of the deployment to delete. This is the slug in https://varity.app/<name>/. " +
-              "Example: 'my-hermes-bot' or 'mvp-static-test'."
+              "Example: 'worker-bot' or 'mvp-static-test'."
           ),
       },
     },
