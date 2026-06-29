@@ -2,6 +2,7 @@ import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { execVaritykit } from "../utils/cli-bridge.js";
+import { DEPLOY_TIMEOUT_MS } from "../utils/deploy-timeout.js";
 
 /**
  * Curated AI-agent deploy templates available via `varitykit app deploy --agent <name>`.
@@ -269,7 +270,7 @@ export function registerAgentTools(server: McpServer): void {
         }
       }
 
-      const result = await execVaritykit("app", args, { timeout: 300_000 }); // 5min for agent deploys
+      const result = await execVaritykit("app", args, { timeout: DEPLOY_TIMEOUT_MS });
 
       if (result.exitCode === 0) {
         return successResponse(

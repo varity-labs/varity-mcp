@@ -6,6 +6,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { execCLI, execVaritykit } from "../utils/cli-bridge.js";
 import { getDeploymentsDir } from "../utils/config.js";
+import { DEPLOY_TIMEOUT_MS } from "../utils/deploy-timeout.js";
 
 function isGitHubUrl(url: string): boolean {
   return /^https?:\/\/github\.com\/|^git@github\.com:/.test(url);
@@ -234,7 +235,7 @@ export function registerMigrateTool(server: McpServer): void {
           "--path", cloneDir,
           "--repo-url", github_url,
         ],
-        { timeout: 300_000 }
+        { timeout: DEPLOY_TIMEOUT_MS }
       );
 
       const deployOutput = deployResult.stdout + "\n" + deployResult.stderr;

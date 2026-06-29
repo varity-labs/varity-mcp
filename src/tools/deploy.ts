@@ -4,6 +4,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { execCLI, execVaritykit, isCLIAvailable } from "../utils/cli-bridge.js";
 import { getDeploymentsDir } from "../utils/config.js";
+import { DEPLOY_TIMEOUT_MS } from "../utils/deploy-timeout.js";
 
 /** Strip ANSI escape codes from CLI output before string matching. */
 // eslint-disable-next-line no-control-regex
@@ -278,7 +279,7 @@ export function registerDeployTool(server: McpServer): void {
       const result = await execVaritykit("app", args, {
         cwd,
         env: { VARITY_CLIENT_SURFACE: "mcp" },
-        timeout: 300_000, // 5 minutes for build + deploy
+        timeout: DEPLOY_TIMEOUT_MS,
       });
 
       if (result.exitCode === 0) {
