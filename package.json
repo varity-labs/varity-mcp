@@ -1,6 +1,6 @@
 {
   "name": "@varity-labs/mcp",
-  "version": "2.3.1",
+  "version": "2.3.2",
   "description": "Varity MCP Server: deploy and operate supported Varity apps from Cursor, Claude Code, VS Code, Windsurf, or ChatGPT.",
   "type": "module",
   "bin": {
@@ -13,7 +13,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/ensure-bin-mode.cjs",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
     "start:http": "node dist/index.js --transport http --port 3100",

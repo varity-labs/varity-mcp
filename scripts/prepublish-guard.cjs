@@ -17,6 +17,16 @@ if (!fs.existsSync(DIST)) {
   process.exit(1);
 }
 
+const BIN = path.join(DIST, "index.js");
+if (!fs.existsSync(BIN)) {
+  console.error("[prepublish-guard] dist/index.js not found — build output is incomplete.");
+  process.exit(1);
+}
+if ((fs.statSync(BIN).mode & 0o111) === 0) {
+  console.error("[prepublish-guard] dist/index.js is not executable — npx would fail with Permission denied.");
+  process.exit(1);
+}
+
 // Unambiguous forbidden phrases (comparative pricing + competitor cost framing).
 // Whole competitor names are intentionally NOT grepped raw — the React `render:`
 // prop and similar would false-positive; we match the violating PHRASES instead.
