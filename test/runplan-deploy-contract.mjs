@@ -7,10 +7,11 @@ const agentTool = readFileSync(new URL("../src/tools/agent.ts", import.meta.url)
 const migrateTool = readFileSync(new URL("../src/tools/migrate.ts", import.meta.url), "utf8");
 const cliBridge = readFileSync(new URL("../src/utils/cli-bridge.ts", import.meta.url), "utf8");
 const deployTimeout = readFileSync(new URL("../src/utils/deploy-timeout.ts", import.meta.url), "utf8");
+const reEscape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 test("varity_deploy forwards RUNPLAN runtime override flags", () => {
-  for (const flag of ["--command", "--arg", "--health-path", "--memory-mb", "--cpu-units", "--storage-mb"]) {
-    assert.match(deployTool, new RegExp(`args\\.push\\("${flag.replace("-", "\\-")}"`));
+  for (const flag of ["--command", "--arg", "--health-path", "--dockerfile-path", "--docker-context-path", "--memory-mb", "--cpu-units", "--storage-mb", "--service"]) {
+    assert.match(deployTool, new RegExp(`args\\.push\\("${reEscape(flag)}"`));
   }
 });
 
@@ -32,4 +33,28 @@ test("execVaritykit preserves environment overrides through direct and python fa
   assert.match(cliBridge, /env\?: NodeJS\.ProcessEnv/);
   assert.match(cliBridge, /execCLI\("varitykit", \[subcommand, \.\.\.args\], options\)/);
   assert.match(cliBridge, /execCLI\("python", \["-m", "varitykit", subcommand, \.\.\.args\], options\)/);
+});
+
+test("varity_deploy prefers the current CLI URL over stale local deployment receipts", () => {
+  assert.match(deployTool, /function extractDeployUrl\(output: string\): string \| null/);
+  assert.match(deployTool, /const cliDeployUrl = extractDeployUrl\(output\)/);
+  assert.match(deployTool, /let deployUrl = cliDeployUrl \?\? "unknown"/);
+  assert.match(deployTool, /if \(!cliDeployUrl && jsonFiles\.length > 0\)/);
+});
+
+test("varity_deploy can derive share cards from dynamic subdomain URLs", () => {
+  assert.match(deployTool, /function varitySlugFromUrl\(url: string\): string \| null/);
+  assert.match(deployTool, /const dynamicMatch = url\.match/);
+  assert.match(deployTool, /const staticMatch = url\.match/);
+  assert.match(deployTool, /cardUrl = `https:\/\/varity\.app\/card\/\$\{varitySlug\}`/);
+});
+
+test("varity_deploy surfaces deploy-api validation failures before generic CLI crash handling", () => {
+  assert.match(deployTool, /function extractDeployFailure\(output: string\)/);
+  const deployFailureIndex = deployTool.indexOf("const deployFailure = extractDeployFailure(output)");
+  const abortedIndex = deployTool.indexOf('if (output.includes("Aborted") || result.exitCode === 137)');
+  assert.ok(deployFailureIndex > -1);
+  assert.ok(abortedIndex > -1);
+  assert.ok(deployFailureIndex < abortedIndex);
+  assert.match(deployTool, /"IMAGE_PREFLIGHT_FAILED"/);
 });

@@ -13,6 +13,47 @@ function stripAnsi(text: string): string {
   return text.replace(ANSI_RE, "");
 }
 
+function extractDeployUrl(output: string): string | null {
+  const liveMatch = output.match(/Live:\s*(https?:\/\/[^\s"'<>()]+)/i);
+  const anyVarityMatch = output.match(/https?:\/\/[^\s"'<>()]*varity\.app[^\s"'<>()]*/i);
+  const raw = liveMatch?.[1] ?? anyVarityMatch?.[0];
+  return raw ? raw.replace(/[.,;:]+$/, "") : null;
+}
+
+function varitySlugFromUrl(url: string): string | null {
+  const dynamicMatch = url.match(/^https?:\/\/([a-z0-9-]+)\.varity\.app(?:[/:?#]|$)/i);
+  if (dynamicMatch?.[1]) {
+    return dynamicMatch[1];
+  }
+  const staticMatch = url.match(/^https?:\/\/varity\.app\/([^/\s?#]+)/i);
+  if (staticMatch?.[1] && staticMatch[1] !== "card") {
+    return staticMatch[1];
+  }
+  return null;
+}
+
+function extractDeployFailure(output: string): { stage: string; message: string } | null {
+  const detailedMatch = output.match(
+    /Deploy failed at ([a-z0-9_-]+):\s*([\s\S]*?)(?:\n\s*stream end|\n\n.? Deploy failed|\nAborted!|$)/i
+  );
+  if (detailedMatch?.[1]) {
+    return {
+      stage: detailedMatch[1],
+      message: (detailedMatch[2] || "").trim() || "Deploy failed.",
+    };
+  }
+
+  const summaryMatch = output.match(/Deploy failed.*stage:\s*([a-z0-9_-]+)/i);
+  if (summaryMatch?.[1]) {
+    return {
+      stage: summaryMatch[1],
+      message: output.slice(-2000).trim(),
+    };
+  }
+
+  return null;
+}
+
 export function registerDeployTool(server: McpServer): void {
   server.registerTool(
     "varity_deploy",
@@ -87,6 +128,14 @@ export function registerDeployTool(server: McpServer): void {
           .string()
           .optional()
           .describe("Advanced runtime override: HTTP startup health path, for example '/health'."),
+        dockerfile_path: z
+          .string()
+          .optional()
+          .describe("Advanced build override: relative Dockerfile path for repo deploys."),
+        docker_context_path: z
+          .string()
+          .optional()
+          .describe("Advanced build override: relative Docker build context path for repo deploys."),
         memory_mb: z
           .number()
           .int()
@@ -116,6 +165,10 @@ export function registerDeployTool(server: McpServer): void {
             "Absolute container path to mount the persistent volume (e.g. '/data', '/home/node/.n8n'). " +
             "Requires volume_size."
           ),
+        services: z
+          .array(z.enum(["postgres", "redis", "ollama", "mongodb", "mysql", "minio"]))
+          .optional()
+          .describe("Auto-wired backend services to attach when inference is not enough."),
       },
       annotations: {
         destructiveHint: true, // Deploys real infrastructure
@@ -131,11 +184,14 @@ export function registerDeployTool(server: McpServer): void {
       command,
       args: runtime_args,
       health_path,
+      dockerfile_path,
+      docker_context_path,
       memory_mb,
       cpu_units,
       storage_mb,
       volume_size,
       volume_path,
+      services,
     }) => {
       // Check if varitykit is installed, auto-install if missing
       let hasVaritykit = await isCLIAvailable("varitykit");
@@ -255,6 +311,12 @@ export function registerDeployTool(server: McpServer): void {
       if (health_path) {
         args.push("--health-path", health_path);
       }
+      if (dockerfile_path) {
+        args.push("--dockerfile-path", dockerfile_path);
+      }
+      if (docker_context_path) {
+        args.push("--docker-context-path", docker_context_path);
+      }
       if (memory_mb != null) {
         args.push("--memory-mb", String(memory_mb));
       }
@@ -275,6 +337,11 @@ export function registerDeployTool(server: McpServer): void {
       if (volume_path) {
         args.push("--volume-path", volume_path);
       }
+      if (services) {
+        for (const service of services) {
+          args.push("--service", service);
+        }
+      }
 
       const result = await execVaritykit("app", args, {
         cwd,
@@ -284,16 +351,19 @@ export function registerDeployTool(server: McpServer): void {
 
       if (result.exitCode === 0) {
         const output = stripAnsi(result.stdout + "\n" + result.stderr);
+        const cliDeployUrl = extractDeployUrl(output);
 
-        // Read the latest deployment record (most reliable source of URL).
-        let deployUrl = "unknown";
+        // The CLI output is authoritative for this deploy. Local deployment
+        // records can be stale when image/repo deploys do not write a fresh
+        // local receipt, so only use them when the CLI did not print a URL.
+        let deployUrl = cliDeployUrl ?? "unknown";
         let deploymentId = "unknown";
 
         try {
           const deploymentsDir = getDeploymentsDir();
           const files = await readdir(deploymentsDir);
           const jsonFiles = files.filter((f) => f.endsWith(".json")).sort().reverse();
-          if (jsonFiles.length > 0) {
+          if (!cliDeployUrl && jsonFiles.length > 0) {
             const latest = JSON.parse(
               await readFile(`${deploymentsDir}/${jsonFiles[0]}`, "utf-8")
             );
@@ -347,9 +417,9 @@ export function registerDeployTool(server: McpServer): void {
 
         // Build card URL from deploy URL if it's on varity.app
         let cardUrl = "";
-        const varityMatch = deployUrl.match(/varity\.app\/([^/\s]+)/);
-        if (varityMatch) {
-          cardUrl = `https://varity.app/card/${varityMatch[1]}`;
+        const varitySlug = varitySlugFromUrl(deployUrl);
+        if (varitySlug) {
+          cardUrl = `https://varity.app/card/${varitySlug}`;
         }
 
         return successResponse(
@@ -387,6 +457,17 @@ export function registerDeployTool(server: McpServer): void {
 
       // "Aborted" means the varitykit process crashed, NOT a framework detection failure.
       // Common causes: OOM during build, Python error, missing dep. Give a specific hint.
+      const deployFailure = extractDeployFailure(output);
+      if (deployFailure) {
+        return errorResponse(
+          deployFailure.stage === "image_preflight" ? "IMAGE_PREFLIGHT_FAILED" : "DEPLOY_FAILED",
+          `Deployment failed at ${deployFailure.stage}: ${deployFailure.message}`,
+          deployFailure.stage === "image_preflight"
+            ? "Use a runnable HTTP service image, or supply the missing runtime contract with port/command/health settings."
+            : "Check the deploy output above, fix the reported issue, then try again."
+        );
+      }
+
       if (output.includes("Aborted") || result.exitCode === 137) {
         const isOom =
           output.includes("Killed") ||
