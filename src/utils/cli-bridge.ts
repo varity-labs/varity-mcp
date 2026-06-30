@@ -24,6 +24,14 @@ export async function execCLI(
   options: { timeout?: number; cwd?: string; env?: NodeJS.ProcessEnv } = {}
 ): Promise<CLIResult> {
   const timeout = options.timeout ?? 120_000; // 2 min default
+  const env: NodeJS.ProcessEnv = { ...process.env, ...(options.env ?? {}) };
+  // The MCP adapter consumes CLI stdout as data. Do not let parent terminal/npm
+  // color settings leak into child commands, especially Python/Rich where
+  // FORCE_COLOR="0" is still truthy and produces ANSI-decorated JSON.
+  delete env.FORCE_COLOR;
+  env.NO_COLOR = "1";
+  env.CLICOLOR = "0";
+  env.PY_COLORS = "0";
 
   // On Windows, run through cmd.exe to resolve .cmd/.bat wrappers
   const execCommand = isWindows ? (process.env.ComSpec || "cmd.exe") : command;
@@ -33,12 +41,7 @@ export async function execCLI(
     const { stdout, stderr } = await execFileAsync(execCommand, execArgs, {
       timeout,
       cwd: options.cwd,
-      // FORCE_COLOR=0 disables colors for Node.js tools (chalk/supports-color).
-      // NO_COLOR=1 is the cross-ecosystem standard (https://no-color.org/) and
-      // is what Python/Rich actually respects, FORCE_COLOR="0" is a non-empty
-      // string, so Python's `bool("0")` is True, causing Rich to *enable* ANSI
-      // output instead of disabling it.  Both vars together cover all toolchains.
-      env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1", ...(options.env ?? {}) },
+      env,
       maxBuffer: 10 * 1024 * 1024, // 10 MB
     });
 
