@@ -33,7 +33,7 @@ export function registerDeleteDeploymentTool(server: McpServer): void {
         );
       }
 
-      const result = await execVaritykit("app", ["delete", name], { timeout: 120_000 });
+      const result = await execVaritykit("app", ["delete", name, "--yes"], { timeout: 120_000 });
 
       if (result.exitCode === 0) {
         return successResponse(

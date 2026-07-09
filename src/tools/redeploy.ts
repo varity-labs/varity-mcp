@@ -11,8 +11,8 @@ export function registerRedeployTool(server: McpServer): void {
       description:
         "Redeploy or restart an app that is ALREADY deployed, in place. Use this when a developer says " +
         "'redeploy <name>', 'restart <name>', 'my app is stuck, restart it', or 'pull the latest image and " +
-        "redeploy'. The app is re-deployed on the SAME deployment. Same URL, same reserved hardware, no new " +
-        "bid. It re-pulls the image (or rebuilds from source) and restarts the container, so it goes live " +
+        "redeploy'. The app is re-deployed on the SAME deployment. Same URL, same reserved hardware, " +
+        "no extra hardware reservation. It re-pulls the image (or rebuilds from source) and restarts the container, so it goes live " +
         "in about a minute with no URL change. To change env vars at the same time, use varity_set_env. To " +
         "create a NEW deployment instead, use varity_deploy.",
       inputSchema: {

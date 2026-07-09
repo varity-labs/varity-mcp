@@ -1,18 +1,22 @@
 import { z } from "zod";
-import { readdir, readFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
-import { getDeploymentsDir } from "../utils/config.js";
+import {
+  getDeployment,
+  listDeployments,
+  VarityPublicApiError,
+  type PublicDeployment,
+} from "../utils/public-api.js";
 
 interface DeploymentRecord {
   id: string;
   url: string;
-  framework: string;
   status: string;
-  size: string;
   timestamp: string;
-  path: string;
+  name: string;
+  appName: string;
+  runtime: string;
+  billing?: Record<string, unknown> | null;
   http_status?: number;
   latency_ms?: number;
 }
@@ -40,7 +44,7 @@ async function applyLiveness(deployments: DeploymentRecord[]): Promise<void> {
   const results = await Promise.all(deployments.map((d) => checkLiveness(d.url)));
   for (let i = 0; i < deployments.length; i++) {
     const { live, httpStatus, latencyMs } = results[i]!;
-    if (deployments[i]!.status === "deployed" && !live) {
+    if ((deployments[i]!.status === "deployed" || deployments[i]!.status === "live") && !live) {
       deployments[i]!.status = "unhealthy";
     }
     if (httpStatus !== undefined) deployments[i]!.http_status = httpStatus;
@@ -48,83 +52,32 @@ async function applyLiveness(deployments: DeploymentRecord[]): Promise<void> {
   }
 }
 
+function normalizeDeployment(item: PublicDeployment): DeploymentRecord {
+  const name = item.subdomain ?? item.app_name ?? item.appName ?? item.id;
+  return {
+    id: item.id ?? name,
+    name,
+    appName: item.appName ?? item.app_name ?? name,
+    runtime: item.runtime ?? "unknown",
+    url: item.url ?? item.public_url ?? "unknown",
+    status: item.status ?? "unknown",
+    timestamp: item.createdAt ?? item.created_at ?? "unknown",
+    billing: item.billing ?? null,
+  };
+}
+
 async function readDeployments(): Promise<DeploymentRecord[]> {
-  const deploymentsDir = getDeploymentsDir();
-  const deployments: DeploymentRecord[] = [];
-
-  try {
-    const files = await readdir(deploymentsDir);
-    const jsonFiles = files.filter((f) => f.endsWith(".json"));
-
-    for (const file of jsonFiles) {
-      try {
-        const content = await readFile(join(deploymentsDir, file), "utf-8");
-        const data = JSON.parse(content);
-        // Resolve the live URL, always prefer clean varity.app custom domain over raw provider URLs
-        const rawUrl =
-          data.custom_domain?.url ||   // clean varity.app URL registered at deploy time
-          data.url ||
-          data.deployment_url ||
-          data.ipfs?.gateway_url ||
-          "unknown";
-        // Convert raw storage URLs to clean varity.app/{app-name}/, use app name slug, never the deployment ID
-        const appSlug =
-          data.custom_domain?.subdomain ||   // most reliable: registered subdomain
-          data.app_name ||
-          data.project_name ||
-          data.project?.name ||
-          (data.path ? data.path.split("/").pop() : null);  // last dir segment as fallback
-        // Always construct a clean varity.app URL, never expose raw provider URLs
-        const cleanUrl = appSlug
-          ? `https://varity.app/${appSlug}/`
-          : (rawUrl.includes("ipfs.io/ipfs/") ? `https://varity.app/${file.replace(".json", "")}/` : rawUrl);
-
-        deployments.push({
-          id: file.replace(".json", ""),
-          url: cleanUrl,
-          framework:
-            data.framework ||
-            data.project?.type ||
-            "unknown",
-          status: data.status || (data.build?.success ? "deployed" : "failed"),
-          size:
-            data.size ||
-            data.build_size ||
-            (data.build?.size_mb ? `${data.build.size_mb.toFixed(1)} MB` : "unknown"),
-          timestamp: data.timestamp || data.deployed_at || "unknown",
-          // Show the app name so developers can identify which project this belongs to.
-          // Never expose full filesystem paths, use app_name only.
-          path: appSlug || file.replace(".json", ""),
-        });
-      } catch {
-        // Skip malformed deployment files
-      }
-    }
-  } catch {
-    // Deployments directory doesn't exist yet
-  }
-
-  // Sort by timestamp, newest first
+  const deployments = (await listDeployments()).map(normalizeDeployment);
   return deployments.sort(
     (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
   );
 }
 
-/**
- * Filter deployments to only those matching the given project path.
- * Matches if the deployment path starts with or is contained within the project path.
- */
-function filterByProject(
-  deployments: DeploymentRecord[],
-  projectPath: string
-): DeploymentRecord[] {
-  const normalized = resolve(projectPath);
-  return deployments.filter((d) => {
-    if (d.path === "unknown") return false;
-    // Match deployments whose source path is under the project directory
-    // e.g. project "/home/user/my-app" matches deploy path "/home/user/my-app/out"
-    return resolve(d.path).startsWith(normalized);
-  });
+function apiFailure(err: unknown, action: string) {
+  if (err instanceof VarityPublicApiError) {
+    return errorResponse(err.code, err.message, err.action ?? action);
+  }
+  return errorResponse("VARITY_API_ERROR", "Varity API request failed.", action);
 }
 
 export function registerDeployStatusTool(server: McpServer): void {
@@ -149,7 +102,7 @@ export function registerDeployStatusTool(server: McpServer): void {
           .string()
           .optional()
           .describe(
-            "Project directory path, only show deployments for this project"
+            "Compatibility hint from older clients. Deployment state is now account-scoped through the Varity public API."
           ),
         limit: z
           .coerce.number()
@@ -167,60 +120,49 @@ export function registerDeployStatusTool(server: McpServer): void {
       },
     },
     async ({ deployment_id, path, limit }) => {
-      let deployments = await readDeployments();
+      try {
+        if (deployment_id) {
+          const deployment = normalizeDeployment(await getDeployment(deployment_id));
+          await applyLiveness([deployment]);
 
-      // Single deployment lookup
-      if (deployment_id) {
-        const deployment = deployments.find((d) => d.id === deployment_id);
-        if (!deployment) {
-          return errorResponse(
-            "DEPLOYMENT_NOT_FOUND",
-            `Deployment "${deployment_id}" not found.`,
-            `Use varity_deploy_status without a deployment_id to list recent deployments.`
+          return successResponse(
+            { deployment, source: "varity_public_api:/api/deployments" },
+            `Deployment ${deployment.id}: ${deployment.status} at ${deployment.url}`
           );
         }
 
-        await applyLiveness([deployment]);
+        const deployments = await readDeployments();
+
+        if (deployments.length === 0) {
+          return successResponse(
+            { deployments: [], total: 0, source: "varity_public_api:/api/deployments" },
+            "No deployments found. Deploy your first app with the varity_deploy tool."
+          );
+        }
+
+        const maxResults = limit ?? 10;
+        const limited = deployments.slice(0, maxResults);
+        const hasMore = deployments.length > maxResults;
+
+        await applyLiveness(limited);
 
         return successResponse(
-          { deployment },
-          `Deployment ${deployment.id}: ${deployment.status} at ${deployment.url}`
+          {
+            deployments: limited,
+            total: deployments.length,
+            showing: limited.length,
+            source: "varity_public_api:/api/deployments",
+            scope: "account-wide",
+            ...(path ? { compatibility_note: "The path filter is ignored because the public API is owner-scoped, not machine-local." } : {}),
+            ...(hasMore
+              ? { pagination_note: `Showing ${limited.length} of ${deployments.length}. Increase "limit" to see more.` }
+              : {}),
+          },
+          `Found ${deployments.length} deployment(s). Most recent: ${limited[0]!.url}`
         );
+      } catch (err) {
+        return apiFailure(err, "Run varity_login, then retry varity_deploy_status.");
       }
-
-      // Filter by project path if provided
-      if (path) {
-        deployments = filterByProject(deployments, path);
-      }
-
-      if (deployments.length === 0) {
-        const msg = path
-          ? `No deployments found for project at ${path}. Deploy with the varity_deploy tool.`
-          : "No deployments found. Deploy your first app with the varity_deploy tool.";
-        return successResponse({ deployments: [], total: 0 }, msg);
-      }
-
-      // Apply limit
-      const maxResults = limit ?? 10;
-      const limited = deployments.slice(0, maxResults);
-      const hasMore = deployments.length > maxResults;
-
-      await applyLiveness(limited);
-
-      return successResponse(
-        {
-          deployments: limited,
-          total: deployments.length,
-          showing: limited.length,
-          // When no path filter was applied, make it explicit these are account-wide results
-          // so developers don't mistake another project's deployments for their own.
-          ...(!path ? { scope: "account-wide", scope_note: `Showing deployments across all projects on this machine. Pass the \`path\` parameter (e.g., your project directory) to filter to a specific project.` } : { scope: "project-filtered" }),
-          ...(hasMore
-            ? { pagination_note: `Showing ${limited.length} of ${deployments.length}. Increase "limit" to see more.` }
-            : {}),
-        },
-        `Found ${deployments.length} deployment(s). Most recent: ${limited[0]!.url}`
-      );
     }
   );
 }

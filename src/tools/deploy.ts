@@ -1,15 +1,34 @@
 import { z } from "zod";
-import { readdir, readFile, access } from "node:fs/promises";
+import { access } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { execCLI, execVaritykit, isCLIAvailable } from "../utils/cli-bridge.js";
-import { getDeploymentsDir } from "../utils/config.js";
 
 /** Strip ANSI escape codes from CLI output before string matching. */
 // eslint-disable-next-line no-control-regex
 const ANSI_RE = /\x1b\[[0-9;]*[mGKHF]|\x1b\][^\x07]*\x07|\x1b[()][0-9A-Z]/g;
 function stripAnsi(text: string): string {
   return text.replace(ANSI_RE, "");
+}
+
+function extractPublicVarityUrl(output: string): string | null {
+  const match = output.match(/https?:\/\/(?:[a-z0-9-]+\.)?varity\.app(?:\/[^\s"'<>)]*)?/i);
+  return match?.[0] ?? null;
+}
+
+function cardSlugFromUrl(rawUrl: string): string | null {
+  try {
+    const url = new URL(rawUrl);
+    if (url.hostname.endsWith(".varity.app")) {
+      return url.hostname.slice(0, -".varity.app".length);
+    }
+    if (url.hostname === "varity.app") {
+      return url.pathname.split("/").filter(Boolean)[0] ?? null;
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 export function registerDeployTool(server: McpServer): void {
@@ -175,10 +194,10 @@ export function registerDeployTool(server: McpServer): void {
         );
       }
 
-      // Pure passthrough to `varitykit app deploy`. The CLI + deploy-api are the
+      // Pure passthrough to `varitykit app deploy`. The CLI and gateway are the
       // single hosting authority: framework detection, static-vs-dynamic hosting
-      // selection, sidecar auto-config, build, and provider selection all happen
-      // server-side. The MCP asserts NO hosting opinion. It only forwards the
+      // selection, attached resources, and build handling all happen server-side.
+      // The MCP asserts NO hosting opinion. It only forwards the
       // project path, the (optional) repo URL, and the (optional) app name.
       // `--mode auto` / `--hosting auto` are the CLI defaults, so we pass neither.
       const args = ["deploy"];
@@ -187,7 +206,7 @@ export function registerDeployTool(server: McpServer): void {
       }
       if (image) {
         // Docker-image source: forward to the CLI, which routes it to the
-        // deploy-api's native `image:` path (no clone/build).
+        // gateway-owned image deployment path (no clone/build).
         args.push("--image", image);
         if (image_credentials) {
           args.push(
@@ -214,78 +233,16 @@ export function registerDeployTool(server: McpServer): void {
 
       const result = await execVaritykit("app", args, {
         cwd,
-        timeout: 300_000, // 5 minutes for build + deploy
+        timeout: 600_000,
       });
 
       if (result.exitCode === 0) {
         const output = stripAnsi(result.stdout + "\n" + result.stderr);
 
-        // Read the latest deployment record (most reliable source of URL).
-        let deployUrl = "unknown";
-        let deploymentId = "unknown";
-
-        try {
-          const deploymentsDir = getDeploymentsDir();
-          const files = await readdir(deploymentsDir);
-          const jsonFiles = files.filter((f) => f.endsWith(".json")).sort().reverse();
-          if (jsonFiles.length > 0) {
-            const latest = JSON.parse(
-              await readFile(`${deploymentsDir}/${jsonFiles[0]}`, "utf-8")
-            );
-            // Prefer the clean varity.app custom domain URL over raw provider URLs.
-            const rawUrl =
-              latest.custom_domain?.url ||
-              latest.url ||
-              latest.ipfs?.gateway_url ||
-              "unknown";
-
-            // Canonicalize any raw provider URL (IPFS hash, provider ingress, etc.)
-            // to varity.app, matching the logic used in varity_deploy_status.
-            const isRawIpfs =
-              rawUrl.includes("ipfs.io/ipfs/") ||
-              rawUrl.includes("ipfscdn.");
-            const isRawProvider =
-              isRawIpfs || (rawUrl !== "unknown" && !rawUrl.startsWith("https://varity.app"));
-            if (isRawProvider) {
-              const subdomain =
-                latest.custom_domain?.subdomain ||
-                latest.app_name ||
-                latest.project_name;
-              if (subdomain) {
-                deployUrl = `https://varity.app/${subdomain}/`;
-              } else {
-                try {
-                  const pkgJson = JSON.parse(await readFile(`${cwd}/package.json`, "utf-8"));
-                  const pkgName: string | undefined = pkgJson.name;
-                  if (pkgName) {
-                    deployUrl = `https://varity.app/${pkgName.toLowerCase().replace(/[^a-z0-9-]/g, "-")}/`;
-                  } else {
-                    deployUrl = rawUrl;
-                  }
-                } catch {
-                  deployUrl = rawUrl;
-                }
-              }
-            } else {
-              deployUrl = rawUrl;
-            }
-
-            deploymentId = latest.deployment_id || jsonFiles[0]!.replace(".json", "");
-          }
-        } catch {
-          // Fallback to regex parsing of CLI output
-          const urlMatch = output.match(
-            /https?:\/\/[^\s]+\.(?:varity\.app|ipfs\.\S+|ipfscdn\.\S+|gateway\.\S+)/i
-          );
-          deployUrl = urlMatch?.[0] ?? "Check varity_deploy_status for the URL";
-        }
-
-        // Build card URL from deploy URL if it's on varity.app
-        let cardUrl = "";
-        const varityMatch = deployUrl.match(/varity\.app\/([^/\s]+)/);
-        if (varityMatch) {
-          cardUrl = `https://varity.app/card/${varityMatch[1]}`;
-        }
+        const deployUrl = extractPublicVarityUrl(output) ?? "Check varity_deploy_status for the URL";
+        const deploymentId = "unknown";
+        const cardSlug = cardSlugFromUrl(deployUrl);
+        const cardUrl = cardSlug ? `https://varity.app/card/${cardSlug}` : "";
 
         return successResponse(
           {

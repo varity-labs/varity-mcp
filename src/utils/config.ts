@@ -12,7 +12,7 @@ const DEPLOYMENTS_DIR = join(VARITYKIT_CONFIG_DIR, "deployments");
  */
 export async function getApiKey(): Promise<string | null> {
   // Check env var first
-  const envKey = process.env["VARITY_API_KEY"];
+  const envKey = process.env["VARITY_API_KEY"] ?? process.env["VARITY_DEPLOY_KEY"];
   if (envKey) return envKey;
 
   // Check config file (JSON format, matches CLI's auth.py)
