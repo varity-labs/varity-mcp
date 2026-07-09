@@ -41,7 +41,7 @@ export function registerRedeployTool(server: McpServer): void {
       if (result.exitCode === 0) {
         return successResponse(
           { name, action: "redeploy" },
-          `Redeploying "${name}" in place on the same hardware and URL. It goes live in about a minute.`
+          `Redeploying "${name}" in place on the same app URL. It goes live in about a minute.`
         );
       }
 

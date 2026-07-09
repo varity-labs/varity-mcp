@@ -196,7 +196,7 @@ export function registerDevServerTool(server: McpServer): void {
             `To reclaim port ${port}: call varity_dev_server({ action: "stop" }) to stop the current server, ` +
             `then call varity_dev_server({ action: "start", port: ${port} }).`;
 
-          // When the port changed, persist the selected port to varity.config.json
+          // When the port changed, persist the chosen port to varity.config.json
           // so future `varity_dev_server` calls start on the same port automatically.
           let portPersisted = false;
           if (portChanged) {
