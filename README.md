@@ -137,7 +137,7 @@ The MCP exposes Varity's deploy surface so your AI tool can take action — not 
 
 ## Templates
 
-Varity templates come from the gateway-owned certified catalog. Ask your AI editor "what templates can I deploy?" or "deploy Agent Zero for me" and it will list the live catalog, inspect the selected template contract, and deploy it through `varitykit app deploy --template <id>`.
+Varity templates come from the gateway-owned certified catalog. Ask your AI editor "what templates can I deploy?" or "deploy Agent Zero for me" and it will list the live catalog, inspect that template contract, and deploy it through `varitykit app deploy --template <id>`.
 
 Each template reserves different hardware. Use `varity_template_info` to see the required environment variables, private/public access mode, resources, hardware profile, and certification state before deploying.
 

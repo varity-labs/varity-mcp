@@ -71,7 +71,7 @@ Varity automatically picks the right infrastructure for your app:
 
 **What runs your static app:** Files are distributed across a global edge network with nodes in multiple regions for fast delivery and automatic failover. Varity manages CDN configuration, cache invalidation, and routing automatically, you never configure the underlying infrastructure.
 
-**What runs your dynamic app:** Your app runs on Varity's managed cloud network with built-in reliability and redundancy. Varity handles where and how it runs, failover, and subdomain routing automatically. You never configure any of this. The deploy logs will confirm which hosting mode was selected.
+**What runs your dynamic app:** Your app runs on Varity's managed cloud network with built-in reliability and redundancy. Varity handles placement, failover, and subdomain routing automatically. You never configure any of this. The deploy logs will confirm which hosting mode was used.
 
 > **Bottom line for both hosting modes:** You specify what to deploy, Varity handles where and how — fully managed, no configuration required.
 
@@ -188,7 +188,7 @@ Varity is backed by enterprise-grade distributed infrastructure with redundancy 
 | Tier | Uptime | Details |
 |------|--------|---------|
 | **CDN (Static apps)** | 99.9% | Global edge nodes with automatic regional failover |
-| **Compute (Dynamic apps)** | 99.5% | Multi-provider deployment with automatic rerouting on failure |
+| **Compute (Dynamic apps)** | 99.5% | Managed deployment with automatic rerouting on failure |
 | **Document Database** | 99.9% | Replicated storage with automatic backups |
 | **Auth** | 99.9% | Managed auth infrastructure, no single point of failure |
 

@@ -82,7 +82,7 @@ export function registerSetEnvTool(server: McpServer): void {
         return successResponse(
           { name, updated_keys: keys, replaced: Boolean(replace) },
           `Updated ${keys.length} variable(s) on "${name}" (${keys.join(", ")}). ` +
-            `Redeploying in place on the same hardware. The change goes live in about a minute. ` +
+            `Redeploying in place on the same app URL. The change goes live in about a minute. ` +
             `Values are not shown back for security.`
         );
       }
