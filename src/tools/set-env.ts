@@ -12,7 +12,7 @@ export function registerSetEnvTool(server: McpServer): void {
         "Set or update environment variables (config + secrets) on an app that is ALREADY deployed, " +
         "then redeploy it in place. Use this when a developer says 'add an env var to <name>', " +
         "'change the API key on <name>', 'set DATABASE_URL on my app', or 'update the config and redeploy'. " +
-        "The variables are applied to the SAME deployment. Same URL, same reserved hardware, no new bid. " +
+        "The variables are applied to the SAME deployment. Same URL, same reserved hardware, no extra hardware reservation. " +
         "so the change goes live in about a minute with no downtime churn. By default the new variables are " +
         "MERGED over the existing set; pass replace=true to overwrite the entire set. Variable values are " +
         "write-only and are never echoed back. To create a NEW deployment instead, use varity_deploy.",

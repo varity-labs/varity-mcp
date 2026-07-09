@@ -1,13 +1,13 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
-import { INFRASTRUCTURE } from "../utils/config.js";
+import { getDeployment, publicApiGet, VarityPublicApiError } from "../utils/public-api.js";
 
 /**
  * varity_cost_calculator, THIN CLIENT.
  *
  * All pricing logic + the single source of truth lives in the gateway
- * (`GET /api/pricing`). This tool calls it so the MCP terminal output and the
+ * (`GET /api/pricing/estimate`). This tool calls it so the MCP terminal output and the
  * developer-portal deploy page render the IDENTICAL computation, no
  * duplicated pricing numbers anywhere.
  *
@@ -61,28 +61,31 @@ export function registerCostCalculatorTool(server: McpServer): void {
       annotations: { readOnlyHint: true },
     },
     async ({ app_profile, subdomain, has_database }) => {
-      const qs = new URLSearchParams();
-      if (subdomain) qs.set("subdomain", subdomain);
-      else qs.set("profile", app_profile || "web-app");
-      if (has_database !== undefined) qs.set("has_db", String(has_database));
-
-      const url = `${INFRASTRUCTURE.GATEWAY}/api/pricing?${qs.toString()}`;
-
       let data: Record<string, unknown>;
       try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 8000);
-        const res = await fetch(url, { signal: controller.signal });
-        clearTimeout(timeout);
-        if (!res.ok) {
-          return errorResponse(
-            "pricing_unavailable",
-            `Pricing service returned ${res.status}.`,
-            "Try again shortly, or check status at varity.app."
-          );
+        if (subdomain) {
+          const deployment = await getDeployment(subdomain);
+          const billing = deployment.billing ?? {};
+          data = {
+            profile: "live-deployment",
+            currency: "USD",
+            fixed_monthly_cost_usd:
+              billing.fixed_monthly_cost_usd ??
+              billing.fixed_monthly_usd ??
+              billing.monthlyUsd,
+            billing_model: "fixed_monthly_resource_reservation",
+            deployment,
+          };
+        } else {
+          const qs = new URLSearchParams();
+          qs.set("profile", app_profile || "web-app");
+          if (has_database !== undefined) qs.set("has_db", String(has_database));
+          data = await publicApiGet<Record<string, unknown>>(`/api/pricing/estimate?${qs.toString()}`);
         }
-        data = (await res.json()) as Record<string, unknown>;
-      } catch {
+      } catch (err) {
+        if (err instanceof VarityPublicApiError) {
+          return errorResponse(err.code, err.message, err.action ?? "Run varity_login, then retry pricing.");
+        }
         return errorResponse(
           "pricing_unreachable",
           "Could not reach the Varity pricing service.",
@@ -90,25 +93,20 @@ export function registerCostCalculatorTool(server: McpServer): void {
         );
       }
 
-      const v = data.varityMonthly as number;
+      const v = (data.fixed_monthly_cost_usd ?? data.varityMonthly) as number;
+      if (typeof v !== "number") {
+        return errorResponse(
+          "pricing_unavailable",
+          "Varity pricing is not available for that request.",
+          "For a live deployment, confirm the app slug with varity_deploy_status."
+        );
+      }
       const fmt = (n: number) => `$${Number(n).toLocaleString("en-US")}`;
-      const comps = (data.competitors as Array<{
-        label: string;
-        atLaunch: number;
-        atTraction: number;
-      }>) ?? [];
-
-      const summary = comps.length
-        ? `${subdomain ?? app_profile}: Varity is a flat ${fmt(v)}/mo, and stays there. ${
-            (data.best as { label: string; pct: number } | undefined)?.label
-          } is ${
-            (data.best as { label: string; pct: number } | undefined)?.pct
-          }% more at launch and the gap widens with traffic. ${data.aha as string}`
-        : `${subdomain ?? app_profile}: Varity is a flat ${fmt(v)}/mo. ${data.aha as string}`;
+      const summary = `${subdomain ?? app_profile}: Varity is a flat ${fmt(v)}/mo fixed resource reservation.`;
 
       return successResponse(
         {
-          source: "gateway:/api/pricing (single source of truth)",
+          source: "varity_public_api:/api/pricing/estimate (single source of truth)",
           input: { app_profile, subdomain, has_database },
           ...data,
         },
