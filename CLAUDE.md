@@ -9,6 +9,7 @@ Live and published to npm (`latest`). Develop MCP changes HERE only. Do not sync
 - **Downstream (this calls):** shells `varitykit` for every deploy operation; `varity_cost_calculator` hits the gateway `/api/pricing`. It does NOT talk to Akash/IPFS/db-proxy directly — those are reached only through `varitykit` / the gateway.
 - **Upstream (calls this):** AI coding tools — Claude Code / Cursor / Codex — via MCP (stdio + HTTP transport).
 - **Where it sits in the architecture:** one of the **two** products (`varitykit` + this MCP) and the secondary distribution channel (MCP-in-AI-IDE; the Developer Portal is primary PLG). It is a thin client over the same deploy engine, so it inherits the honest deploy surface and feeds the same deployment telemetry / orchestration path.
+- **One-PaaS invariant:** direct portal/API/CLI/MCP use and embedded-platform use share this same public control plane and canonical deployment truth. Internal Layer 1/Layer 2 labels mean direct/embedded consumption only, not separate products, engines, workload classes, or roadmaps. This MCP must never implement an embedded-only path or orchestration policy.
 - Exact backend versions / DSEQs / health (gateway, deploy-api, etc.): `../varity.manifest.yaml` → `state.services`. Never hardcode them here.
 
 ## SOURCE OF TRUTH
