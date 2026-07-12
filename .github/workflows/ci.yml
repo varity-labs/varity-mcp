@@ -1,13 +1,6 @@
-# Repo-local build/test CI for @varity-labs/mcp.
-#
-# This is an UNPRIVILEGED workflow by design (PROPAGATION gate §3/§4): it grants
-# only `contents: read`, holds no secrets, and never checks out another
-# repository. Pull-request code therefore cannot read a cross-repo credential or
-# private source. It always triggers (no path filters) so it can be adopted as a
-# required status check without leaving unrelated PRs Pending.
-#
-# The universal cross-surface `Propagation / decision` check is published
-# separately by the private GitHub App and is not part of this workflow.
+# Repository-local, unprivileged MCP build/test CI.
+# It uses only contents: read, holds no repository secrets, and checks out no
+# other repository.
 name: ci
 
 on:
