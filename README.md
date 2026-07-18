@@ -60,11 +60,16 @@ Add to `mcp_config.json`:
 
 ### Claude.ai / ChatGPT (HTTP)
 
-Use the hosted server URL:
+The hosted process is reachable at:
 
 ```
 https://mcp.varity.so
 ```
+
+Hosted OAuth and per-user deployment authorization are not currently certified
+end to end. Do not use this endpoint for owner-scoped production operations yet;
+use the stdio package until the repository architecture's OAuth verification bar
+passes.
 
 ### Any MCP-compatible client (stdio)
 
@@ -181,7 +186,8 @@ For browser-based AI tools. Claude.ai, ChatGPT.
 npx -y @varity-labs/mcp --transport http --port 3100
 ```
 
-Hosted at `https://mcp.varity.so` — connect directly from any HTTP-capable MCP client.
+The process is hosted at `https://mcp.varity.so`, but authenticated hosted use
+is not currently certified. Use stdio for owner-scoped operations.
 
 ## Prerequisites
 
