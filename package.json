@@ -14,6 +14,7 @@
   ],
   "scripts": {
     "build": "tsc",
+    "check:architecture": "node scripts/check-architecture.cjs",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
     "start:http": "node dist/index.js --transport http --port 3100",
