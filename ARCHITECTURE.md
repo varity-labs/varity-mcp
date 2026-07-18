@@ -70,7 +70,7 @@ the public interface or CLI did not return.
 | Public-interface client | deploy-key auth, 10-second GET timeout, normalized error codes/actions | `src/utils/public-api.ts`; gateway adapter | adapter tests with mocked fetch are currently missing |
 | Response module | `{success,data,message}` or MCP error `{success:false,error}` | `src/utils/responses.ts` | contract tests are currently missing |
 | Credential/config lookup | environment key first, then `~/.varitykit/config.json` | `src/utils/config.ts` | precedence/redaction tests are currently missing |
-| HTTP OAuth provider | proxy OAuth endpoints and gateway token verification | `src/auth/provider.ts` | verification and client-registration tests are currently missing |
+| HTTP OAuth provider | proxies OAuth endpoints to `auth.varity.so`; currently targets a missing gateway token-verification route | `src/auth/provider.ts` | verification and client-registration tests are currently missing; hosted flow is not certified |
 
 The CLI bridge and public-interface client are two real adapter seams: callers
 already vary between them. Removing either adapter without migrating its
@@ -102,11 +102,19 @@ key used by `varitykit` or the public-interface adapter.
 ### Streamable HTTP
 
 HTTP creates one MCP server/transport pair per session and keeps it in an
-in-memory map. OAuth access tokens are verified through the gateway. Rate-limit
-counters and MCP sessions are process-local, so a restart discards them and
-horizontal replicas require explicit shared-session/routing design.
+in-memory map. Rate-limit counters and MCP sessions are process-local, so a
+restart discards them and horizontal replicas require explicit shared-session/
+routing design.
 
-OAuth authenticates the MCP protocol session, but current tool adapters do not
+The code configures OAuth authorization/token/registration endpoints at
+`auth.varity.so`, but `verifyAccessToken()` calls gateway
+`POST /api/auth/verify`. The gateway release current at the audit has no such
+route and the live endpoint returned HTTP 404 on 2026-07-18. The hosted process
+and current repository also reported different versions. These facts prove
+neither exact-release parity nor an authenticated protocol session. Hosted HTTP
+OAuth is not end-to-end certified.
+
+Even after protocol authentication is repaired, current tool adapters do not
 receive a per-request OAuth credential. `public-api.ts` and `varitykit` instead
 read the MCP host's environment or `~/.varitykit/config.json`. Therefore hosted
 HTTP must not be described as per-user deployment authorization until the auth
@@ -151,6 +159,10 @@ credentials.
 - HTTP sessions, rate limits, and OAuth client lookup are process-local. Loss of
   process state must fail closed or require session reinitialization, never
   manufacture a successful operation.
+- A healthy hosted process is not authorization proof. The exact deployed MCP,
+  auth-service, and gateway releases must pass registration, authorization,
+  exchange, verification, authenticated MCP request, owner-bound operation,
+  revocation, and cleanup before public hosted-auth claims are restored.
 - Tool input validation happens before adapter calls. User-controlled values
   must remain argv entries or encoded URL segments, never shell fragments.
 

@@ -26,6 +26,9 @@ this repository. The workspace manifest and live probes own operational truth.
 - Several developer tools operate directly on the MCP host's filesystem or
   processes; this is naturally the user's machine in stdio mode, but not in a
   hosted HTTP process.
+- Hosted HTTP OAuth is not currently certified: the token verifier targets a
+  gateway route absent from the current release, and hosted/repository versions
+  differ. A health response is not authorization proof. See `ARCHITECTURE.md`.
 - The MCP never calls provider, static-storage, db-proxy, credential-proxy, or
   billing internals directly.
 
@@ -57,6 +60,8 @@ guard. Do not publish from an architecture-only branch.
   tokens as secrets.
 - Preserve stdio/HTTP differences deliberately. A local-filesystem tool is not
   automatically safe or meaningful in hosted HTTP mode.
+- Do not present `mcp.varity.so` as authenticated production access until the
+  exact-release OAuth and owner-binding certification bar passes.
 - Update `ARCHITECTURE.md` in the same change when ownership, an adapter
   interface, auth/custody, persistent or process-local state, transport
   topology, or failure semantics change.
