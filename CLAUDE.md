@@ -1,29 +1,72 @@
-# CLAUDE.md — varity-mcp-standalone
+# CLAUDE.md — `@varity-labs/mcp`
 
-The CANONICAL home of **`@varity-labs/mcp`** (npm, public repo) — the thin MCP server that shells to `varitykit`. Same engine, no second implementation; the orchestration lives in `varitykit` / the gateway, never here.
+This repository is the canonical public source for the published Varity MCP
+server. It is a thin client of the one Varity PaaS control plane. It must never
+contain provider selection, deployment orchestration, durable deployment state,
+billing policy, or a second embedded-consumption path.
 
-## STATUS (verified 2026-06-24)
-Live and published to npm (`latest`). Develop MCP changes HERE only. Do not sync into the frozen in-repo mirror at `../varity-sdk-private/packages/cli/varity-mcp/`; that mirror is unmaintained and out of product scope. For the published version + tool count, see the manifest `product.packages."@varity-labs/mcp"` (do not restate here).
+## Read first
 
-## WIRES IN
-- **Downstream (this calls):** shells `varitykit` for every deploy operation; `varity_cost_calculator` hits the gateway `/api/pricing`. It does NOT talk to Akash/IPFS/db-proxy directly — those are reached only through `varitykit` / the gateway.
-- **Upstream (calls this):** AI coding tools — Claude Code / Cursor / Codex — via MCP (stdio + HTTP transport).
-- **Where it sits in the architecture:** one of the **two** products (`varitykit` + this MCP) and the secondary distribution channel (MCP-in-AI-IDE; the Developer Portal is primary PLG). It is a thin client over the same deploy engine, so it inherits the honest deploy surface and feeds the same deployment telemetry / orchestration path.
-- **One-PaaS invariant:** direct portal/API/CLI/MCP use and embedded-platform use share this same public control plane and canonical deployment truth. Internal Layer 1/Layer 2 labels mean direct/embedded consumption only, not separate products, engines, workload classes, or roadmaps. This MCP must never implement an embedded-only path or orchestration policy.
-- Exact backend versions / DSEQs / health (gateway, deploy-api, etc.): `../varity.manifest.yaml` → `state.services`. Never hardcode them here.
+1. Workspace `CLAUDE.md` and `varity.manifest.yaml` for current product scope.
+2. [ARCHITECTURE.md](ARCHITECTURE.md) for this repository's transports, adapter
+   seams, state, auth, failure semantics, and test surface.
+3. Workspace `POSITIONING.md` before editing tool descriptions or responses.
+4. Workspace `PRICING-MODEL-CANONICAL.md` before editing cost behavior.
 
-## SOURCE OF TRUTH
-- `../varity.manifest.yaml` — versions, scope, capability, services registry (wins on operational conflict).
-- `../CLAUDE.md` — workspace scope + in-scope/ignore map + guardrails.
-- `../POSITIONING.md` — voice + forbidden vocabulary (applies to every tool description and response).
-- `../PRICING-MODEL-CANONICAL.md` — the only authority for cost claims (the cost-calculator tool must match).
+Do not copy live backend versions, release history, gate status, or pricing into
+this repository. The workspace manifest and live probes own operational truth.
 
-## Repo-specific operational facts
-- Build: `npm run build` (tsc). Dev: `npm run dev` (tsc --watch). HTTP transport: `npm run start:http` (port 3100).
-- Bin: `varity-mcp` → `dist/index.js`.
-- Publish (founder action): bump BOTH `package.json` version AND `src/server.ts` `VERSION`, then `npm publish --access public` for the stable `latest` release. Use `--tag beta` only for an intentional prerelease.
+## Actual runtime shape
 
-## IGNORE-HERE (dormant / out of scope)
-- Any tool/description referencing the App Store / submit-to-store, the SDK / ui-kit / types, `create-varity-app`, or SaaS-template scaffolding — dormant `sdk_pre_investment`, not the product, never promoted to users.
-- Any blockchain/crypto/DePIN/wallet/AKT/USDC vocabulary in tool descriptions or responses — forbidden user-facing.
-- The retired `varity-labs/varity-sdk` open-source monorepo and `sync-to-public.sh` — the public MCP ships from THIS repo, not there.
+- Upstream callers are MCP clients over stdio or Streamable HTTP.
+- Deployment mutations, template operations, login, and migration use the
+  `varitykit` CLI adapter in `src/utils/cli-bridge.ts`.
+- Deployment/status/log and pricing reads use the owner-scoped public Varity
+  interface through `src/utils/public-api.ts`.
+- Several developer tools operate directly on the MCP host's filesystem or
+  processes; this is naturally the user's machine in stdio mode, but not in a
+  hosted HTTP process.
+- The MCP never calls provider, static-storage, db-proxy, credential-proxy, or
+  billing internals directly.
+
+The older statement that every deploy operation shells to `varitykit` is too
+broad. Preserve both real adapter seams unless a separately reviewed change
+migrates callers and proves behavior through their interfaces.
+
+## Commands
+
+```bash
+npm run build
+npm test
+npm run check:architecture
+npm run start:http
+```
+
+Publishing is a founder/release action. Keep `package.json` and
+`src/server.ts` versions synchronized, then use the repository's publish
+guard. Do not publish from an architecture-only branch.
+
+## Change rules
+
+- Keep tool results on the shared `successResponse` / `errorResponse` shape.
+- Do not expose internal infrastructure or provider vocabulary in user-facing
+  tool descriptions.
+- Do not hardcode pricing; call the public pricing interface.
+- Do not place credentials in arguments that are logged, responses, docs, or
+  fixtures. Treat registry passwords, GitHub tokens, deploy keys, and OAuth
+  tokens as secrets.
+- Preserve stdio/HTTP differences deliberately. A local-filesystem tool is not
+  automatically safe or meaningful in hosted HTTP mode.
+- Update `ARCHITECTURE.md` in the same change when ownership, an adapter
+  interface, auth/custody, persistent or process-local state, transport
+  topology, or failure semantics change.
+- Complete the pull request's `Architecture impact` declaration. An internal
+  implementation change behind unchanged interfaces may correctly declare
+  `none`.
+
+## Out of scope
+
+- The frozen MCP mirror under `varity-sdk-private`.
+- Dormant SDK, UI kit, types, create-app, SaaS-template, App Store, and
+  blockchain-era code.
+- Provider-specific orchestration or a separate path for embedded consumers.
