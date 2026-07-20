@@ -7,14 +7,13 @@ export function registerRedeployTool(server: McpServer): void {
   server.registerTool(
     "varity_redeploy",
     {
-      title: "Redeploy or Restart an Existing Deployment In Place",
+      title: "Reapply an Existing Deployment Configuration",
       description:
-        "Redeploy or restart an app that is ALREADY deployed, in place. Use this when a developer says " +
-        "'redeploy <name>', 'restart <name>', 'my app is stuck, restart it', or 'pull the latest image and " +
-        "redeploy'. The app is re-deployed on the SAME deployment. Same URL, same reserved hardware, " +
-        "no extra hardware reservation. It re-pulls the image (or rebuilds from source) and restarts the container, so it goes live " +
-        "in about a minute with no URL change. To change env vars at the same time, use varity_set_env. To " +
-        "create a NEW deployment instead, use varity_deploy.",
+        "Reapply the saved configuration for an app that is ALREADY deployed. Use this when a developer " +
+        "explicitly asks to reapply or redeploy that saved configuration. The app keeps the same URL and reserved " +
+        "hardware, with no extra reservation. An unchanged configuration may be a no-op, so this tool must not " +
+        "be presented as a verified restart for a stuck app. To change environment variables at the same time, " +
+        "use varity_set_env. To create a NEW deployment instead, use varity_deploy.",
       inputSchema: {
         name: z
           .string()
@@ -41,7 +40,7 @@ export function registerRedeployTool(server: McpServer): void {
       if (result.exitCode === 0) {
         return successResponse(
           { name, action: "redeploy" },
-          `Redeploying "${name}" in place on the same app URL. It goes live in about a minute.`
+          `Reapplying the saved configuration for "${name}" on the same app URL.`
         );
       }
 
