@@ -42,14 +42,26 @@ export function registerDeployLogsTool(server: McpServer): void {
           return stripAnsi(text);
         });
 
+        // Honestly surface partial/stale reads. The public API sets
+        // `complete: false` when the returned window may be missing recent
+        // lines (e.g. the live runtime source was momentarily unavailable), so
+        // the agent does not treat a partial window as the whole log.
+        const partial = data.complete === false;
+        const summary = partial
+          ? `Showing ${logLines.length} log line(s) for deployment ${deployment_id}. `
+            + "These logs may be delayed or partial — retry shortly for a complete window."
+          : `Showing ${logLines.length} log line(s) for deployment ${deployment_id}`;
+
         return successResponse(
           {
             deployment_id,
             log_lines: logLines,
             total_lines: data.count ?? logLines.length,
+            complete: data.complete ?? true,
+            observed_at: data.observed_at ?? null,
             source: "varity_public_api:/api/deployments/{id}/logs",
           },
-          `Showing ${logLines.length} log line(s) for deployment ${deployment_id}`
+          summary
         );
       } catch (err) {
         if (err instanceof VarityPublicApiError) {
