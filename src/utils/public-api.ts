@@ -101,11 +101,26 @@ export async function getDeployment(id: string): Promise<PublicDeployment> {
   return data.deployment;
 }
 
+export interface DeploymentLogsResult {
+  lines: PublicLogLine[];
+  count: number;
+  /**
+   * The public API reports `complete: false` when the returned window may be
+   * partial — e.g. the live runtime source was momentarily unavailable. Absent
+   * on older gateways; treat `undefined` as "not reported".
+   */
+  complete?: boolean;
+  /** ISO timestamp of the live runtime read, when the gateway captured one. */
+  observed_at?: string | null;
+  /** Stable warning code present only alongside `complete: false`. */
+  warning_code?: string;
+}
+
 export async function getDeploymentLogs(
   id: string,
   limit: number
-): Promise<{ lines: PublicLogLine[]; count: number }> {
-  return publicApiGet<{ lines: PublicLogLine[]; count: number }>(
+): Promise<DeploymentLogsResult> {
+  return publicApiGet<DeploymentLogsResult>(
     `/api/deployments/${encodeURIComponent(id)}/logs?limit=${encodeURIComponent(String(limit))}`
   );
 }
