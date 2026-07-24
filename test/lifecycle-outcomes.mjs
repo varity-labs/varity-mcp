@@ -46,5 +46,6 @@ test("redeploy is never described as a verified restart", async () => {
   assert.doesNotMatch(source, /redeploy or restart/i);
   assert.doesNotMatch(source, /restarts the container/i);
   assert.doesNotMatch(source, /my app is stuck/i);
+  assert.doesNotMatch(source, /no extra (?:hardware )?reservation/i);
   assert.match(source, /unchanged configuration may be a no-op/i);
 });
