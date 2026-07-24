@@ -53,7 +53,7 @@ export function getConfigDir(): string {
  * Infrastructure endpoints (all LIVE).
  */
 export const INFRASTRUCTURE = {
-  GATEWAY: "https://varity.app",
+  GATEWAY: process.env["VARITY_GATEWAY_URL"] ?? "https://varity.app",
   DOCS: "https://docs.varity.so",
   DEVELOPER_PORTAL: "https://developer.store.varity.so",
 } as const;

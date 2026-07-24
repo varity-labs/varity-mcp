@@ -35,6 +35,8 @@ export interface PublicLogLine {
   created_at?: string;
 }
 
+export const PUBLIC_API_GET_TIMEOUT_MS = 60_000;
+
 async function authHeaders(): Promise<Record<string, string>> {
   const key = await getApiKey();
   if (!key) {
@@ -51,7 +53,7 @@ async function authHeaders(): Promise<Record<string, string>> {
 export async function publicApiGet<T>(path: string): Promise<T> {
   const headers = await authHeaders();
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10_000);
+  const timeout = setTimeout(() => controller.abort(), PUBLIC_API_GET_TIMEOUT_MS);
   try {
     const res = await fetch(`${INFRASTRUCTURE.GATEWAY}${path}`, {
       headers,

@@ -67,7 +67,7 @@ the public interface or CLI did not return.
 | MCP composition | One registered tool/resource/prompt surface; local-only tools are mode-sensitive | `src/server.ts` | registration/contract tests are currently missing |
 | Tool modules | Zod-validated MCP input; structured text result; no orchestration policy | `src/tools/`, `src/resources/`, `src/prompts/` | exercise each registered tool through its result interface |
 | CLI bridge | argv arrays, bounded timeout, cwd, machine-readable output, structured exit result | `src/utils/cli-bridge.ts`; `varitykit` and `python -m varitykit` adapters | `test/cli-bridge-env.mjs` plus command-specific tool tests |
-| Public-interface client | deploy-key auth, 10-second GET timeout, normalized error codes/actions | `src/utils/public-api.ts`; gateway adapter | adapter tests with mocked fetch are currently missing |
+| Public-interface client | deploy-key auth, 60-second GET timeout, normalized error codes/actions | `src/utils/public-api.ts`; gateway adapter | adapter tests cover gateway configuration and timeout policy plus selected response projections |
 | Response module | `{success,data,message}` or MCP error `{success:false,error}` | `src/utils/responses.ts` | contract tests are currently missing |
 | Credential/config lookup | environment key first, then `~/.varitykit/config.json` | `src/utils/config.ts` | precedence/redaction tests are currently missing |
 | HTTP OAuth provider | proxies OAuth endpoints to `auth.varity.so`; currently targets a missing gateway token-verification route | `src/auth/provider.ts` | verification and client-registration tests are currently missing; hosted flow is not certified |
@@ -151,7 +151,8 @@ credentials.
 - CLI commands have explicit bounded timeouts; deploy has a longer bounded
   window than ordinary operations. Output is capped and terminal color is
   disabled before parsing.
-- The public-interface adapter aborts after 10 seconds and preserves structured
+- The public-interface adapter aborts after 60 seconds so owner-scoped gateway
+  reconciliation can finish, and preserves structured
   downstream code/message/action fields. Transport failures become
   `VARITY_API_UNREACHABLE`.
 - Public URL liveness checks abort after 8 seconds. A failed probe affects the
