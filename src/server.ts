@@ -20,7 +20,7 @@ import { registerSetEnvTool } from "./tools/set-env.js";
 import { registerRedeployTool } from "./tools/redeploy.js";
 import { createOAuthProvider } from "./auth/provider.js";
 
-export const VERSION = "2.3.7";
+export const VERSION = "2.3.8";
 
 export type TransportMode = "stdio" | "http";
 
@@ -35,7 +35,7 @@ export type TransportMode = "stdio" | "http";
  *   - Discovery: search-docs, cost-calculator, doctor
  *   - Setup: install-deps, build, login
  *   - Deploy own code: deploy, deploy-status, deploy-logs, delete-deployment
- *   - Operate: set-env, redeploy (edit config / redeploy + restart in place)
+ *   - Operate: set-env, redeploy (trackable configuration reapply; not verified restart)
  *   - Deploy certified templates: list-templates, template-info, deploy-template
  *   - Local-dev (stdio only): open-browser, dev-server
  *   - Project ops: create-repo, migrate
@@ -76,7 +76,7 @@ export function createVarityServer(mode: TransportMode = "stdio"): McpServer {
   registerDeployLogsTool(server);
   registerDeleteDeploymentTool(server);
 
-  // ── Operate tools (edit env + redeploy/restart in place) ──
+  // ── Operate tools (edit env + trackable configuration reapply) ──
   registerSetEnvTool(server);
   registerRedeployTool(server);
 

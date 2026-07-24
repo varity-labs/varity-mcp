@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
-import { execVaritykit } from "../utils/cli-bridge.js";
+import { execVaritykit, lifecycleTracking } from "../utils/cli-bridge.js";
 
 export function registerSetEnvTool(server: McpServer): void {
   server.registerTool(
@@ -12,8 +12,8 @@ export function registerSetEnvTool(server: McpServer): void {
         "Set or update environment variables (config + secrets) on an app that is ALREADY deployed, " +
         "then redeploy it in place. Use this when a developer says 'add an env var to <name>', " +
         "'change the API key on <name>', 'set DATABASE_URL on my app', or 'update the config and redeploy'. " +
-        "The variables are applied to the SAME deployment. Same URL, same reserved hardware, no extra hardware reservation. " +
-        "so the change goes live in about a minute with no downtime churn. By default the new variables are " +
+        "The variables are applied to the SAME deployment and app URL. " +
+        "The tool returns the durable run used to track the terminal outcome. By default the new variables are " +
         "MERGED over the existing set; pass replace=true to overwrite the entire set. Variable values are " +
         "write-only and are never echoed back. To create a NEW deployment instead, use varity_deploy.",
       inputSchema: {
@@ -79,11 +79,21 @@ export function registerSetEnvTool(server: McpServer): void {
 
       if (result.exitCode === 0) {
         const keys = entries.map(([k]) => k).sort();
+        const tracking = lifecycleTracking(result.stdout);
         return successResponse(
-          { name, updated_keys: keys, replaced: Boolean(replace) },
+          {
+            name,
+            updated_keys: keys,
+            replaced: Boolean(replace),
+            status: tracking.runId ? "redeploying" : "outcome_unconfirmed",
+            run_id: tracking.runId,
+            status_command: tracking.statusCommand,
+          },
           `Updated ${keys.length} variable(s) on "${name}" (${keys.join(", ")}). ` +
-            `Redeploying in place on the same app URL. The change goes live in about a minute. ` +
-            `Values are not shown back for security.`
+            (tracking.statusCommand
+              ? `Redeploy accepted on the same app URL. Track its terminal outcome with: ${tracking.statusCommand}. `
+              : "The command returned success without a durable tracking reference, so the terminal outcome is not proven. Upgrade varitykit and inspect varity_deploy_status before retrying. ") +
+            "Values are not shown back for security."
         );
       }
 

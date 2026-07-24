@@ -66,7 +66,7 @@ the public interface or CLI did not return.
 | Transport entrypoint | `--transport stdio|http`, optional HTTP port, lifecycle and health | `src/index.ts` | process startup, HTTP protocol/session tests are currently missing |
 | MCP composition | One registered tool/resource/prompt surface; local-only tools are mode-sensitive | `src/server.ts` | registration/contract tests are currently missing |
 | Tool modules | Zod-validated MCP input; structured text result; no orchestration policy | `src/tools/`, `src/resources/`, `src/prompts/` | exercise each registered tool through its result interface |
-| CLI bridge | argv arrays, bounded timeout, cwd, machine-readable output, structured exit result | `src/utils/cli-bridge.ts`; `varitykit` and `python -m varitykit` adapters | `test/cli-bridge-env.mjs` plus command-specific tool tests |
+| CLI bridge | argv arrays, bounded timeout, cwd, machine-readable output, structured exit result, durable lifecycle run extraction | `src/utils/cli-bridge.ts`; `varitykit` and `python -m varitykit` adapters | `test/cli-bridge-env.mjs`, lifecycle projection tests, plus command-specific tool tests |
 | Public-interface client | deploy-key auth, 60-second GET timeout, normalized error codes/actions | `src/utils/public-api.ts`; gateway adapter | adapter tests cover gateway configuration and timeout policy plus selected response projections |
 | Response module | `{success,data,message}` or MCP error `{success:false,error}` | `src/utils/responses.ts` | contract tests are currently missing |
 | Credential/config lookup | environment key first, then `~/.varitykit/config.json` | `src/utils/config.ts` | precedence/redaction tests are currently missing |
@@ -82,7 +82,7 @@ complexity across tool modules, so both pass the deletion test.
 | Behavior | Current path | Important qualification |
 |---|---|---|
 | Deploy source/image | MCP tool -> CLI bridge -> `varitykit app deploy` | Requires Python and `varitykit` on the MCP host |
-| Delete, env update, redeploy | MCP tool -> CLI bridge -> `varitykit app ...` | Mutation semantics and authorization come from the control plane |
+| Delete, env update, redeploy | MCP tool -> CLI bridge -> `varitykit app ...` | Successful acceptance projects the durable run ID; missing tracking is explicit and never presented as terminal completion |
 | Template list/detail/deploy | MCP tool -> CLI bridge -> `varitykit` | Catalog truth is gateway-owned, not embedded here |
 | Migration and login | MCP tool -> local process/CLI bridge | Reads or changes the MCP host's checkout/config |
 | Deployment list/status | MCP tool -> public-interface adapter; optional public URL liveness probe | Liveness can downgrade a reported live state for the response; it is not durable lifecycle authority |
@@ -148,6 +148,9 @@ credentials.
 - The CLI adapter never throws a command failure to callers; it returns stdout,
   stderr, and a normalized non-zero exit code. Tool modules translate that into
   the MCP error response.
+- Lifecycle mutation tools extract only the CLI's durable run reference. They
+  report accepted work as in progress and never infer terminal redeploy,
+  deletion, or billing-stop completion from process exit alone.
 - CLI commands have explicit bounded timeouts; deploy has a longer bounded
   window than ordinary operations. Output is capped and terminal color is
   disabled before parsing.

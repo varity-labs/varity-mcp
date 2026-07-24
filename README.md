@@ -131,7 +131,7 @@ The MCP exposes Varity's deploy surface so your AI tool can take action — not 
 | `varity_deploy_logs` | Read build and runtime logs |
 | `varity_delete_deployment` | Stop a deployment and end its billing |
 | `varity_set_env` | Set or replace environment variables on a live deployment, then redeploy |
-| `varity_redeploy` | Restart or redeploy an existing deployment in place |
+| `varity_redeploy` | Reapply an existing deployment's saved configuration; unchanged input may be a no-op |
 | `varity_list_templates` | List certified gateway-owned Varity templates |
 | `varity_template_info` | Show full details for one certified template |
 | `varity_deploy_template` | Deploy a certified template by ID |
