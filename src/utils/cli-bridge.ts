@@ -11,6 +11,27 @@ export interface CLIResult {
   exitCode: number;
 }
 
+export interface LifecycleTracking {
+  runId: string | null;
+  statusCommand: string | null;
+}
+
+const DURABLE_RUN_ID_RE =
+  /\bvaritykit app status ([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\b/i;
+
+/**
+ * Project only the durable tracking reference from lifecycle CLI output.
+ * The CLI deliberately does not emit environment values, and the MCP must not
+ * return the rest of stdout as an invented lifecycle result.
+ */
+export function lifecycleTracking(stdout: string): LifecycleTracking {
+  const runId = stdout.match(DURABLE_RUN_ID_RE)?.[1] ?? null;
+  return {
+    runId,
+    statusCommand: runId ? `varitykit app status ${runId}` : null,
+  };
+}
+
 /**
  * Execute a CLI command and return structured output.
  * Used to bridge MCP tool calls to existing varitykit CLI.

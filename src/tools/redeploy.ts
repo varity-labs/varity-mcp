@@ -1,20 +1,19 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
-import { execVaritykit } from "../utils/cli-bridge.js";
+import { execVaritykit, lifecycleTracking } from "../utils/cli-bridge.js";
 
 export function registerRedeployTool(server: McpServer): void {
   server.registerTool(
     "varity_redeploy",
     {
-      title: "Redeploy or Restart an Existing Deployment In Place",
+      title: "Reapply an Existing Deployment Configuration",
       description:
-        "Redeploy or restart an app that is ALREADY deployed, in place. Use this when a developer says " +
-        "'redeploy <name>', 'restart <name>', 'my app is stuck, restart it', or 'pull the latest image and " +
-        "redeploy'. The app is re-deployed on the SAME deployment. Same URL, same reserved hardware, " +
-        "no extra hardware reservation. It re-pulls the image (or rebuilds from source) and restarts the container, so it goes live " +
-        "in about a minute with no URL change. To change env vars at the same time, use varity_set_env. To " +
-        "create a NEW deployment instead, use varity_deploy.",
+        "Reapply the saved configuration for an app that is ALREADY deployed. Use this when a developer " +
+        "explicitly asks to reapply or redeploy that saved configuration. The app keeps the same deployment and URL. " +
+        "An unchanged configuration may be a no-op, so this tool must not " +
+        "be presented as a verified restart for a stuck app. To change environment variables at the same time, " +
+        "use varity_set_env. To create a NEW deployment instead, use varity_deploy.",
       inputSchema: {
         name: z
           .string()
@@ -39,9 +38,18 @@ export function registerRedeployTool(server: McpServer): void {
       const result = await execVaritykit("app", ["redeploy", "--", name], { timeout: 120_000 });
 
       if (result.exitCode === 0) {
+        const tracking = lifecycleTracking(result.stdout);
         return successResponse(
-          { name, action: "redeploy" },
-          `Redeploying "${name}" in place on the same app URL. It goes live in about a minute.`
+          {
+            name,
+            action: "redeploy",
+            status: tracking.runId ? "redeploying" : "outcome_unconfirmed",
+            run_id: tracking.runId,
+            status_command: tracking.statusCommand,
+          },
+          tracking.statusCommand
+            ? `Reapply accepted for "${name}" on the same app URL. Track its terminal outcome with: ${tracking.statusCommand}`
+            : `The reapply command returned success for "${name}" without a durable tracking reference. The terminal outcome is not proven; upgrade varitykit and inspect varity_deploy_status before retrying.`
         );
       }
 

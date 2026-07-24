@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
-import { execVaritykit } from "../utils/cli-bridge.js";
+import { execVaritykit, lifecycleTracking } from "../utils/cli-bridge.js";
 
 export function registerDeleteDeploymentTool(server: McpServer): void {
   server.registerTool(
@@ -9,11 +9,10 @@ export function registerDeleteDeploymentTool(server: McpServer): void {
     {
       title: "Delete a Deployment and Stop Its Billing",
       description:
-        "Delete an existing Varity deployment by name and stop its billing immediately. " +
+        "Request deletion of an existing Varity deployment by name and track it until billing stop is proven. " +
         "Use this when a developer says 'stop my <name>', 'shut down my deployment', 'I'm done with <name>', " +
         "'delete <name>', or when they no longer need a running app or agent. " +
-        "This shuts down the running app and releases its reserved hardware, so charges stop accruing right away. " +
-        "Static (CDN-hosted) deployments also stop being billed after delete. " +
+        "The durable operation independently reconciles route removal, reserved hardware release, and billing stop. " +
         "Use varity_deploy_status or list deployments at https://varity.app/dashboard to confirm the name first if the developer is unsure.",
       inputSchema: {
         name: z
@@ -36,13 +35,18 @@ export function registerDeleteDeploymentTool(server: McpServer): void {
       const result = await execVaritykit("app", ["delete", name, "--yes"], { timeout: 120_000 });
 
       if (result.exitCode === 0) {
+        const tracking = lifecycleTracking(result.stdout);
         return successResponse(
           {
             name,
-            deleted: true,
-            cli_output: result.stdout,
+            status: tracking.runId ? "deleting" : "outcome_unconfirmed",
+            deleted: false,
+            run_id: tracking.runId,
+            status_command: tracking.statusCommand,
           },
-          `Deleted deployment "${name}". Billing has stopped. The URL https://varity.app/${name}/ will return 404 within a few minutes.\n\nCLI output:\n${result.stdout}`
+          tracking.statusCommand
+            ? `Delete accepted for "${name}". Route removal, reserved hardware release, and billing stop are not complete until the run reaches a terminal success. Track it with: ${tracking.statusCommand}`
+            : `The delete command returned success for "${name}" without a durable tracking reference. Deletion and billing stop are not proven; upgrade varitykit and inspect varity_deploy_status before retrying.`
         );
       }
 
