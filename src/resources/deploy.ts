@@ -65,8 +65,8 @@ Varity automatically picks the right infrastructure for your app:
 
 | Your app type | Detected as | What you get |
 |--------------|------------|--------------|
-| Next.js with \`output: 'export'\` | Static | Global CDN, 30+ edge locations worldwide, fastest, ~$4/mo flat |
-| Next.js with API routes or SSR | Dynamic | Cloud compute, 2 vCPU, 4 GB RAM, distributed across multiple providers |
+| Next.js with \`output: 'export'\` | Static | Global CDN, 30+ edge locations worldwide, fastest, Free (3 active sites, 1 GB pinned assets, verified account) |
+| Next.js with API routes or SSR | Dynamic | Cloud compute on a fixed Managed Cloud preset menu (Starter, Growth, Scale, Pro), distributed across multiple providers |
 | Any app without \`output: 'export'\` | Dynamic | Cloud compute with auto-scaling across providers |
 
 **What runs your static app:** Files are distributed across a global edge network with nodes in multiple regions for fast delivery and automatic failover. Varity manages CDN configuration, cache invalidation, and routing automatically, you never configure the underlying infrastructure.
@@ -82,7 +82,7 @@ Varity automatically picks the right infrastructure for your app:
 2. Change \`"hosting": "static"\` to \`"hosting": "dynamic"\` in \`varity.config.json\`
 3. Re-deploy, Varity will provision compute instead of CDN
 
-> **Note:** Static export is the default because it's the fastest, flat-priced option for most SaaS dashboards. Only switch to dynamic when you actually need API routes or SSR.
+> **Note:** Static export is the default because it's the fastest option and free for verified accounts (within the static free limits) for most SaaS dashboards. Only switch to dynamic when you actually need API routes or SSR.
 
 **Confirming which mode was used:** The \`varity_deploy\` response includes an \`"orchestration"\` field that states the detected mode, e.g.:
 \`\`\`
@@ -131,16 +131,11 @@ The \`varity_deploy\` MCP tool returns a structured JSON object. Here are all th
 
 ## Billing
 
-Varity bills one flat monthly cost per app, based on the hardware you reserve. Add a payment method once, then deploy. The bill does not change with traffic, bandwidth, requests, or build minutes. Stop paying for a deployment by deleting it.
+Varity bills each paid deployment up to a fixed monthly maximum for the reserved profile, prorated by running time. Add a payment method for paid products, then deploy; free static sites need a verified account only. For an unchanged profile, the bill does not grow with traffic, bandwidth, requests, or build minutes. Stop paying for a deployment by deleting it.
 
 ## Pricing model
 
-Varity charges flat monthly per app, scoped to the hardware reserved (static / web app / web app + database / AI CPU / GPU tiers). The rest of the industry meters every dimension — request volume, bandwidth, build minutes, invocations — so their bills typically grow 5-40× as the app gets traction. Varity's doesn't move.
-
-**Same app, monthly cost over 12 months:**
-- Month 1 (low traffic): free/hobby tiers elsewhere can start at $0; Varity's flat price wins as traffic grows
-- Month 6 (1K users): Varity stays flat; usage-metered hosting + managed-services stack typically runs 4-5× higher
-- Month 12+ (10K+ users): Varity stays flat; usage-metered hosting typically runs 10-50× higher
+Varity prices deployments by the resources you reserve, not by usage meters. Static sites are free for verified accounts (3 active static sites, 1 GB total pinned assets). Dynamic apps select from a fixed Managed Cloud preset menu (Starter, Growth, Scale, Pro); each preset bills up to a fixed monthly maximum, prorated by running time. For an unchanged profile, traffic alone does not change the price; changing resources, services, replicas, accelerators, or app count can.
 
 For current per-tier pricing, use \`varity_cost_calculator\` (returns live rates) or check varity.app/pricing.
 

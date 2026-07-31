@@ -11,10 +11,9 @@ import { getDeployment, publicApiGet, VarityPublicApiError } from "../utils/publ
  * developer-portal deploy page render the IDENTICAL computation, no
  * duplicated pricing numbers anywhere.
  *
- * The point this tool makes memorable: Varity charges ONLY for hardware and
- * the price is FLAT. It doesn't spike with traffic the way usage-metered
- * hosting (bandwidth + invocation metered) does. Varity's price is flat and
- * doesn't move as the app grows, and uniquely runs everything including GPU.
+ * The tool reports the fixed monthly price for the reserved deployment
+ * profile as computed server-side. No comparisons, markups, or savings math
+ * happen in this client.
  */
 
 const PROFILE_KEYS = [
@@ -31,14 +30,12 @@ export function registerCostCalculatorTool(server: McpServer): void {
     {
       title: "Cost Calculator",
       description:
-        "Compare a deployment's flat monthly Varity cost against usage-metered hosting " +
-        "(bandwidth + invocations). " +
-        "Varity charges a FLAT hardware-only price that doesn't spike with traffic; " +
-        "usage-metered hosting bills grow as the app scales. Varity's price is fixed " +
-        "and doesn't move as the app grows. " +
-        "Use whenever a developer asks about pricing, cost, hosting bills, traffic " +
-        "costs, or platform comparison. Pass `subdomain` for a specific live " +
-        "deployment's REAL cost, or `app_profile` for a pre-deploy estimate.",
+        "Estimate the fixed monthly price for a deployment profile. " +
+        "Pricing is computed by the Varity pricing service, so this tool, the CLI, " +
+        "and the portal render identical numbers. " +
+        "Use whenever a developer asks what a Varity deployment costs. " +
+        "Pass `subdomain` for a specific live deployment's REAL cost, or " +
+        "`app_profile` for a pre-deploy estimate.",
       inputSchema: {
         app_profile: z
           .enum(PROFILE_KEYS)
@@ -56,7 +53,7 @@ export function registerCostCalculatorTool(server: McpServer): void {
         has_database: z
           .boolean()
           .optional()
-          .describe("Whether the app uses a database (affects competitor base cost)"),
+          .describe("Whether the app uses a database (selects the database-inclusive estimate)"),
       },
       annotations: { readOnlyHint: true },
     },
@@ -102,13 +99,21 @@ export function registerCostCalculatorTool(server: McpServer): void {
         );
       }
       const fmt = (n: number) => `$${Number(n).toLocaleString("en-US")}`;
-      const summary = `${subdomain ?? app_profile}: Varity is a flat ${fmt(v)}/mo fixed resource reservation.`;
+      const summary = `${subdomain ?? app_profile}: up to ${fmt(v)}/mo for this reserved deployment, prorated by running time.`;
 
       return successResponse(
         {
           source: "varity_public_api:/api/pricing/estimate (single source of truth)",
           input: { app_profile, subdomain, has_database },
-          ...data,
+          // Explicit whitelist of the pricing response fields this tool renders.
+          // Never spread the raw response into the tool result.
+          profile: data.profile,
+          currency: data.currency,
+          fixed_monthly_cost_usd: v,
+          billing_model: data.billing_model,
+          mode: data.mode,
+          verified: data.verified,
+          deployment: data.deployment,
         },
         summary
       );

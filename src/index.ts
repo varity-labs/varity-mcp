@@ -73,7 +73,7 @@ OPTIONS:
 
 TOOLS:
   varity_search_docs       Search Varity documentation
-  varity_cost_calculator   Compare your flat monthly cost vs usage-metered hosting
+  varity_cost_calculator   Estimate the fixed monthly price for a deployment profile
   varity_create_repo       Create a GitHub repo from your local project (HTTP/stdio)
   varity_deploy            Deploy to production
   varity_deploy_status     Check deployment status
