@@ -8,7 +8,7 @@
 
 This repository contains only `@varity-labs/mcp`, the npm MCP server. It is a thin tool wrapper around `varitykit` and Varity's gateway APIs; it is not the Python CLI, the portal, the dormant SDK, or an app-store package.
 
-The Varity MCP Server lets your AI editor build, deploy, and manage supported apps in production for you. Flat monthly cost per app, locked at deploy time based on hardware reserved — no usage-based billing, no surprise overages. One server, every AI client, zero commands.
+The Varity MCP Server lets your AI editor build, deploy, and manage supported apps in production for you. Each paid app bills up to a fixed monthly maximum for the resources it reserves, prorated by running time; static sites are free for verified accounts. One server, every AI client, zero commands.
 
 **Browser usage**: see the [browser usage guide](https://docs.varity.so/ai-tools/browser-usage) for Claude.ai or ChatGPT browser.
 **Quick start**: pick your editor below and run one command.
@@ -162,9 +162,9 @@ AI:  Deployed Agent Zero at https://varity.app/my-agent/
 
 ## How Varity is priced
 
-- **Flat monthly cost per app**: locked at deploy time, based on the hardware your app reserves. Your bill on day 1 equals your bill on day 1000.
-- **No usage-based billing**: cost doesn't change with traffic, requests, bandwidth, or build minutes. No surprise overages.
-- **No plan tiers**: every feature is in every account; you don't pay for "Pro" to unlock anything.
+- **Fixed monthly maximum per app**: set by the resources your app reserves, billed prorated by running time. Static sites are free for verified accounts.
+- **No usage meters**: for an unchanged profile, traffic alone does not change the price. Changing resources, services, replicas, accelerators, or app count can.
+- **Preset resource menu**: dynamic apps select a Managed Cloud preset (Starter, Growth, Scale, Pro); presets differ in reserved resources, not gated features.
 
 Ask your AI editor "how much would this app cost on Varity?" and it will use `varity_cost_calculator` to estimate before you deploy.
 
@@ -196,10 +196,10 @@ is not currently certified. Use stdio for owner-scoped operations.
 
 ## Cost
 
-Varity charges a flat monthly price per app, locked at deploy time based on the hardware reserved. Your bill doesn't grow with your traffic, requests, or build minutes. Use the `varity_cost_calculator` tool from your AI editor for a detailed estimate before you deploy.
+Varity bills each paid deployment up to a fixed monthly maximum for the reserved profile, prorated by running time. For an unchanged profile, the bill does not grow with traffic, requests, or build minutes. Static sites are free for verified accounts. Use the `varity_cost_calculator` tool from your AI editor for a detailed estimate before you deploy.
 
 ---
 
-**Deploy supported apps from your AI coding tool.** Flat predictable pricing — your bill stays the same as your app grows.
+**Deploy supported apps from your AI coding tool.** Resource-based pricing with a fixed monthly maximum per app — no usage meters.
 
 [Documentation](https://docs.varity.so/ai-tools/mcp-server-spec) · [GitHub](https://github.com/varity-labs/varity-mcp) · [Discord](https://discord.gg/7vWsdwa2Bg)
