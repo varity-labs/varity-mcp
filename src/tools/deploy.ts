@@ -39,8 +39,8 @@ export function registerDeployTool(server: McpServer): void {
       description:
         "Deploy the current project to production on Varity. " +
         "Detects the framework, selects the right hosting, and ships it live at https://varity.app/<name>/. " +
-        "Zero configuration required. Flat hardware-reserved pricing. Your bill stays the same as your app grows. " +
-        "No usage-based billing, no surprise overages. " +
+        "Zero configuration required. Paid apps bill up to a fixed monthly maximum for the reserved resources, prorated by running time; " +
+        "for an unchanged profile, traffic alone does not change the price. Static sites are free for verified accounts. " +
         "Use this when a developer wants to deploy, publish, ship, or make their app live. " +
         "If the developer wants to deploy a certified template rather than their own code, " +
         "use varity_deploy_template instead. To stop a deployment and its billing, use varity_delete_deployment.",
