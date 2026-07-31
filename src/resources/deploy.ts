@@ -67,7 +67,7 @@ Varity automatically picks the right infrastructure for your app:
 |--------------|------------|--------------|
 | Next.js with \`output: 'export'\` | Static | Global CDN, 30+ edge locations worldwide, fastest, Free (3 active sites, 1 GB pinned assets, verified account) |
 | Next.js with API routes or SSR | Dynamic | Cloud compute on a fixed Managed Cloud preset menu (Starter, Growth, Scale, Pro), distributed across multiple providers |
-| Any app without \`output: 'export'\` | Dynamic | Cloud compute with auto-scaling across providers |
+| Any app without \`output: 'export'\` | Dynamic | Cloud compute on reserved resources, distributed across providers |
 
 **What runs your static app:** Files are distributed across a global edge network with nodes in multiple regions for fast delivery and automatic failover. Varity manages CDN configuration, cache invalidation, and routing automatically, you never configure the underlying infrastructure.
 
