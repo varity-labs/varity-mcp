@@ -20,7 +20,8 @@ change. Implementation-only changes behind unchanged interfaces may use
 - [ ] `npm run check:architecture`
 - [ ] `npm run build`
 - [ ] `npm test`
-- [ ] User-facing tool descriptions and responses match workspace positioning
-      and pricing canon, if applicable
+- [ ] User-facing tool descriptions and responses match
+      `varity-engineering/POSITIONING.md` and `varity-engineering/PRICING.md`,
+      if applicable
 - [ ] No secret, private environment value, provider credential, or customer
       data appears in the diff or test output

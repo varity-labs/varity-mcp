@@ -7,14 +7,17 @@ billing policy, or a second embedded-consumption path.
 
 ## Read first
 
-1. Workspace `CLAUDE.md` and `varity.manifest.yaml` for current product scope.
-2. [ARCHITECTURE.md](ARCHITECTURE.md) for this repository's transports, adapter
-   seams, state, auth, failure semantics, and test surface.
-3. Workspace `POSITIONING.md` before editing tool descriptions or responses.
-4. Workspace `PRICING-MODEL-CANONICAL.md` before editing cost behavior.
+1. This file and [ARCHITECTURE.md](ARCHITECTURE.md) for this repository's
+   transports, adapter seams, state, auth, failure semantics, and test surface.
+2. `varity-engineering/CURRENT-STATE.md` before making a deployed-capability or
+   cross-repository integration claim.
+3. `varity-engineering/POSITIONING.md` before editing tool descriptions or
+   responses.
+4. `varity-engineering/PRICING.md` before editing cost behavior.
 
 Do not copy live backend versions, release history, gate status, or pricing into
-this repository. The workspace manifest and live probes own operational truth.
+this repository. `varity-engineering/CURRENT-STATE.md`, executable owners, and
+fresh probes own operational truth.
 
 ## Actual runtime shape
 
@@ -26,9 +29,10 @@ this repository. The workspace manifest and live probes own operational truth.
 - Several developer tools operate directly on the MCP host's filesystem or
   processes; this is naturally the user's machine in stdio mode, but not in a
   hosted HTTP process.
-- Hosted HTTP OAuth is not currently certified: the token verifier targets a
-  gateway route absent from the current release, and hosted/repository versions
-  differ. A health response is not authorization proof. See `ARCHITECTURE.md`.
+- Hosted HTTP OAuth crosses the auth-service and gateway seams, while tool
+  adapters still use host-local credentials. A health response is not
+  authorization proof. See `ARCHITECTURE.md` and verify current cross-repository
+  status in `varity-engineering/CURRENT-STATE.md`.
 - The MCP never calls provider, static-storage, db-proxy, credential-proxy, or
   billing internals directly.
 
