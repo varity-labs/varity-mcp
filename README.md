@@ -2,7 +2,6 @@
 
 [![npm](https://img.shields.io/npm/v/@varity-labs/mcp)](https://www.npmjs.com/package/@varity-labs/mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/varity-labs/varity-mcp/blob/main/LICENSE)
-[![Status: Beta](https://img.shields.io/badge/Status-Beta-yellow.svg)](https://github.com/varity-labs/varity-mcp)
 
 > The published Varity MCP package for Cursor, Claude Code, VS Code, Windsurf, and other MCP clients.
 
@@ -60,16 +59,16 @@ Add to `mcp_config.json`:
 
 ### Claude.ai / ChatGPT (HTTP)
 
-The hosted process is reachable at:
+The configured hosted endpoint is:
 
 ```
 https://mcp.varity.so
 ```
 
-Hosted OAuth and per-user deployment authorization are not currently certified
-end to end. Do not use this endpoint for owner-scoped production operations yet;
-use the stdio package until the repository architecture's OAuth verification bar
-passes.
+Before using it for owner-scoped operations, check
+`varity-engineering/CURRENT-STATE.md` for exact-release OAuth and owner-binding
+evidence. A reachable endpoint or healthy process is not authorization proof;
+use stdio when that evidence is absent.
 
 ### Any MCP-compatible client (stdio)
 
@@ -186,8 +185,9 @@ For browser-based AI tools. Claude.ai, ChatGPT.
 npx -y @varity-labs/mcp --transport http --port 3100
 ```
 
-The process is hosted at `https://mcp.varity.so`, but authenticated hosted use
-is not currently certified. Use stdio for owner-scoped operations.
+For authenticated hosted use, require the exact-release evidence recorded in
+`varity-engineering/CURRENT-STATE.md`. Otherwise use stdio for owner-scoped
+operations.
 
 ## Prerequisites
 

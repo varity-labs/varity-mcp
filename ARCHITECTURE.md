@@ -1,14 +1,11 @@
 # `@varity-labs/mcp` Architecture
 
-Status: current implementation map
-Last code-grounded audit: 2026-07-18
 Scope: stable ownership, interfaces, adapters, state, auth, failures, and tests
 
-This document is the repository-level layer of Varity's progressive
-architecture disclosure. Workspace `architecture-map/00-INDEX.md` owns the
-cross-repository system view; source and tests remain the detailed executable
-truth. Live versions and shipped capability belong in `varity.manifest.yaml`,
-not here.
+This file owns repository-local architecture. Source and tests are the detailed
+executable truth. `varity-engineering/ARCHITECTURE.md` owns cross-repository
+navigation, and `varity-engineering/CURRENT-STATE.md` owns mutable deployment
+and capability status.
 
 ## Ownership
 
@@ -70,7 +67,7 @@ the public interface or CLI did not return.
 | Public-interface client | deploy-key auth, 60-second GET timeout, normalized error codes/actions | `src/utils/public-api.ts`; gateway adapter | adapter tests cover gateway configuration and timeout policy plus selected response projections |
 | Response module | `{success,data,message}` or MCP error `{success:false,error}` | `src/utils/responses.ts` | contract tests are currently missing |
 | Credential/config lookup | environment key first, then `~/.varitykit/config.json` | `src/utils/config.ts` | precedence/redaction tests are currently missing |
-| HTTP OAuth provider | proxies OAuth endpoints to `auth.varity.so`; currently targets a missing gateway token-verification route | `src/auth/provider.ts` | verification and client-registration tests are currently missing; hosted flow is not certified |
+| HTTP OAuth provider | delegates OAuth endpoints to `auth.varity.so` and token verification to the gateway | `src/auth/provider.ts` | verification and client-registration tests are currently missing; cross-repository certification is external to this repository |
 
 The CLI bridge and public-interface client are two real adapter seams: callers
 already vary between them. Removing either adapter without migrating its
@@ -106,13 +103,12 @@ in-memory map. Rate-limit counters and MCP sessions are process-local, so a
 restart discards them and horizontal replicas require explicit shared-session/
 routing design.
 
-The code configures OAuth authorization/token/registration endpoints at
-`auth.varity.so`, but `verifyAccessToken()` calls gateway
-`POST /api/auth/verify`. The gateway release current at the audit has no such
-route and the live endpoint returned HTTP 404 on 2026-07-18. The hosted process
-and current repository also reported different versions. These facts prove
-neither exact-release parity nor an authenticated protocol session. Hosted HTTP
-OAuth is not end-to-end certified.
+The code configures OAuth authorization, token, and registration endpoints at
+`auth.varity.so`, while `verifyAccessToken()` calls gateway
+`POST /api/auth/verify`. This repository cannot prove that independently
+deployed services expose a compatible route set or release. Confirm that in
+`varity-engineering/CURRENT-STATE.md` and with an end-to-end protocol test
+before making a hosted-auth claim.
 
 Even after protocol authentication is repaired, current tool adapters do not
 receive a per-request OAuth credential. `public-api.ts` and `varitykit` instead
