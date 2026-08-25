@@ -1,100 +1,49 @@
 /**
- * Structured logging with Winston
+ * Structured logging for the MCP server.
+ *
+ * Every line goes to STDERR, never stdout. In stdio transport — the default,
+ * and the only transport certified for owner-scoped operations — stdout IS the
+ * JSON-RPC channel, so a single stray byte written there corrupts the MCP
+ * stream for the client. Centralising the stream choice here is the point of
+ * this module: individual call sites must not have to remember it.
+ *
+ * This replaced a Winston logger whose Console transport wrote every level,
+ * including `error`, to stdout with ANSI colour codes.
  */
 
-import winston from "winston";
+type Level = "debug" | "info" | "warn" | "error";
 
-const isDevelopment = process.env.NODE_ENV !== "production";
+const LEVELS: Record<Level, number> = { debug: 10, info: 20, warn: 30, error: 40 };
 
-export const logger = winston.createLogger({
-  level: isDevelopment ? "debug" : "info",
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.errors({ stack: true }),
-    winston.format.json()
-  ),
-  defaultMeta: { service: "varity-mcp" },
-  transports: [
-    // Console output (pretty print in development, JSON in production)
-    new winston.transports.Console({
-      format: isDevelopment
-        ? winston.format.combine(
-            winston.format.colorize(),
-            winston.format.simple()
-          )
-        : winston.format.json(),
-    }),
-  ],
-});
+function configuredLevel(): Level {
+  const requested = process.env.VARITY_MCP_LOG_LEVEL as Level | undefined;
+  if (requested && requested in LEVELS) return requested;
+  return process.env.NODE_ENV === "production" ? "info" : "debug";
+}
 
-// Add file transports in production
-if (!isDevelopment) {
-  logger.add(
-    new winston.transports.File({
-      filename: "logs/error.log",
-      level: "error",
-      maxsize: 10485760, // 10MB
-      maxFiles: 5,
-    })
-  );
-
-  logger.add(
-    new winston.transports.File({
-      filename: "logs/combined.log",
-      maxsize: 10485760, // 10MB
-      maxFiles: 5,
+function emit(level: Level, message: string, meta?: Record<string, unknown>): void {
+  if (LEVELS[level] < LEVELS[configuredLevel()]) return;
+  // console.error writes to stderr.
+  console.error(
+    JSON.stringify({
+      timestamp: new Date().toISOString(),
+      level,
+      service: "varity-mcp",
+      message,
+      ...meta,
     })
   );
 }
 
-/**
- * Log MCP tool call
- */
-export function logToolCall(
-  toolName: string,
-  params: any,
-  sessionId?: string
-) {
-  logger.info("MCP tool called", {
-    tool: toolName,
-    params: Object.keys(params),
-    sessionId,
-  });
-}
+export const logger = {
+  debug: (message: string, meta?: Record<string, unknown>) => emit("debug", message, meta),
+  info: (message: string, meta?: Record<string, unknown>) => emit("info", message, meta),
+  warn: (message: string, meta?: Record<string, unknown>) => emit("warn", message, meta),
+  error: (message: string, meta?: Record<string, unknown>) => emit("error", message, meta),
+};
 
 /**
- * Log MCP tool result
- */
-export function logToolResult(
-  toolName: string,
-  success: boolean,
-  duration: number,
-  sessionId?: string
-) {
-  logger.info("MCP tool completed", {
-    tool: toolName,
-    success,
-    duration,
-    sessionId,
-  });
-}
-
-/**
- * Log error
- */
-export function logError(
-  error: Error,
-  context?: Record<string, any>
-) {
-  logger.error("Error occurred", {
-    error: error.message,
-    stack: error.stack,
-    ...context,
-  });
-}
-
-/**
- * Log HTTP request
+ * Log an HTTP request served by the Streamable HTTP transport.
  */
 export function logHttpRequest(
   method: string,
@@ -102,12 +51,6 @@ export function logHttpRequest(
   statusCode: number,
   duration: number,
   sessionId?: string
-) {
-  logger.info("HTTP request", {
-    method,
-    path,
-    statusCode,
-    duration,
-    sessionId,
-  });
+): void {
+  emit("info", "HTTP request", { method, path, statusCode, duration, sessionId });
 }

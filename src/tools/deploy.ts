@@ -2,15 +2,10 @@ import { z } from "zod";
 import { access } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
-import { execCLI, execVaritykit, isCLIAvailable } from "../utils/cli-bridge.js";
+import { execCLI, execVaritykit, isCLIAvailable, stripAnsi } from "../utils/cli-bridge.js";
 
 /** Strip ANSI escape codes from CLI output before string matching. */
 // eslint-disable-next-line no-control-regex
-const ANSI_RE = /\x1b\[[0-9;]*[mGKHF]|\x1b\][^\x07]*\x07|\x1b[()][0-9A-Z]/g;
-function stripAnsi(text: string): string {
-  return text.replace(ANSI_RE, "");
-}
-
 function extractPublicVarityUrl(output: string): string | null {
   const match = output.match(/https?:\/\/(?:[a-z0-9-]+\.)?varity\.app(?:\/[^\s"'<>)]*)?/i);
   return match?.[0] ?? null;

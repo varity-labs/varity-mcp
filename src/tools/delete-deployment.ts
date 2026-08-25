@@ -32,7 +32,14 @@ export function registerDeleteDeploymentTool(server: McpServer): void {
         );
       }
 
-      const result = await execVaritykit("app", ["delete", name, "--yes"], { timeout: 120_000 });
+      if (name.startsWith("-")) {
+        return errorResponse("INVALID_NAME", `Invalid app name: "${name}".`, "App names can't start with '-'.");
+      }
+
+      // `--` stops the CLI's flag parsing so the app name is never read as a flag.
+      // redeploy.ts and set-env.ts already guard this way; delete was the only
+      // lifecycle mutation missing it, and it is the destructive one.
+      const result = await execVaritykit("app", ["delete", "--yes", "--", name], { timeout: 120_000 });
 
       if (result.exitCode === 0) {
         const tracking = lifecycleTracking(result.stdout);

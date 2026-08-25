@@ -2,13 +2,7 @@ import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { getDeploymentLogs, VarityPublicApiError } from "../utils/public-api.js";
-
-/** Strip ANSI escape codes so log lines render cleanly in MCP clients. */
-// eslint-disable-next-line no-control-regex
-const ANSI_RE = /\x1b\[[0-9;]*[mGKHF]|\x1b\][^\x07]*\x07|\x1b[()][0-9A-Z]/g;
-function stripAnsi(text: string): string {
-  return text.replace(ANSI_RE, "");
-}
+import { stripAnsi } from "../utils/cli-bridge.js";
 
 export function registerDeployLogsTool(server: McpServer): void {
   server.registerTool(

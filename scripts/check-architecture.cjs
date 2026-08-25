@@ -62,17 +62,25 @@ if (process.env.GITHUB_EVENT_NAME === "pull_request") {
     fail("pull_request event payload is unavailable");
   } else {
     const event = JSON.parse(fs.readFileSync(eventPath, "utf8"));
-    const body = event.pull_request?.body ?? "";
-    if (!/^Architecture impact:\s*(none|updated)\s*$/im.test(body)) {
-      fail("pull request body must declare `Architecture impact: none` or `Architecture impact: updated`");
-    }
-    for (const field of [
-      "Reason:",
-      "Affected runtime services/modules:",
-      "Interfaces/data/security/topology changed:",
-      "Architecture/ADR files:",
-    ]) {
-      if (!body.includes(field)) fail(`pull request body is missing architecture field: ${field}`);
+    const author = event.pull_request?.user ?? {};
+    // Automated dependency and release PRs cannot write an architecture
+    // declaration, so requiring one fails them by construction. The identical
+    // gate in varity-docs blocked every Dependabot PR and held 27 open security
+    // alerts. Human PRs still fail closed; a payload with no author does too.
+    const isBot = author.type === "Bot" || /\[bot\]$/.test(author.login ?? "");
+    if (!isBot) {
+      const body = event.pull_request?.body ?? "";
+      if (!/^Architecture impact:\s*(none|updated)\s*$/im.test(body)) {
+        fail("pull request body must declare `Architecture impact: none` or `Architecture impact: updated`");
+      }
+      for (const field of [
+        "Reason:",
+        "Affected runtime services/modules:",
+        "Interfaces/data/security/topology changed:",
+        "Architecture/ADR files:",
+      ]) {
+        if (!body.includes(field)) fail(`pull request body is missing architecture field: ${field}`);
+      }
     }
   }
 }

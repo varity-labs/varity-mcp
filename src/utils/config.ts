@@ -43,13 +43,6 @@ export function getDeploymentsDir(): string {
 }
 
 /**
- * Get path to varitykit config directory.
- */
-export function getConfigDir(): string {
-  return VARITYKIT_CONFIG_DIR;
-}
-
-/**
  * Infrastructure endpoints (all LIVE).
  */
 export const INFRASTRUCTURE = {

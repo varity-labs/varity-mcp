@@ -7,14 +7,20 @@ billing policy, or a second embedded-consumption path.
 
 ## Read first
 
-1. Workspace `CLAUDE.md` and `varity.manifest.yaml` for current product scope.
+Cross-repository authority lives in the `varity-engineering` control
+repository, checked out at `/workspaces/varity-engineering/`:
+
+1. `varity-engineering/CURRENT-STATE.md` for dated shipped, unfinished and
+   blocker status, and `varity-engineering/repos.yaml` for repository topology.
 2. [ARCHITECTURE.md](ARCHITECTURE.md) for this repository's transports, adapter
    seams, state, auth, failure semantics, and test surface.
-3. Workspace `POSITIONING.md` before editing tool descriptions or responses.
-4. Workspace `PRICING-MODEL-CANONICAL.md` before editing cost behavior.
+3. `varity-engineering/POSITIONING.md` before editing tool descriptions or
+   responses.
+4. `varity-engineering/PRICING.md` before editing cost behavior.
 
 Do not copy live backend versions, release history, gate status, or pricing into
-this repository. The workspace manifest and live probes own operational truth.
+this repository. `varity-engineering/CURRENT-STATE.md` and live probes own
+operational truth.
 
 ## Actual runtime shape
 
