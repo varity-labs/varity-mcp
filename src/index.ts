@@ -4,7 +4,6 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createVarityServer, VERSION } from "./server.js";
 import type { TransportMode } from "./server.js";
-import { initSentry, captureException } from "./utils/monitoring.js";
 import { logger, logHttpRequest } from "./utils/logger.js";
 
 /**
@@ -107,14 +106,9 @@ async function startStdio(): Promise<void> {
 }
 
 async function startHttp(port: number): Promise<void> {
-  // Initialize production services
-  initSentry();
-
   // Dynamic imports
   const { createServer } = await import("node:http");
   const { randomUUID } = await import("node:crypto");
-  const rateLimit = (await import("express-rate-limit")).default;
-  const helmet = (await import("helmet")).default;
 
   // Track server+transport pairs by session ID
   // Each session gets its own McpServer instance (SDK requires 1:1 server:transport)
@@ -238,7 +232,6 @@ async function startHttp(port: number): Promise<void> {
     } catch (error) {
       // Catch-all error handler
       const err = error instanceof Error ? error : new Error(String(error));
-      captureException(err, { path: url.pathname, method: req.method, ip: clientIp });
       logger.error("HTTP request error", {
         error: err.message,
         stack: err.stack,
@@ -284,6 +277,5 @@ async function main(): Promise<void> {
 
 main().catch((error) => {
   logger.error("Fatal error", { error: error instanceof Error ? error.message : String(error) });
-  captureException(error instanceof Error ? error : new Error(String(error)));
   process.exit(1);
 });

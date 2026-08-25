@@ -4,17 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
-import { execCLI, execVaritykit } from "../utils/cli-bridge.js";
+import { execCLI, execVaritykit, stripAnsi } from "../utils/cli-bridge.js";
 import { getDeploymentsDir } from "../utils/config.js";
 
 function isGitHubUrl(url: string): boolean {
   return /^https?:\/\/github\.com\/|^git@github\.com:/.test(url);
-}
-
-/** Strip ANSI escape codes from CLI output for clean parsing. */
-function stripAnsi(text: string): string {
-  // eslint-disable-next-line no-control-regex
-  return text.replace(/\x1B\[[0-9;]*[mGKHF]/g, "").replace(/\x1B\[\?[0-9]+[hl]/g, "");
 }
 
 /** Extract the deployed URL from varitykit deploy output or the deployments dir. */

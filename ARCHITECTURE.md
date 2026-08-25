@@ -1,14 +1,14 @@
 # `@varity-labs/mcp` Architecture
 
 Status: current implementation map
-Last code-grounded audit: 2026-07-18
+Last code-grounded audit: 2026-08-25
 Scope: stable ownership, interfaces, adapters, state, auth, failures, and tests
 
 This document is the repository-level layer of Varity's progressive
-architecture disclosure. Workspace `architecture-map/00-INDEX.md` owns the
-cross-repository system view; source and tests remain the detailed executable
-truth. Live versions and shipped capability belong in `varity.manifest.yaml`,
-not here.
+architecture disclosure. `varity-engineering/architecture/likec4/` owns the
+cross-repository system view (this repository is the `varity.mcp` element);
+source and tests remain the detailed executable truth. Live versions and shipped
+capability belong in `varity-engineering/CURRENT-STATE.md`, not here.
 
 ## Ownership
 
@@ -63,7 +63,7 @@ the public interface or CLI did not return.
 
 | Module | Interface and invariants | Implementation / adapters | Test surface |
 |---|---|---|---|
-| Transport entrypoint | `--transport stdio|http`, optional HTTP port, lifecycle and health | `src/index.ts` | process startup, HTTP protocol/session tests are currently missing |
+| Transport entrypoint | `--transport stdio\|http`, optional HTTP port, lifecycle and health | `src/index.ts` | process startup, HTTP protocol/session tests are currently missing |
 | MCP composition | One registered tool/resource/prompt surface; local-only tools are mode-sensitive | `src/server.ts` | registration/contract tests are currently missing |
 | Tool modules | Zod-validated MCP input; structured text result; no orchestration policy | `src/tools/`, `src/resources/`, `src/prompts/` | exercise each registered tool through its result interface |
 | CLI bridge | argv arrays, bounded timeout, cwd, machine-readable output, structured exit result, durable lifecycle run extraction | `src/utils/cli-bridge.ts`; `varitykit` and `python -m varitykit` adapters | `test/cli-bridge-env.mjs`, lifecycle projection tests, plus command-specific tool tests |
@@ -98,6 +98,13 @@ The MCP process normally runs on the user's machine. It can therefore operate
 on an explicitly supplied local project path and reuse the user's
 `~/.varitykit/config.json`. Authentication for Varity operations is the deploy
 key used by `varitykit` or the public-interface adapter.
+
+**stdout is the JSON-RPC channel and nothing else may write to it.** Every
+diagnostic goes to stderr, via `src/utils/logger.ts` or `console.error`. This is
+a hard invariant, not a style preference: one stray byte on stdout corrupts the
+protocol stream for the client. A Winston logger whose Console transport wrote
+every level, `error` included, to stdout with ANSI colour codes was removed on
+2026-08-25 for exactly this reason.
 
 ### Streamable HTTP
 
@@ -180,8 +187,13 @@ npm run build
 npm test
 ```
 
-Current automated tests cover CLI child-environment normalization and public
-URL liveness classification. High-value missing contract tests are MCP tool
+Current automated tests are six files, 17 tests: CLI child-environment
+normalization (`test/cli-bridge-env.mjs`), stderr-only diagnostic logging
+(`test/logger-stdio-channel.mjs`), public URL liveness classification
+(`test/deploy-status-liveness.mjs`), log completeness and freshness passthrough
+(`test/deploy-logs-completeness.mjs`), lifecycle acceptance semantics
+(`test/lifecycle-outcomes.mjs`), and public-API endpoint/timeout policy
+(`test/public-api-budget.mjs`). High-value missing contract tests are MCP tool
 registration by transport, public-interface auth/error normalization,
 structured response shape, HTTP OAuth/session behavior, and secret redaction.
 These are test gaps, not permission to create a second implementation.
