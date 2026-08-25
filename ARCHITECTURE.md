@@ -187,8 +187,9 @@ npm run build
 npm test
 ```
 
-Current automated tests are five files, 16 assertions: CLI child-environment
-normalization (`test/cli-bridge-env.mjs`), public URL liveness classification
+Current automated tests are six files, 17 tests: CLI child-environment
+normalization (`test/cli-bridge-env.mjs`), stderr-only diagnostic logging
+(`test/logger-stdio-channel.mjs`), public URL liveness classification
 (`test/deploy-status-liveness.mjs`), log completeness and freshness passthrough
 (`test/deploy-logs-completeness.mjs`), lifecycle acceptance semantics
 (`test/lifecycle-outcomes.mjs`), and public-API endpoint/timeout policy
