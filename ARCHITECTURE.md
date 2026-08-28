@@ -187,7 +187,7 @@ The MCP owns no durable deployment or billing state.
 | HTTP rate-limit counters | `src/index.ts` in-memory map | lost on restart; per process/IP |
 | OAuth client lookup | `src/auth/provider.ts` in-memory map | process-local; current code does not provide a durable client registry |
 | Local dev-server registry | `~/.varitykit/dev-servers.json` | host-local helper state, not platform truth |
-| Telemetry batches and metric aggregation | process memory in the official OpenTelemetry SDKs | bounded queues/cardinality; flushed and shut down on stdio close, SIGTERM, SIGINT, HTTP shutdown, or fatal startup; transport-close failure cannot skip telemetry custody or report success |
+| Telemetry batches and metric aggregation | process memory in the official OpenTelemetry SDKs | bounded queues/cardinality; stdio readiness is emitted only after signal shutdown custody is installed; batches flush on stdio close, SIGTERM, SIGINT, HTTP shutdown, or fatal startup; transport-close failure cannot skip telemetry custody or report success |
 | Deployment/release/log/billing truth | downstream Varity control plane | never cached as durable authority here |
 
 Tool results and logs must not include deploy keys, OAuth tokens, registry

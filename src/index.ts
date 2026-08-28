@@ -120,7 +120,6 @@ async function startStdio(onTransportClose: () => void): Promise<RuntimeShutdown
   // The SDK listens for stdin data/error but does not translate EOF into
   // transport.close(), so the process must take telemetry custody explicitly.
   process.stdin.once("end", onTransportClose);
-  console.error(`Varity MCP Server v${VERSION} running on stdio`);
   return async () => {
     process.stdin.off("end", onTransportClose);
     await server.close();
@@ -340,6 +339,11 @@ async function main(): Promise<void> {
         }
       );
     });
+  }
+
+  // Readiness promises signal-safe shutdown custody to the parent process.
+  if (transport === "stdio") {
+    console.error(`Varity MCP Server v${VERSION} running on stdio`);
   }
 }
 
