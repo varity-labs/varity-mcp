@@ -27,3 +27,5 @@ jobs:
         run: npm run build
       - name: Test
         run: npm test
+      - name: Build runtime container
+        run: docker build --tag varity-mcp-ci:${{ github.sha }} .

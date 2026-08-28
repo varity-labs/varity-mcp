@@ -46,7 +46,5 @@ MARKETPLACE_SUBMISSIONS.md
 PRE_PUBLISH_CHECKLIST.md
 BROWSER_USAGE.md
 
-# Infrastructure (do not commit)
+# Rendered infrastructure (contains deployment credentials; do not commit)
 deploy.yaml
-Dockerfile
-.dockerignore

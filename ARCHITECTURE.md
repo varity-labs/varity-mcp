@@ -81,6 +81,7 @@ the public interface or CLI did not return.
 | Credential/config lookup | environment key first, then `~/.varitykit/config.json` | `src/utils/config.ts` | precedence/redaction tests are currently missing |
 | HTTP OAuth provider | proxies OAuth endpoints to `auth.varity.so`; currently targets a missing gateway token-verification route | `src/auth/provider.ts` | verification and client-registration tests are currently missing; hosted flow is not certified |
 | Runtime telemetry | Optional MCP server spans, correlated logs, operation-duration metrics, startup custody, and error capture; stdout and protected inputs are excluded | `src/telemetry.ts`, `src/runtime-shutdown.ts`, `src/utils/logger.ts`; OTLP and error-ingest adapters | in-memory signal correlation, synthetic OTLP transport, secret allowlist, stdout, shutdown-flush, and failed-close custody tests |
+| Runtime container release | Tag `mcp-v<package-version>`; GHCR image tags `v<version>`, bare semver, and `latest` | `Dockerfile`, `.dockerignore`, `.github/workflows/release-container.yml`; GitHub Actions owns build/push credentials | PR CI builds the image; tag workflow rechecks package/runtime version before publishing |
 
 The CLI bridge and public-interface client are two real adapter seams: callers
 already vary between them. Removing either adapter without migrating its
