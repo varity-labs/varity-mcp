@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { createRequire } from "node:module";
 import { registerResources } from "./resources/index.js";
 import { registerPrompts } from "./prompts/index.js";
 import { registerSearchDocsTool } from "./tools/search-docs.js";
@@ -21,7 +22,14 @@ import { registerRedeployTool } from "./tools/redeploy.js";
 import { createOAuthProvider } from "./auth/provider.js";
 import { instrumentMcpServer } from "./telemetry.js";
 
-export const VERSION = "2.3.9";
+const require = createRequire(import.meta.url);
+const packageMetadata = require("../package.json") as { version?: unknown };
+
+if (typeof packageMetadata.version !== "string" || packageMetadata.version.length === 0) {
+  throw new Error("MCP package version is missing");
+}
+
+export const VERSION = packageMetadata.version;
 
 export type TransportMode = "stdio" | "http";
 
