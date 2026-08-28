@@ -8,7 +8,14 @@ test("logger preserves stdout as a clean JSON-RPC channel", () => {
     logger.debug("debug diagnostic");
     logger.info("info diagnostic");
     logger.warn("warn diagnostic");
-    logger.error("error diagnostic");
+    logger.error("error diagnostic", {
+      headers: { authorization: "Bearer synthetic-secret" },
+      sessionId: "synthetic-session",
+      ip: "203.0.113.10",
+      "http.request.method": "ATTACKER-METHOD",
+      "url.path": "/synthetic-secret/path",
+      "error.type": "SyntheticError"
+    });
   `;
   const result = spawnSync(process.execPath, ["--input-type=module", "--eval", script], {
     cwd: process.cwd(),
@@ -22,4 +29,11 @@ test("logger preserves stdout as a clean JSON-RPC channel", () => {
   const entries = result.stderr.trim().split("\n").map((line) => JSON.parse(line));
   assert.deepEqual(entries.map(({ level }) => level), ["debug", "info", "warn", "error"]);
   assert.ok(entries.every(({ service }) => service === "varity-mcp"));
+  assert.equal(entries[3]["error.type"], "SyntheticError");
+  assert.equal(entries[3].headers, undefined);
+  assert.equal(entries[3].sessionId, undefined);
+  assert.equal(entries[3].ip, undefined);
+  assert.equal(entries[3]["http.request.method"], "OTHER");
+  assert.equal(entries[3]["url.path"], "/_other");
+  assert.doesNotMatch(result.stderr, /synthetic-secret|synthetic-session|203\.0\.113\.10/);
 });

@@ -5,6 +5,16 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { createVarityServer, VERSION } from "./server.js";
 import type { TransportMode } from "./server.js";
 import { logger, logHttpRequest } from "./utils/logger.js";
+import {
+  captureTelemetryException,
+  failureAttributes,
+  startTelemetry,
+  stopTelemetry,
+} from "./telemetry.js";
+import {
+  createRuntimeShutdownCoordinator,
+  type RuntimeShutdown,
+} from "./runtime-shutdown.js";
 
 /**
  * Varity MCP Server
@@ -98,14 +108,26 @@ DOCS: https://docs.varity.so/ai-tools/mcp-server-spec
 `);
 }
 
-async function startStdio(): Promise<void> {
+async function startStdio(onTransportClose: () => void): Promise<RuntimeShutdown> {
   const server = createVarityServer("stdio");
   const transport = new StdioServerTransport();
   await server.connect(transport);
+  const sdkOnClose = transport.onclose;
+  transport.onclose = () => {
+    sdkOnClose?.();
+    onTransportClose();
+  };
+  // The SDK listens for stdin data/error but does not translate EOF into
+  // transport.close(), so the process must take telemetry custody explicitly.
+  process.stdin.once("end", onTransportClose);
   console.error(`Varity MCP Server v${VERSION} running on stdio`);
+  return async () => {
+    process.stdin.off("end", onTransportClose);
+    await server.close();
+  };
 }
 
-async function startHttp(port: number): Promise<void> {
+async function startHttp(port: number): Promise<RuntimeShutdown> {
   // Dynamic imports
   const { createServer } = await import("node:http");
   const { randomUUID } = await import("node:crypto");
@@ -161,7 +183,7 @@ async function startHttp(port: number): Promise<void> {
         res.writeHead(429, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Too many requests. Try again in 1 minute." }));
         logHttpRequest(req.method || "?", url.pathname, 429, Date.now() - startTime);
-        logger.warn("Rate limit exceeded", { ip: clientIp });
+        logger.warn("Rate limit exceeded");
         return;
       }
 
@@ -187,7 +209,7 @@ async function startHttp(port: number): Promise<void> {
           // Reuse existing session
           const session = sessions.get(sessionId)!;
           await session.transport.handleRequest(req, res);
-          logHttpRequest(req.method || "POST", url.pathname, 200, Date.now() - startTime, sessionId);
+          logHttpRequest(req.method || "POST", url.pathname, res.statusCode, Date.now() - startTime);
           return;
         }
 
@@ -201,7 +223,7 @@ async function startHttp(port: number): Promise<void> {
           transport.onclose = () => {
             if (transport.sessionId) {
               sessions.delete(transport.sessionId);
-              logger.info("Session closed", { sessionId: transport.sessionId });
+              logger.info("MCP session closed");
             }
           };
 
@@ -211,10 +233,10 @@ async function startHttp(port: number): Promise<void> {
           // Session ID is assigned after handleRequest processes the initialize message
           if (transport.sessionId) {
             sessions.set(transport.sessionId, { server: sessionServer, transport });
-            logger.info("New MCP session created", { sessionId: transport.sessionId, ip: clientIp });
+            logger.info("New MCP session created");
           }
 
-          logHttpRequest("POST", url.pathname, 200, Date.now() - startTime, transport.sessionId);
+          logHttpRequest("POST", url.pathname, res.statusCode, Date.now() - startTime);
           return;
         }
 
@@ -232,12 +254,22 @@ async function startHttp(port: number): Promise<void> {
     } catch (error) {
       // Catch-all error handler
       const err = error instanceof Error ? error : new Error(String(error));
+      const failure = failureAttributes(
+        "inspect_correlated_trace_and_response_before_retry",
+        "http_request_failed",
+        "http_request"
+      );
       logger.error("HTTP request error", {
-        error: err.message,
-        stack: err.stack,
-        path: url.pathname,
-        method: req.method,
-        headers: req.headers
+        ...failure,
+        "so.varity.mcp.operation.name": "http_request",
+        "error.type": err.name,
+        "url.path": url.pathname,
+        "http.request.method": req.method ?? "?",
+      });
+      captureTelemetryException(err, {
+        ...failure,
+        "so.varity.mcp.operation.name": "http_request",
+        "error.type": err.name,
       });
 
       res.writeHead(500, { "Content-Type": "application/json" });
@@ -249,33 +281,84 @@ async function startHttp(port: number): Promise<void> {
     }
   });
 
-  httpServer.listen(port, () => {
+  await new Promise<void>((resolve) => httpServer.listen(port, resolve));
+  {
     logger.info(`Varity MCP Server v${VERSION} running on http://localhost:${port}/mcp`);
     logger.info(`Health check: http://localhost:${port}/health`);
     logger.info(`Rate limit: ${RATE_LIMIT} requests/minute per IP`);
-  });
+  }
 
-  // Graceful shutdown
-  process.on("SIGTERM", () => {
-    logger.info("SIGTERM received, shutting down gracefully");
-    httpServer.close(() => {
-      logger.info("HTTP server closed");
-      process.exit(0);
+  return () => new Promise<void>((resolve, reject) => {
+    httpServer.close((error) => {
+      if (error) reject(error);
+      else {
+        logger.info("HTTP server closed");
+        resolve();
+      }
     });
   });
 }
 
 async function main(): Promise<void> {
   const { transport, port } = parseArgs();
+  startTelemetry({ version: VERSION, transport });
+  const shutdown = createRuntimeShutdownCoordinator(stopTelemetry);
 
   if (transport === "stdio") {
-    await startStdio();
+    shutdown.setRuntimeShutdown(await startStdio(() => {
+      void shutdown.shutdown(false).catch(() => {
+        logger.error("Runtime shutdown failed", {
+          ...failureAttributes(
+            "inspect_shutdown_diagnostics_before_restart",
+            "runtime_shutdown_failed",
+            "runtime_shutdown"
+          ),
+          "so.varity.mcp.operation.name": "runtime_shutdown",
+        });
+        process.exitCode = 1;
+      });
+    }));
   } else if (transport === "http") {
-    await startHttp(port);
+    shutdown.setRuntimeShutdown(await startHttp(port));
+  }
+
+  for (const signal of ["SIGTERM", "SIGINT"] as const) {
+    process.once(signal, () => {
+      logger.info(`${signal} received, shutting down gracefully`);
+      void shutdown.shutdown(true).then(
+        () => process.exit(0),
+        () => {
+          logger.error("Runtime shutdown failed", {
+            ...failureAttributes(
+              "inspect_shutdown_diagnostics_before_restart",
+              "runtime_shutdown_failed",
+              "runtime_shutdown"
+            ),
+            "so.varity.mcp.operation.name": "runtime_shutdown",
+          });
+          process.exit(1);
+        }
+      );
+    });
   }
 }
 
 main().catch((error) => {
-  logger.error("Fatal error", { error: error instanceof Error ? error.message : String(error) });
-  process.exit(1);
+  const err = error instanceof Error ? error : new Error(String(error));
+  const failure = failureAttributes(
+    "inspect_runtime_configuration_and_error_before_restart",
+    "runtime_start_failed",
+    "runtime_start"
+  );
+  logger.error("Fatal error", {
+    ...failure,
+    "so.varity.mcp.operation.name": "runtime_start",
+    "error.type": err.name,
+  });
+  captureTelemetryException(err, {
+    ...failure,
+    "so.varity.mcp.operation.name": "runtime_start",
+    "error.type": err.name,
+  });
+  void stopTelemetry().finally(() => process.exit(1));
 });

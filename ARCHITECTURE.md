@@ -1,7 +1,7 @@
 # `@varity-labs/mcp` Architecture
 
 Status: current implementation map
-Last code-grounded audit: 2026-08-25
+Last code-grounded audit: 2026-08-28
 Scope: stable ownership, interfaces, adapters, state, auth, failures, and tests
 
 This document is the repository-level layer of Varity's progressive
@@ -19,6 +19,8 @@ This repository owns:
 - translation from MCP inputs to either local `varitykit` commands or the
   owner-scoped public Varity interface;
 - consistent structured success/error responses;
+- secret-safe, trace-correlated runtime telemetry projected through standard
+  OpenTelemetry and optional Better Stack error ingestion;
 - bounded local developer helpers such as build, dependency installation,
   browser opening, and development-server management.
 
@@ -31,6 +33,8 @@ It explicitly does not own:
 - a separate deployment engine for portal, CLI, MCP, or embedded consumers;
 - direct provider, static-storage, db-proxy, credential-proxy, or billing-meter
   integration.
+- Better Stack sources, error projects, dashboards, monitors, incidents, or
+  deployment configuration.
 
 ## Context and call flow
 
@@ -46,6 +50,9 @@ flowchart LR
   LOCAL[Local filesystem, processes, GitHub]
   VK[varitykit]
   GATEWAY[Varity gateway/public control plane]
+  TELEMETRY[Telemetry module]
+  OTLP[OTLP trace, log, and metric ingest]
+  ERRORS[Optional error ingest]
 
   CLIENT --> STDIO --> SERVER
   CLIENT --> HTTP --> SERVER
@@ -53,6 +60,8 @@ flowchart LR
   TOOLS --> CLI --> VK --> GATEWAY
   TOOLS --> PUBLIC --> GATEWAY
   TOOLS --> LOCAL
+  SERVER --> TELEMETRY --> OTLP
+  TELEMETRY --> ERRORS
 ```
 
 All deployment paths converge on the same Varity control plane. MCP output is a
@@ -71,6 +80,7 @@ the public interface or CLI did not return.
 | Response module | `{success,data,message}` or MCP error `{success:false,error}` | `src/utils/responses.ts` | contract tests are currently missing |
 | Credential/config lookup | environment key first, then `~/.varitykit/config.json` | `src/utils/config.ts` | precedence/redaction tests are currently missing |
 | HTTP OAuth provider | proxies OAuth endpoints to `auth.varity.so`; currently targets a missing gateway token-verification route | `src/auth/provider.ts` | verification and client-registration tests are currently missing; hosted flow is not certified |
+| Runtime telemetry | Optional MCP server spans, correlated logs, operation-duration metrics, startup custody, and error capture; stdout and protected inputs are excluded | `src/telemetry.ts`, `src/runtime-shutdown.ts`, `src/utils/logger.ts`; OTLP and error-ingest adapters | in-memory signal correlation, synthetic OTLP transport, secret allowlist, stdout, shutdown-flush, and failed-close custody tests |
 
 The CLI bridge and public-interface client are two real adapter seams: callers
 already vary between them. Removing either adapter without migrating its
@@ -133,6 +143,39 @@ Only `open-browser` and `dev-server` are currently excluded from HTTP
 registration; other local-development tools remain registered for both modes.
 Treat changing that exposure as a security and interface change.
 
+### Telemetry
+
+Telemetry is opt-in. The OTLP adapters read standard `OTEL_EXPORTER_OTLP_*`
+configuration; error capture reads `BETTERSTACK_MCP_DSN`. Missing or invalid
+telemetry configuration must not change MCP transport, auth, tool, resource, or
+prompt behavior. Export diagnostics remain on stderr.
+
+`src/telemetry.ts` wraps the MCP handler-registration seam once, before tools,
+resources, and prompts register. It records the OpenTelemetry MCP development
+convention's low-cardinality method, transport, successful tool/prompt name,
+duration, and error class. W3C `traceparent`/`tracestate` received in MCP
+`params._meta` establish the server-span parent. Baggage, JSON-RPC request IDs,
+session IDs, IP addresses, authorization headers, arguments, prompt variables,
+resource URIs, results, and arbitrary paths are never telemetry dimensions or
+log bodies. Unknown or failed target names remain absent to prevent an
+attacker-controlled cardinality channel.
+
+The logger uses an explicit safe-attribute allowlist. Failure logs separate the
+observed operation (`mcp.method.name` or a bounded runtime-operation field) from
+canonical `action`, which is a bounded remediation instruction. They include a
+diagnostic code and one of four observed lifecycle stages (`mcp_handler`,
+`http_request`, `runtime_start`, or `runtime_shutdown`), plus explicit
+`unobserved` values for owner, retryability, cause, and domain when downstream
+ownership cannot be proven. The optional error adapter structurally rebuilds
+events from an allowlist: free-form
+exception values, request/user/extra/breadcrumb data, raw paths, functions, and
+source context are discarded; only a fixed exception value, safe type/frame
+shape, canonical tags, and valid OpenTelemetry trace/span identifiers remain.
+Each configured signal is independent: error-only and log-only configurations
+still wrap the MCP handler-registration seam even without an OTLP tracer. Error
+capture is strictly observational: an adapter exception emits only a fixed
+secret-free diagnostic and cannot replace an MCP result or handler exception.
+
 ## State and data
 
 The MCP owns no durable deployment or billing state.
@@ -144,6 +187,7 @@ The MCP owns no durable deployment or billing state.
 | HTTP rate-limit counters | `src/index.ts` in-memory map | lost on restart; per process/IP |
 | OAuth client lookup | `src/auth/provider.ts` in-memory map | process-local; current code does not provide a durable client registry |
 | Local dev-server registry | `~/.varitykit/dev-servers.json` | host-local helper state, not platform truth |
+| Telemetry batches and metric aggregation | process memory in the official OpenTelemetry SDKs | bounded queues/cardinality; flushed and shut down on stdio close, SIGTERM, SIGINT, HTTP shutdown, or fatal startup; transport-close failure cannot skip telemetry custody or report success |
 | Deployment/release/log/billing truth | downstream Varity control plane | never cached as durable authority here |
 
 Tool results and logs must not include deploy keys, OAuth tokens, registry
@@ -176,6 +220,12 @@ credentials.
   revocation, and cleanup before public hosted-auth claims are restored.
 - Tool input validation happens before adapter calls. User-controlled values
   must remain argv entries or encoded URL segments, never shell fragments.
+- Telemetry initialization/export failure degrades to a bounded stderr
+  diagnostic and never changes the MCP result. Export credentials remain only
+  in exporter headers. Shutdown waits for buffered telemetry before exit.
+- MCP error results and thrown handlers are observability failures, not proof
+  that Varity or a supplier owns the underlying defect; their failure domain is
+  `unobserved` until an owning adapter supplies evidence.
 
 ## Verification
 
@@ -187,15 +237,15 @@ npm run build
 npm test
 ```
 
-Current automated tests are six files, 17 tests: CLI child-environment
-normalization (`test/cli-bridge-env.mjs`), stderr-only diagnostic logging
-(`test/logger-stdio-channel.mjs`), public URL liveness classification
-(`test/deploy-status-liveness.mjs`), log completeness and freshness passthrough
-(`test/deploy-logs-completeness.mjs`), lifecycle acceptance semantics
-(`test/lifecycle-outcomes.mjs`), and public-API endpoint/timeout policy
-(`test/public-api-budget.mjs`). High-value missing contract tests are MCP tool
-registration by transport, public-interface auth/error normalization,
-structured response shape, HTTP OAuth/session behavior, and secret redaction.
+Automated coverage includes CLI child-environment normalization, stderr-only
+diagnostic logging and safe attributes, public URL liveness classification,
+log completeness/freshness passthrough, lifecycle acceptance semantics,
+public-interface endpoint/timeout policy, in-memory MCP span/log/metric
+correlation, protected-input exclusion, error-only capture, structural Sentry
+allowlisting, real synthetic OTLP HTTP construction, stdio shutdown flushing,
+and failed-close telemetry custody. High-value missing contract tests are the complete
+MCP registration surface by transport, public-interface auth/error
+normalization, structured response shape, and HTTP OAuth/session behavior.
 These are test gaps, not permission to create a second implementation.
 
 ## Change navigation
@@ -210,5 +260,8 @@ These are test gaps, not permission to create a second implementation.
 - Transport/session/OAuth change: update `index.ts`, `auth/provider.ts`,
   topology/security sections here, and add an ADR when the choice is
   load-bearing.
+- Telemetry signal/attribute/export change: update `telemetry.ts`, the logger,
+  correlation/transport tests, and the telemetry/security sections here. Live
+  ingest configuration remains outside this repository.
 - New durable state, provider logic, pricing policy, or orchestration logic:
   stop. That belongs behind the Varity control plane, not in this repository.
