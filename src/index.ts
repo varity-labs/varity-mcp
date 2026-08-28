@@ -280,7 +280,9 @@ async function startHttp(port: number): Promise<RuntimeShutdown> {
     }
   });
 
-  await new Promise<void>((resolve) => httpServer.listen(port, resolve));
+  // Akash ingress reaches the pod over IPv4. Node hostless listen defaults to an IPv6
+  // wildcard and only accepts IPv4 when the node permits mapped addresses.
+  await new Promise<void>((resolve) => httpServer.listen({ port, host: "0.0.0.0" }, resolve));
   {
     logger.info(`Varity MCP Server v${VERSION} running on http://localhost:${port}/mcp`);
     logger.info(`Health check: http://localhost:${port}/health`);
