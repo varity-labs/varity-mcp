@@ -1,0 +1,57 @@
+name: Build and Push MCP Container
+
+on:
+  push:
+    tags:
+      - "mcp-v*"
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: varity-labs/varity-mcp
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve and verify release version
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          requested="${GITHUB_REF_NAME#mcp-v}"
+          if [[ ! "$requested" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::release tag must match mcp-v<major>.<minor>.<patch>"
+            exit 1
+          fi
+          package_version="$(node -p 'require("./package.json").version')"
+          if [[ "$requested" != "$package_version" ]]; then
+            echo "::error::release tag requests $requested, but package/runtime reports $package_version"
+            exit 1
+          fi
+          echo "version=$requested" >> "$GITHUB_OUTPUT"
+          echo "versioned_tag=v$requested" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Build and push immutable image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          provenance: false
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.release.outputs.versioned_tag }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.release.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
