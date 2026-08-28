@@ -19,6 +19,7 @@ import { registerDeleteDeploymentTool } from "./tools/delete-deployment.js";
 import { registerSetEnvTool } from "./tools/set-env.js";
 import { registerRedeployTool } from "./tools/redeploy.js";
 import { createOAuthProvider } from "./auth/provider.js";
+import { instrumentMcpServer } from "./telemetry.js";
 
 export const VERSION = "2.3.9";
 
@@ -46,6 +47,10 @@ export function createVarityServer(mode: TransportMode = "stdio"): McpServer {
     version: VERSION,
     ...(mode === "http" ? { authProvider: createOAuthProvider() } : {}),
   });
+
+  // Instrument the registration seam once so every resource, prompt, and tool
+  // runs inside the same secret-safe MCP server span implementation.
+  instrumentMcpServer(server, mode);
 
   // ── Resources (deploy reference for AI context) ──
   registerResources(server);
