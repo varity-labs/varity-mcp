@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 
 const gateScript = new URL("../scripts/hosted-release-function-gate.mjs", import.meta.url);
@@ -10,6 +13,8 @@ const expectedVersion = "9.8.7";
 
 async function runGate(handler) {
   const requests = [];
+  const receiptRoot = mkdtempSync(path.join(tmpdir(), "varity-hosted-gate-receipt-"));
+  const receiptPath = path.join(receiptRoot, "gate.receipt.json");
   const server = createServer(async (request, response) => {
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
@@ -33,6 +38,7 @@ async function runGate(handler) {
       VARITY_MCP_URL: "http://127.0.0.1:" + address.port + "/mcp",
       VARITY_MCP_ACCESS_TOKEN: token,
       VARITY_MCP_EXPECTED_VERSION: expectedVersion,
+      VARITY_MCP_RECEIPT_PATH: receiptPath,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -43,11 +49,14 @@ async function runGate(handler) {
   const [exitCode] = await once(child, "exit");
   server.close();
   await once(server, "close");
+  const receipt = existsSync(receiptPath) ? JSON.parse(readFileSync(receiptPath, "utf8")) : undefined;
+  rmSync(receiptRoot, { recursive: true, force: true });
   return {
     exitCode,
     stdout: Buffer.concat(stdout).toString("utf8"),
     stderr: Buffer.concat(stderr).toString("utf8"),
     requests,
+    receipt,
   };
 }
 
@@ -109,6 +118,20 @@ test("hosted gate proves exact release, rejection, session continuity, and tools
 
   assert.equal(result.exitCode, 0, result.stderr);
   assert.match(result.stdout, /hosted-mcp-release-function-gate: passed/);
+  assert.deepEqual(result.receipt, {
+    version: expectedVersion,
+    serverInfoVersion: expectedVersion,
+    anonymous: "rejected",
+    tools: ["varity_search_docs"],
+    toolsCall: {
+      name: "varity_search_docs",
+      query: "deploy",
+      maxResults: 1,
+      result: "bounded-public-docs-pass",
+      docsUrl: "https://docs.varity.so",
+      resultCount: 1,
+    },
+  });
   assert.deepEqual(result.requests[0], {
     method: "GET",
     authorization: undefined,

@@ -81,7 +81,7 @@ the public interface or CLI did not return.
 | Credential/config lookup | environment key first, then `~/.varitykit/config.json` | `src/utils/config.ts` | precedence/redaction tests are currently missing |
 | HTTP OAuth provider | proxies OAuth endpoints to `auth.varity.so`; verifies every `/mcp` bearer before the transport, rejects verification without a stable non-empty `user_id`, and binds each session to that verified principal; production verification currently targets a missing gateway route | `src/auth/provider.ts`, `src/auth/http-bearer.ts` | a real-package test proves anonymous rejection, missing-principal rejection, authenticated session continuity, cross-principal HTTP 403, and one bounded public-documentation tool result through the production verifier and tool implementations; live production verification and downstream owner equality are not certified |
 | Runtime telemetry | Optional MCP server spans, correlated logs, operation-duration metrics, startup custody, and error capture; stdout and protected inputs are excluded | `src/telemetry.ts`, `src/runtime-shutdown.ts`, `src/utils/logger.ts`; OTLP and error-ingest adapters | in-memory signal correlation, synthetic OTLP transport, secret allowlist, stdout, shutdown-flush, and failed-close custody tests |
-| Runtime container release | Tag `mcp-v<package-version>`; GHCR image tags `v<version>`, bare semver, and `latest` | `Dockerfile`, `.dockerignore`, `.github/workflows/release-container.yml`; GitHub Actions owns build/push credentials | PR CI starts the Node 22 image and validates exact health; tag workflow rechecks package/runtime version before publishing |
+| Runtime container release | Tag `mcp-v<package-version>`; one globally locked run builds one candidate index; accepts and attests its digest; revalidates both immutable aliases; then promotes to `v<version>`, bare semver, and `latest` | `Dockerfile`, `.dockerignore`, `.github/workflows/release-container.yml`; `scripts/release-alias-gate.mjs` classifies registry absence; `scripts/validate-release-evidence.mjs` validates the complete artifact; GitHub Actions owns build/push credentials; `scripts/release-auth-fixture.mjs` supplies only an ephemeral test principal | PR CI starts the Node 22 image and validates exact health; executable tests prove auth/outage/timeout/malformed registry failures stay closed, a promotion-time recheck catches an intervening alias, evidence is exact and credential-opaque, and every promoted alias resolves to the accepted digest |
 
 The CLI bridge and public-interface client are two real adapter seams: callers
 already vary between them. Removing either adapter without migrating its
@@ -203,6 +203,18 @@ Tool results and logs must not include deploy keys, OAuth tokens, registry
 passwords, GitHub tokens, private environment values, or downstream internal
 credentials.
 
+Release acceptance creates one random, masked bearer inside the Actions runner.
+The bearer is passed only through process environments to the ephemeral verifier
+fixture and hosted function gate; it is never placed in a container environment,
+image layer, command argument, artifact, or diagnostic. The fixture returns one
+fixed read-only principal, has no durable state, and is not included in the
+runtime container. The retained artifact is self-contained: exact digest/version
+and health receipts, structured `tools/list` and real `tools/call` receipts,
+gate stdout/stderr, fixture diagnostics, container diagnostics, and the final
+`ACCEPTANCE PASS` receipt. Every regular evidence entry is scanned for the
+bearer before upload; a missing, malformed, unreadable, or non-regular entry
+fails closed.
+
 ## Failure semantics
 
 - The CLI adapter never throws a command failure to callers; it returns stdout,
@@ -228,6 +240,14 @@ credentials.
   exchange, verification, authenticated MCP request, revocation, and cleanup. A
   separately proven OAuth-principal/downstream-owner equality and an owner-bound
   operation are required before any per-user hosted operation is registered.
+- A release alias is not artifact identity. The tag workflow holds one global
+  non-cancelling release lock, accepts the candidate by digest, verifies exact
+  health and the authenticated Option B function, attests that digest, and then
+  revalidates both immutable aliases immediately before promotion. Only an
+  explicit registry `manifest unknown` or `no such manifest` diagnostic proves
+  absence; missing Docker/buildx/credential helpers, authentication, outage,
+  timeout, empty, or malformed results fail closed. An intervening alias aborts
+  promotion, and all promoted aliases must resolve back to the accepted digest.
 - Tool input validation happens before adapter calls. User-controlled values
   must remain argv entries or encoded URL segments, never shell fragments.
 - Telemetry initialization/export failure degrades to a bounded stderr
@@ -256,11 +276,37 @@ allowlisting, real synthetic OTLP HTTP construction, stdio shutdown flushing,
 failed-close telemetry custody, package startup at the exact Node 22.11 LTS minimum and on Node 24, actual Node 22
 container health, stable-principal verification, cross-principal session
 rejection, exact hosted tool registration, a deterministic real-package public-
-documentation tool call, and the separately runnable live hosted function gate. High-value missing contract tests are
+documentation tool call, the fail-closed credential-opaque release verifier
+fixture, fail-closed registry absence classification, promotion-time TOCTOU
+revalidation, complete credential-opaque release evidence, the digest-first
+release ordering, and the separately runnable live hosted function gate.
+High-value missing contract tests are
 the complete stdio registration surface, public-interface auth/error
 normalization, structured response shape, live production OAuth verification, and
 cross-replica HTTP session behavior.
 These are test gaps, not permission to create a second implementation.
+
+## Release change evidence across the seven required metrics
+
+- **maximum speed:** one image build feeds acceptance, attestation, and all
+  aliases; the workflow does not rebuild after smoke.
+- **scalability:** one repository-wide release lock and digest identity prevent
+  competing tag runs without adding runtime state or a request-path dependency.
+- **flexibility:** acceptance reuses the existing hosted function gate and
+  production verifier interface; registry classification and evidence checking
+  are separate deep modules with executable interfaces.
+- **reliability:** ambiguous registry results and promotion races fail closed;
+  health, version, anonymous rejection, authenticated session, exact Option B
+  allowlist, and real `tools/call` must pass before promotion.
+- **durability:** the accepted OCI digest is the release identity, with max
+  provenance, an SBOM, GitHub attestation, and a self-contained artifact holding
+  exact digest/version, health, gate, diagnostic, and PASS receipts.
+- **security:** semver aliases require confirmed absence twice; the production
+  verifier implementation is exercised; no filesystem, process, customer-data,
+  or mutation tool becomes reachable over HTTP.
+- **privacy:** the random bearer is masked and excluded from the image; every
+  gate output, receipt, and diagnostic is scanned before upload, while missing,
+  malformed, unreadable, or non-regular evidence fails closed.
 
 ## Change navigation
 

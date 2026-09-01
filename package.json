@@ -1,6 +1,6 @@
 {
   "name": "@varity-labs/mcp",
-  "version": "2.3.14",
+  "version": "2.3.15",
   "description": "Varity MCP Server: deploy and operate supported Varity apps from Cursor, Claude Code, VS Code, Windsurf, or ChatGPT.",
   "type": "module",
   "bin": {
