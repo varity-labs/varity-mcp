@@ -89,6 +89,7 @@ test("real HTTP server rejects anonymous initialize and preserves an authenticat
   const childEnv = {
     ...process.env,
     VARITY_GATEWAY_URL: "http://127.0.0.1:" + gatewayAddress.port,
+    NODE_OPTIONS: "--import=" + new URL("./fixtures/http-docs-fetch.mjs", import.meta.url).href,
   };
   delete childEnv.VARITY_MCP_DEV_TOKEN;
   const child = spawn(process.execPath, ["dist/index.js", "--transport", "http", "--port", String(port)], {
@@ -209,6 +210,45 @@ test("real HTTP server rejects anonymous initialize and preserves an authenticat
   assert.equal(listed.status, 200);
   const toolsPayload = await rpcResult(listed, 2);
   assert.deepEqual(toolsPayload.result.tools.map((tool) => tool.name), ["varity_search_docs"]);
+
+  const called = await fetch(baseUrl + "/mcp", {
+    method: "POST",
+    headers: {
+      ...authorization,
+      Accept: "application/json, text/event-stream",
+      "Content-Type": "application/json",
+      "Mcp-Session-Id": sessionId,
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: { name: "varity_search_docs", arguments: { query: "deploy", maxResults: 1 } },
+    }),
+  });
+  assert.equal(called.status, 200);
+  const callPayload = await rpcResult(called, 3);
+  const content = callPayload.result.content;
+  assert.equal(content.length, 1);
+  assert.equal(content[0].type, "text");
+  assert(content[0].text.length <= 5_000);
+  const projection = JSON.parse(content[0].text);
+  assert.equal(projection.success, true);
+  assert.equal(projection.data.docsUrl, "https://docs.varity.so");
+  assert.equal(projection.data.query, "deploy");
+  assert.equal(projection.data.results.length, 1);
+  assert.deepEqual(projection.data.results.map(({ title, url, content: body }) => ({
+    titleBounded: typeof title === "string" && title.length > 0 && title.length <= 256,
+    url,
+    contentBounded: typeof body === "string" && body.length > 0 && body.length <= 1_200,
+  })), [{
+    titleBounded: true,
+    url: "https://docs.varity.so",
+    contentBounded: true,
+  }]);
+  for (const token of [principalAToken, principalBToken, missingPrincipalToken]) {
+    assert.doesNotMatch(content[0].text, new RegExp(token));
+  }
 
   const closed = await fetch(baseUrl + "/mcp", {
     method: "DELETE",

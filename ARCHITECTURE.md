@@ -79,7 +79,7 @@ the public interface or CLI did not return.
 | Public-interface client | stdio-only deploy-key auth, 60-second GET timeout, normalized error codes/actions; never receives an HTTP OAuth bearer | `src/utils/public-api.ts`; gateway adapter | adapter tests cover gateway configuration and timeout policy plus selected response projections |
 | Response module | `{success,data,message}` or MCP error `{success:false,error}` | `src/utils/responses.ts` | contract tests are currently missing |
 | Credential/config lookup | environment key first, then `~/.varitykit/config.json` | `src/utils/config.ts` | precedence/redaction tests are currently missing |
-| HTTP OAuth provider | proxies OAuth endpoints to `auth.varity.so`; verifies every `/mcp` bearer before the transport, rejects verification without a stable non-empty `user_id`, and binds each session to that verified principal; production verification currently targets a missing gateway route | `src/auth/provider.ts`, `src/auth/http-bearer.ts` | a real-package test proves anonymous rejection, missing-principal rejection, authenticated session continuity, and cross-principal HTTP 403 through the production verifier adapter; live production verification and downstream owner equality are not certified |
+| HTTP OAuth provider | proxies OAuth endpoints to `auth.varity.so`; verifies every `/mcp` bearer before the transport, rejects verification without a stable non-empty `user_id`, and binds each session to that verified principal; production verification currently targets a missing gateway route | `src/auth/provider.ts`, `src/auth/http-bearer.ts` | a real-package test proves anonymous rejection, missing-principal rejection, authenticated session continuity, cross-principal HTTP 403, and one bounded public-documentation tool result through the production verifier and tool implementations; live production verification and downstream owner equality are not certified |
 | Runtime telemetry | Optional MCP server spans, correlated logs, operation-duration metrics, startup custody, and error capture; stdout and protected inputs are excluded | `src/telemetry.ts`, `src/runtime-shutdown.ts`, `src/utils/logger.ts`; OTLP and error-ingest adapters | in-memory signal correlation, synthetic OTLP transport, secret allowlist, stdout, shutdown-flush, and failed-close custody tests |
 | Runtime container release | Tag `mcp-v<package-version>`; GHCR image tags `v<version>`, bare semver, and `latest` | `Dockerfile`, `.dockerignore`, `.github/workflows/release-container.yml`; GitHub Actions owns build/push credentials | PR CI starts the Node 22 image and validates exact health; tag workflow rechecks package/runtime version before publishing |
 
@@ -255,8 +255,8 @@ correlation, protected-input exclusion, error-only capture, structural Sentry
 allowlisting, real synthetic OTLP HTTP construction, stdio shutdown flushing,
 failed-close telemetry custody, package startup at the exact Node 22.11 LTS minimum and on Node 24, actual Node 22
 container health, stable-principal verification, cross-principal session
-rejection, exact hosted tool registration, and one bounded live documentation
-search through the hosted function gate. High-value missing contract tests are
+rejection, exact hosted tool registration, a deterministic real-package public-
+documentation tool call, and the separately runnable live hosted function gate. High-value missing contract tests are
 the complete stdio registration surface, public-interface auth/error
 normalization, structured response shape, live production OAuth verification, and
 cross-replica HTTP session behavior.
