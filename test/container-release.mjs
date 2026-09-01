@@ -6,6 +6,7 @@ const dockerfile = readFileSync(new URL("../Dockerfile", import.meta.url), "utf8
 const dockerignore = readFileSync(new URL("../.dockerignore", import.meta.url), "utf8");
 const workflow = readFileSync(new URL("../.github/workflows/release-container.yml", import.meta.url), "utf8");
 const ciWorkflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+const aliasGate = readFileSync(new URL("../scripts/release-alias-gate.mjs", import.meta.url), "utf8");
 
 test("runtime container builds source reproducibly and runs as non-root", () => {
   assert.match(dockerfile, /FROM node:22-alpine AS build/);
@@ -39,6 +40,8 @@ test("GHCR release builds once, accepts by digest, attests, then promotes", () =
   assert.match(workflow, /attestations: write/);
   assert.match(workflow, /package_version=.*package\.json/);
   assert.match(workflow, /release-alias-gate\.mjs assert-absent/);
+  assert.equal((workflow.match(/GHCR_ACTOR: \$\{\{ github\.actor \}\}/g) ?? []).length, 2);
+  assert.equal((workflow.match(/GHCR_TOKEN: \$\{\{ secrets\.GHCR_PAT \|\| github\.token \}\}/g) ?? []).length, 2);
   assert.match(workflow, /group: varity-mcp-container-release/);
   assert.match(workflow, /cancel-in-progress: false/);
   assert.match(workflow, /docker\/build-push-action@v6/);
@@ -83,5 +86,6 @@ test("GHCR release builds once, accepts by digest, attests, then promotes", () =
   assert.doesNotMatch(workflow, /provenance: false/);
   assert.doesNotMatch(workflow, /Upload acceptance evidence\n\s+if: always\(\)/);
   assert.doesNotMatch(workflow, /--env [^\n]*release_token|docker logs .*\|/);
+  assert.doesNotMatch(aliasGate, /console\.(?:log|error)\([^\n]*(?:GHCR_TOKEN|Authorization|registryToken|token\})/);
   assert.doesNotMatch(workflow, /workflow_dispatch|DOCKERHUB|npm publish/);
 });

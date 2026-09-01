@@ -53,6 +53,8 @@ jobs:
 
       - name: Reject an existing immutable release alias
         env:
+          GHCR_ACTOR: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GHCR_PAT || github.token }}
           VERSION: ${{ steps.release.outputs.version }}
           VERSIONED_TAG: ${{ steps.release.outputs.versioned_tag }}
         run: |
@@ -171,6 +173,8 @@ jobs:
 
       - name: Revalidate immutable aliases immediately before promotion
         env:
+          GHCR_ACTOR: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GHCR_PAT || github.token }}
           VERSION: ${{ steps.release.outputs.version }}
           VERSIONED_TAG: ${{ steps.release.outputs.versioned_tag }}
         run: |
