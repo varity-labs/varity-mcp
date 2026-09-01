@@ -24,6 +24,7 @@ test("container context is a source allowlist that excludes environment files", 
 });
 
 test("CI executes every supported runtime lane and the real Node 22 container", () => {
+  assert.match(ciWorkflow, /build-test:[\s\S]*?node-version: 22\.11\.0/);
   assert.match(ciWorkflow, /node: \[22\.11\.0, 24\]/);
   assert.match(ciWorkflow, /node --test test\/runtime-version\.mjs/);
   assert.match(ciWorkflow, /docker run --detach/);
