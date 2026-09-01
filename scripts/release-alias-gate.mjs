@@ -3,7 +3,7 @@
 import { spawnSync } from "node:child_process";
 
 const INSPECT_TIMEOUT_MS = 30_000;
-const CONFIRMED_ABSENT = /(?:manifest unknown|no such manifest|\bnot found\b)/i;
+const CONFIRMED_ABSENT = /(?:manifest unknown|no such manifest)/i;
 const INDETERMINATE = /(?:unauthorized|authentication required|denied|forbidden|too many requests|rate limit|timed? ?out|timeout|i\/o timeout|context deadline exceeded|temporary failure|unavailable|internal server error|connection refused|connection reset|network is unreachable|bad gateway|gateway timeout|tls handshake|unexpected end|unexpected eof|malformed|invalid character)/i;
 
 export function classifyAliasInspection({ status, stdout = "", stderr = "", error }) {

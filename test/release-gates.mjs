@@ -11,17 +11,22 @@ const digest = `sha256:${"a".repeat(64)}`;
 const version = "2.3.15";
 const bearer = "release-bearer-that-must-remain-opaque";
 
-test("immutable alias absence is confirmed only by an explicit registry not-found response", () => {
+test("immutable alias absence requires an unambiguous missing-manifest diagnostic", () => {
   assert.equal(classifyAliasInspection({ status: 1, stderr: "manifest unknown" }), "absent");
   assert.equal(classifyAliasInspection({ status: 1, stderr: "no such manifest" }), "absent");
-  assert.equal(classifyAliasInspection({ status: 1, stderr: "reference not found: missing tag" }), "absent");
+  assert.equal(classifyAliasInspection({ status: 1, stderr: "reference not found: missing tag" }), "indeterminate");
   assert.equal(classifyAliasInspection({ status: 0 }), "present");
   for (const outcome of [
     { status: 1, stderr: "unauthorized: authentication required" },
     { status: 1, stderr: "503 Service Unavailable" },
     { status: 1, stderr: "request timed out" },
     { status: 1, stderr: "invalid character in registry response" },
+    { status: 1, stderr: "reference not found: missing tag" },
+    { status: 1, stderr: 'error getting credentials - err: exec: "docker-credential-pass": executable file not found in $PATH' },
+    { status: 1, stderr: "authentication helper not found" },
+    { status: 1, stderr: "docker: 'buildx' is not a docker command" },
     { status: 1, stderr: "" },
+    { status: null, error: Object.assign(new Error("spawnSync docker ENOENT"), { code: "ENOENT" }) },
     { status: null, error: Object.assign(new Error("timeout"), { code: "ETIMEDOUT" }) },
   ]) {
     assert.equal(classifyAliasInspection(outcome), "indeterminate");

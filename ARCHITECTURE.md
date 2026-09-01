@@ -244,7 +244,8 @@ fails closed.
   non-cancelling release lock, accepts the candidate by digest, verifies exact
   health and the authenticated Option B function, attests that digest, and then
   revalidates both immutable aliases immediately before promotion. Only an
-  explicit registry not-found response proves absence; authentication, outage,
+  explicit registry `manifest unknown` or `no such manifest` diagnostic proves
+  absence; missing Docker/buildx/credential helpers, authentication, outage,
   timeout, empty, or malformed results fail closed. An intervening alias aborts
   promotion, and all promoted aliases must resolve back to the accepted digest.
 - Tool input validation happens before adapter calls. User-controlled values
