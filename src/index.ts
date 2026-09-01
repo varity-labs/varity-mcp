@@ -15,6 +15,12 @@ import {
   createRuntimeShutdownCoordinator,
   type RuntimeShutdown,
 } from "./runtime-shutdown.js";
+import { createOAuthProvider } from "./auth/provider.js";
+import {
+  authenticateBearerRequest,
+  rejectSessionPrincipalMismatch,
+  type AuthenticatedHttpRequest,
+} from "./auth/http-bearer.js";
 
 /**
  * Varity MCP Server
@@ -126,14 +132,19 @@ async function startStdio(onTransportClose: () => void): Promise<RuntimeShutdown
   };
 }
 
-async function startHttp(port: number): Promise<RuntimeShutdown> {
+export async function startHttp(port: number): Promise<RuntimeShutdown> {
   // Dynamic imports
   const { createServer } = await import("node:http");
   const { randomUUID } = await import("node:crypto");
+  const authProvider = createOAuthProvider();
 
   // Track server+transport pairs by session ID
   // Each session gets its own McpServer instance (SDK requires 1:1 server:transport)
-  const sessions = new Map<string, { server: ReturnType<typeof createVarityServer>; transport: StreamableHTTPServerTransport }>();
+  const sessions = new Map<string, {
+    server: ReturnType<typeof createVarityServer>;
+    transport: StreamableHTTPServerTransport;
+    clientId: string;
+  }>();
 
   // Rate limiting: 100 requests/minute per IP
   const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
@@ -201,20 +212,36 @@ async function startHttp(port: number): Promise<RuntimeShutdown> {
 
       // MCP endpoint
       if (url.pathname === "/mcp") {
+        const authenticatedRequest = req as AuthenticatedHttpRequest;
+        const authInfo = await authenticateBearerRequest(
+          authenticatedRequest,
+          res,
+          authProvider,
+        );
+        if (!authInfo) {
+          logHttpRequest(req.method || "?", url.pathname, res.statusCode, Date.now() - startTime);
+          return;
+        }
+
         // Check for existing session
         const sessionId = req.headers["mcp-session-id"] as string | undefined;
 
         if (sessionId && sessions.has(sessionId)) {
           // Reuse existing session
           const session = sessions.get(sessionId)!;
-          await session.transport.handleRequest(req, res);
+          if (session.clientId !== authInfo.clientId) {
+            rejectSessionPrincipalMismatch(res);
+            logHttpRequest(req.method || "?", url.pathname, 403, Date.now() - startTime);
+            return;
+          }
+          await session.transport.handleRequest(authenticatedRequest, res);
           logHttpRequest(req.method || "POST", url.pathname, res.statusCode, Date.now() - startTime);
           return;
         }
 
         // New session, create a fresh server + transport pair
         if (req.method === "POST" && !sessionId) {
-          const sessionServer = createVarityServer("http");
+          const sessionServer = createVarityServer("http", authProvider);
           const transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => randomUUID(),
           });
@@ -227,11 +254,15 @@ async function startHttp(port: number): Promise<RuntimeShutdown> {
           };
 
           await sessionServer.connect(transport);
-          await transport.handleRequest(req, res);
+          await transport.handleRequest(authenticatedRequest, res);
 
           // Session ID is assigned after handleRequest processes the initialize message
           if (transport.sessionId) {
-            sessions.set(transport.sessionId, { server: sessionServer, transport });
+            sessions.set(transport.sessionId, {
+              server: sessionServer,
+              transport,
+              clientId: authInfo.clientId,
+            });
             logger.info("New MCP session created");
           }
 

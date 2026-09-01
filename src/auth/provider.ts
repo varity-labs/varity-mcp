@@ -46,11 +46,22 @@ async function verifyAccessToken(token: string): Promise<AuthInfo> {
     throw new Error(`Invalid or expired access token`);
   }
 
-  const data = (await res.json()) as { user_id?: string; scopes?: string[] };
+  const data = (await res.json()) as { user_id?: unknown; scopes?: unknown };
+  if (
+    typeof data.user_id !== "string" ||
+    data.user_id.length === 0 ||
+    data.user_id.length > 256 ||
+    data.user_id !== data.user_id.trim()
+  ) {
+    throw new Error("Token verification did not return a stable user identity");
+  }
+  const scopes = Array.isArray(data.scopes) && data.scopes.every((scope) => typeof scope === "string")
+    ? data.scopes
+    : [];
   return {
     token,
-    clientId: data.user_id ?? "unknown",
-    scopes: data.scopes ?? ["read", "write"],
+    clientId: data.user_id,
+    scopes,
   };
 }
 
