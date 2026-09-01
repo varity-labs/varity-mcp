@@ -15,6 +15,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
 
     steps:
       - name: Checkout repository
@@ -45,13 +47,143 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GHCR_PAT || github.token }}
 
-      - name: Build and push immutable image
+      - name: Reject an existing immutable release alias
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          VERSIONED_TAG: ${{ steps.release.outputs.versioned_tag }}
+        run: |
+          set -euo pipefail
+          for tag in "$VERSION" "$VERSIONED_TAG"; do
+            if docker buildx imagetools inspect "${REGISTRY}/${IMAGE_NAME}:${tag}" >/dev/null 2>&1; then
+              echo "::error::immutable release alias ${tag} already exists"
+              exit 1
+            fi
+          done
+
+      - name: Build and push candidate image once
+        id: candidate
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          provenance: false
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.release.outputs.versioned_tag }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.release.outputs.version }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          provenance: mode=max
+          sbom: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:candidate-${{ github.sha }}
+
+      - name: Accept exact candidate digest
+        env:
+          CANDIDATE_DIGEST: ${{ steps.candidate.outputs.digest }}
+          EXPECTED_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          image="${REGISTRY}/${IMAGE_NAME}@${CANDIDATE_DIGEST}"
+          container_name="varity-mcp-release-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          auth_port=3199
+          auth_pid=""
+          evidence="$RUNNER_TEMP/mcp-release-evidence"
+          mkdir -p "$evidence"
+
+          cleanup() {
+            docker rm --force "$container_name" >/dev/null 2>&1 || true
+            if [[ -n "$auth_pid" ]]; then
+              kill "$auth_pid" >/dev/null 2>&1 || true
+              wait "$auth_pid" >/dev/null 2>&1 || true
+            fi
+          }
+          trap cleanup EXIT
+
+          release_token="$(openssl rand -hex 32)"
+          echo "::add-mask::${release_token}"
+          RELEASE_AUTH_FIXTURE_TOKEN="$release_token" \
+            RELEASE_AUTH_FIXTURE_PORT="$auth_port" \
+            node scripts/release-auth-fixture.mjs >"$evidence/auth-fixture.stdout" 2>"$evidence/auth-fixture.stderr" &
+          auth_pid=$!
+
+          for attempt in {1..30}; do
+            if curl --fail --silent --show-error "http://127.0.0.1:${auth_port}/health" >/dev/null; then
+              break
+            fi
+            if ! kill -0 "$auth_pid" >/dev/null 2>&1; then
+              echo "::error::release authentication fixture stopped before readiness"
+              exit 1
+            fi
+            sleep 1
+          done
+          curl --fail --silent --show-error "http://127.0.0.1:${auth_port}/health" >/dev/null
+
+          docker pull "$image"
+          docker run --detach --name "$container_name" \
+            --add-host host.docker.internal:host-gateway \
+            --publish 127.0.0.1:3100:3100 \
+            --env VARITY_GATEWAY_URL="http://host.docker.internal:${auth_port}" \
+            --env NODE_OPTIONS="--import=/release-fixtures/http-docs-fetch.mjs" \
+            --volume "$GITHUB_WORKSPACE/test/fixtures/http-docs-fetch.mjs:/release-fixtures/http-docs-fetch.mjs:ro" \
+            "$image"
+
+          for attempt in {1..30}; do
+            if body="$(curl --fail --silent --show-error http://127.0.0.1:3100/health)"; then
+              node -e 'const value=JSON.parse(process.argv[1]); if(value.status!=="ok"||value.transport!=="http"||value.version!==process.argv[2]) process.exit(1)' "$body" "$EXPECTED_VERSION"
+              break
+            fi
+            sleep 1
+          done
+          body="$(curl --fail --silent --show-error http://127.0.0.1:3100/health)"
+          node -e 'const value=JSON.parse(process.argv[1]); if(value.status!=="ok"||value.transport!=="http"||value.version!==process.argv[2]) process.exit(1)' "$body" "$EXPECTED_VERSION"
+
+          VARITY_MCP_URL="http://127.0.0.1:3100/mcp" \
+            VARITY_MCP_ACCESS_TOKEN="$release_token" \
+            VARITY_MCP_EXPECTED_VERSION="$EXPECTED_VERSION" \
+            node scripts/hosted-release-function-gate.mjs
+
+          docker logs "$container_name" >"$evidence/container.stderr" 2>&1
+          set +e
+          rg -Fq "$release_token" "$evidence"
+          scan_status=$?
+          set -e
+          if [[ "$scan_status" -eq 0 ]]; then
+            echo "::error::release acceptance evidence exposed its bearer"
+            exit 1
+          fi
+          if [[ "$scan_status" -ne 1 ]]; then
+            echo "::error::release acceptance evidence could not be scanned safely"
+            exit 1
+          fi
+          echo "ACCEPTANCE PASS: ${image} served exact health and authenticated public-read tools/call"
+
+      - name: Upload acceptance evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-release-evidence-${{ github.sha }}
+          path: ${{ runner.temp }}/mcp-release-evidence/
+          retention-days: 30
+
+      - name: Attest accepted image digest
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.candidate.outputs.digest }}
+          push-to-registry: true
+
+      - name: Promote exact accepted image digest
+        env:
+          CANDIDATE_DIGEST: ${{ steps.candidate.outputs.digest }}
+          VERSION: ${{ steps.release.outputs.version }}
+          VERSIONED_TAG: ${{ steps.release.outputs.versioned_tag }}
+        run: |
+          set -euo pipefail
+          source="${REGISTRY}/${IMAGE_NAME}@${CANDIDATE_DIGEST}"
+          docker buildx imagetools create \
+            --tag "${REGISTRY}/${IMAGE_NAME}:${VERSIONED_TAG}" \
+            --tag "${REGISTRY}/${IMAGE_NAME}:${VERSION}" \
+            --tag "${REGISTRY}/${IMAGE_NAME}:latest" \
+            "$source"
+
+          for tag in "$VERSIONED_TAG" "$VERSION" latest; do
+            promoted="$(docker buildx imagetools inspect \
+              "${REGISTRY}/${IMAGE_NAME}:${tag}" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+            if [[ "$promoted" != "$CANDIDATE_DIGEST" ]]; then
+              echo "::error::promoted ${tag} digest ${promoted} differs from accepted ${CANDIDATE_DIGEST}"
+              exit 1
+            fi
+          done
+          echo "PROMOTION PASS: all release aliases point at exact accepted digest ${CANDIDATE_DIGEST}"

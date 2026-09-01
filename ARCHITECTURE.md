@@ -81,7 +81,7 @@ the public interface or CLI did not return.
 | Credential/config lookup | environment key first, then `~/.varitykit/config.json` | `src/utils/config.ts` | precedence/redaction tests are currently missing |
 | HTTP OAuth provider | proxies OAuth endpoints to `auth.varity.so`; verifies every `/mcp` bearer before the transport, rejects verification without a stable non-empty `user_id`, and binds each session to that verified principal; production verification currently targets a missing gateway route | `src/auth/provider.ts`, `src/auth/http-bearer.ts` | a real-package test proves anonymous rejection, missing-principal rejection, authenticated session continuity, cross-principal HTTP 403, and one bounded public-documentation tool result through the production verifier and tool implementations; live production verification and downstream owner equality are not certified |
 | Runtime telemetry | Optional MCP server spans, correlated logs, operation-duration metrics, startup custody, and error capture; stdout and protected inputs are excluded | `src/telemetry.ts`, `src/runtime-shutdown.ts`, `src/utils/logger.ts`; OTLP and error-ingest adapters | in-memory signal correlation, synthetic OTLP transport, secret allowlist, stdout, shutdown-flush, and failed-close custody tests |
-| Runtime container release | Tag `mcp-v<package-version>`; GHCR image tags `v<version>`, bare semver, and `latest` | `Dockerfile`, `.dockerignore`, `.github/workflows/release-container.yml`; GitHub Actions owns build/push credentials | PR CI starts the Node 22 image and validates exact health; tag workflow rechecks package/runtime version before publishing |
+| Runtime container release | Tag `mcp-v<package-version>`; build one candidate index; accept, attest, and promote only its digest to `v<version>`, bare semver, and `latest` | `Dockerfile`, `.dockerignore`, `.github/workflows/release-container.yml`; GitHub Actions owns build/push credentials; `scripts/release-auth-fixture.mjs` supplies only an ephemeral test principal | PR CI starts the Node 22 image and validates exact health; tag workflow rechecks package/runtime version, rejects occupied immutable aliases, executes authenticated `tools/call` against the exact candidate digest, emits max provenance and an SBOM, and asserts every promoted alias resolves to that digest |
 
 The CLI bridge and public-interface client are two real adapter seams: callers
 already vary between them. Removing either adapter without migrating its
@@ -203,6 +203,13 @@ Tool results and logs must not include deploy keys, OAuth tokens, registry
 passwords, GitHub tokens, private environment values, or downstream internal
 credentials.
 
+Release acceptance creates one random, masked bearer inside the Actions runner.
+The bearer is passed only through process environments to the ephemeral verifier
+fixture and hosted function gate; it is never placed in a container environment,
+image layer, command argument, artifact, or diagnostic. The fixture returns one
+fixed read-only principal, has no durable state, and is not included in the
+runtime container.
+
 ## Failure semantics
 
 - The CLI adapter never throws a command failure to callers; it returns stdout,
@@ -228,6 +235,11 @@ credentials.
   exchange, verification, authenticated MCP request, revocation, and cleanup. A
   separately proven OAuth-principal/downstream-owner equality and an owner-bound
   operation are required before any per-user hosted operation is registered.
+- A release alias is not artifact identity. The tag workflow accepts the
+  candidate by digest, verifies exact health and the authenticated Option B
+  function, attests that digest, and only then assigns aliases. Existing semver
+  aliases fail closed; all promoted aliases must resolve back to the accepted
+  digest.
 - Tool input validation happens before adapter calls. User-controlled values
   must remain argv entries or encoded URL segments, never shell fragments.
 - Telemetry initialization/export failure degrades to a bounded stderr
@@ -256,11 +268,34 @@ allowlisting, real synthetic OTLP HTTP construction, stdio shutdown flushing,
 failed-close telemetry custody, package startup at the exact Node 22.11 LTS minimum and on Node 24, actual Node 22
 container health, stable-principal verification, cross-principal session
 rejection, exact hosted tool registration, a deterministic real-package public-
-documentation tool call, and the separately runnable live hosted function gate. High-value missing contract tests are
+documentation tool call, the fail-closed credential-opaque release verifier
+fixture, the digest-first release ordering, and the separately runnable live
+hosted function gate. High-value missing contract tests are
 the complete stdio registration surface, public-interface auth/error
 normalization, structured response shape, live production OAuth verification, and
 cross-replica HTTP session behavior.
 These are test gaps, not permission to create a second implementation.
+
+## Release change evidence across the seven required metrics
+
+- **maximum speed:** one image build feeds acceptance, attestation, and all
+  aliases; the workflow does not rebuild after smoke.
+- **scalability:** immutable semver collision checks and digest identity avoid
+  tag-race ambiguity; no runtime state or request path is added.
+- **flexibility:** acceptance reuses the existing hosted function gate and
+  production verifier interface while the ephemeral verifier remains a
+  replaceable test adapter.
+- **reliability:** health, version, anonymous rejection, authenticated session,
+  exact Option B allowlist, and real `tools/call` must pass before promotion;
+  cleanup runs on every exit.
+- **durability:** the accepted OCI digest is the release identity, with max
+  provenance, an SBOM, GitHub attestation, and retained acceptance artifacts.
+- **security:** semver aliases fail closed on collision; the production verifier
+  implementation is exercised; no filesystem, process, customer-data, or
+  mutation tool becomes reachable over HTTP.
+- **privacy:** the random bearer is masked, excluded from the image and uploaded
+  evidence, searched only with quiet matching, and never printed on failure;
+  an evidence-scan error fails closed before artifact upload.
 
 ## Change navigation
 
