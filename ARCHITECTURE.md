@@ -72,7 +72,7 @@ the public interface or CLI did not return.
 
 | Module | Interface and invariants | Implementation / adapters | Test surface |
 |---|---|---|---|
-| Transport entrypoint | `--transport stdio\|http`, optional HTTP port, lifecycle and health | `src/index.ts` | direct package startup on Node 20/22/24, actual Node 22 container health, real-server authentication/session contract, and a credential-opaque hosted function gate; downstream owner equality remains uncertified |
+| Transport entrypoint | `--transport stdio\|http`, optional HTTP port, lifecycle and health | `src/index.ts` | direct package startup at the exact Node 22.11 LTS minimum and on Node 24, actual Node 22 container health, real-server authentication/session contract, and a credential-opaque hosted function gate; downstream owner equality remains uncertified |
 | MCP composition | stdio registers the full local/deployment surface; hosted HTTP registers only authenticated `varity_search_docs` | `src/server.ts` | the real-server contract asserts the exact HTTP tool allowlist and the release gate executes one bounded public documentation result; complete stdio registration coverage is still missing |
 | Tool modules | Zod-validated MCP input; structured text result; no orchestration policy | `src/tools/`, `src/resources/`, `src/prompts/` | exercise each registered tool through its result interface |
 | CLI bridge | argv arrays, bounded timeout, cwd, machine-readable output, structured exit result, durable lifecycle run extraction | `src/utils/cli-bridge.ts`; `varitykit` and `python -m varitykit` adapters | `test/cli-bridge-env.mjs`, lifecycle projection tests, plus command-specific tool tests |
@@ -253,7 +253,7 @@ log completeness/freshness passthrough, lifecycle acceptance semantics,
 public-interface endpoint/timeout policy, in-memory MCP span/log/metric
 correlation, protected-input exclusion, error-only capture, structural Sentry
 allowlisting, real synthetic OTLP HTTP construction, stdio shutdown flushing,
-failed-close telemetry custody, package startup on Node 20/22/24, actual Node 22
+failed-close telemetry custody, package startup at the exact Node 22.11 LTS minimum and on Node 24, actual Node 22
 container health, stable-principal verification, cross-principal session
 rejection, exact hosted tool registration, and one bounded live documentation
 search through the hosted function gate. High-value missing contract tests are

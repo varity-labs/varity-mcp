@@ -193,7 +193,7 @@ is not currently certified. Its HTTP tool allowlist contains only
 
 ## Prerequisites
 
-- **Node.js** >= 18
+- **Node.js** >= 22.11 (the current supported LTS baseline; EOL Node 18/20 are unsupported)
 - **For deployment**: `pip install varitykit`
 
 ## Cost
