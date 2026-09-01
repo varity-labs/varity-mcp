@@ -63,10 +63,17 @@ jobs:
             "${REGISTRY}/${IMAGE_NAME}:${VERSION}" \
             "${REGISTRY}/${IMAGE_NAME}:${VERSIONED_TAG}"
 
+      - name: Set up attestation-capable Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        with:
+          driver: docker-container
+
       - name: Build and push candidate image once
         id: candidate
         uses: docker/build-push-action@v6
         with:
+          builder: ${{ steps.buildx.outputs.name }}
           context: .
           push: true
           provenance: mode=max
