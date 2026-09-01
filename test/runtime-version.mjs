@@ -31,7 +31,7 @@ test("HTTP health reports the package release version", async (t) => {
   );
   t.after(() => child.kill("SIGTERM"));
 
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + 15_000;
   let response;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) break;

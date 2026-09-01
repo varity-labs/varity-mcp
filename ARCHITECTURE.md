@@ -1,7 +1,7 @@
 # `@varity-labs/mcp` Architecture
 
 Status: current implementation map
-Last code-grounded audit: 2026-08-28
+Last code-grounded audit: 2026-09-01
 Scope: stable ownership, interfaces, adapters, state, auth, failures, and tests
 
 This document is the repository-level layer of Varity's progressive
@@ -15,9 +15,9 @@ capability belong in `varity-engineering/CURRENT-STATE.md`, not here.
 This repository owns:
 
 - the MCP tool, resource, and prompt interface presented to AI coding clients;
-- stdio and Streamable HTTP transport composition;
+- stdio full-surface and Streamable HTTP public-read transport composition;
 - translation from MCP inputs to either local `varitykit` commands or the
-  owner-scoped public Varity interface;
+  deploy-key-authenticated public Varity interface;
 - consistent structured success/error responses;
 - secret-safe, trace-correlated runtime telemetry projected through standard
   OpenTelemetry and optional Better Stack error ingestion;
@@ -72,14 +72,14 @@ the public interface or CLI did not return.
 
 | Module | Interface and invariants | Implementation / adapters | Test surface |
 |---|---|---|---|
-| Transport entrypoint | `--transport stdio\|http`, optional HTTP port, lifecycle and health | `src/index.ts` | package-version health test plus a credential-opaque hosted release gate covering anonymous rejection, initialization, session continuation, tool discovery, and one bounded owner-scoped read |
-| MCP composition | One registered tool/resource/prompt surface; local-only tools are mode-sensitive | `src/server.ts` | registration/contract tests are currently missing |
+| Transport entrypoint | `--transport stdio\|http`, optional HTTP port, lifecycle and health | `src/index.ts` | real-server authentication/session contract plus a credential-opaque hosted release gate covering exact release identity, anonymous rejection, authenticated initialization, session continuation, and tool discovery; downstream owner equality remains uncertified |
+| MCP composition | stdio registers the full local/deployment surface; hosted HTTP registers only authenticated `varity_search_docs` | `src/server.ts` | the real-server contract asserts the exact HTTP tool allowlist; complete stdio registration coverage is still missing |
 | Tool modules | Zod-validated MCP input; structured text result; no orchestration policy | `src/tools/`, `src/resources/`, `src/prompts/` | exercise each registered tool through its result interface |
 | CLI bridge | argv arrays, bounded timeout, cwd, machine-readable output, structured exit result, durable lifecycle run extraction | `src/utils/cli-bridge.ts`; `varitykit` and `python -m varitykit` adapters | `test/cli-bridge-env.mjs`, lifecycle projection tests, plus command-specific tool tests |
-| Public-interface client | deploy-key auth, 60-second GET timeout, normalized error codes/actions | `src/utils/public-api.ts`; gateway adapter | adapter tests cover gateway configuration and timeout policy plus selected response projections |
+| Public-interface client | stdio-only deploy-key auth, 60-second GET timeout, normalized error codes/actions; never receives an HTTP OAuth bearer | `src/utils/public-api.ts`; gateway adapter | adapter tests cover gateway configuration and timeout policy plus selected response projections |
 | Response module | `{success,data,message}` or MCP error `{success:false,error}` | `src/utils/responses.ts` | contract tests are currently missing |
 | Credential/config lookup | environment key first, then `~/.varitykit/config.json` | `src/utils/config.ts` | precedence/redaction tests are currently missing |
-| HTTP OAuth provider | proxies OAuth endpoints to `auth.varity.so`; currently targets a missing gateway token-verification route | `src/auth/provider.ts` | verification and client-registration tests are currently missing; hosted flow is not certified |
+| HTTP OAuth provider | proxies OAuth endpoints to `auth.varity.so`; verifies every `/mcp` bearer before the transport and binds each session to the verified OAuth client ID; production verification currently targets a missing gateway route | `src/auth/provider.ts`, `src/auth/http-bearer.ts` | a real-server test proves anonymous rejection and authenticated session continuity with the local verifier; production verification and downstream owner equality are not certified |
 | Runtime telemetry | Optional MCP server spans, correlated logs, operation-duration metrics, startup custody, and error capture; stdout and protected inputs are excluded | `src/telemetry.ts`, `src/runtime-shutdown.ts`, `src/utils/logger.ts`; OTLP and error-ingest adapters | in-memory signal correlation, synthetic OTLP transport, secret allowlist, stdout, shutdown-flush, and failed-close custody tests |
 | Runtime container release | Tag `mcp-v<package-version>`; GHCR image tags `v<version>`, bare semver, and `latest` | `Dockerfile`, `.dockerignore`, `.github/workflows/release-container.yml`; GitHub Actions owns build/push credentials | PR CI builds the image; tag workflow rechecks package/runtime version before publishing |
 
@@ -119,10 +119,15 @@ every level, `error` included, to stdout with ANSI colour codes was removed on
 
 ### Streamable HTTP
 
-HTTP creates one MCP server/transport pair per session and keeps it in an
-in-memory map. Rate-limit counters and MCP sessions are process-local, so a
-restart discards them and horizontal replicas require explicit shared-session/
-routing design.
+HTTP authenticates every non-preflight `/mcp` request before it reaches the
+SDK transport, attaches the verified `AuthInfo` at the SDK request interface,
+and binds each in-memory session to the same verified OAuth client ID. The HTTP
+composition registers exactly one tool: `varity_search_docs`, an in-process
+read of public documentation. It registers no filesystem, process, deploy-key,
+customer-data, or mutation path. It creates one MCP server/transport pair per
+session. Rate-limit counters and MCP sessions are process-local, so a restart
+discards them and horizontal replicas require explicit shared-session/routing
+design.
 
 The code configures OAuth authorization/token/registration endpoints at
 `auth.varity.so`, but `verifyAccessToken()` calls gateway
@@ -132,17 +137,18 @@ and current repository also reported different versions. These facts prove
 neither exact-release parity nor an authenticated protocol session. Hosted HTTP
 OAuth is not end-to-end certified.
 
-Even after protocol authentication is repaired, current tool adapters do not
-receive a per-request OAuth credential. `public-api.ts` and `varitykit` instead
-read the MCP host's environment or `~/.varitykit/config.json`. Therefore hosted
-HTTP must not be described as per-user deployment authorization until the auth
-context is explicitly propagated to tool calls and verified end to end.
+Protocol authentication does not establish downstream owner equality. Option B
+therefore excludes every owner-scoped tool from hosted HTTP. The stdio-only
+`public-api.ts` and `varitykit` adapters read the local MCP host environment
+or `~/.varitykit/config.json`; the OAuth bearer is never propagated to either
+adapter or any subprocess. Hosted HTTP must not be described as per-user
+deployment authorization. Adding an owner-scoped HTTP tool requires a separate
+design and exact OAuth-principal/downstream-owner equality proof.
 
-Tools that read files, install dependencies, run builds, open repositories, or
-spawn processes act on the HTTP server host, not the caller's workstation.
-Only `open-browser` and `dev-server` are currently excluded from HTTP
-registration; other local-development tools remain registered for both modes.
-Treat changing that exposure as a security and interface change.
+Every filesystem, process, deployment, customer-data, and mutation tool is
+stdio-only. Stdio acts on the local MCP host under the invoking user credentials.
+Hosted HTTP cannot reach those adapters through MCP registration. Expanding the
+HTTP allowlist is a high-risk security and interface change.
 
 ### Telemetry
 
@@ -206,7 +212,7 @@ credentials.
 - CLI commands have explicit bounded timeouts; deploy has a longer bounded
   window than ordinary operations. Output is capped and terminal color is
   disabled before parsing.
-- The public-interface adapter aborts after 60 seconds so owner-scoped gateway
+- The public-interface adapter aborts after 60 seconds so deploy-key-authenticated gateway
   reconciliation can finish, and preserves structured
   downstream code/message/action fields. Transport failures become
   `VARITY_API_UNREACHABLE`.
@@ -217,8 +223,9 @@ credentials.
   manufacture a successful operation.
 - A healthy hosted process is not authorization proof. The exact deployed MCP,
   auth-service, and gateway releases must pass registration, authorization,
-  exchange, verification, authenticated MCP request, owner-bound operation,
-  revocation, and cleanup before public hosted-auth claims are restored.
+  exchange, verification, authenticated MCP request, revocation, and cleanup. A
+  separately proven OAuth-principal/downstream-owner equality and an owner-bound
+  operation are required before any per-user hosted operation is registered.
 - Tool input validation happens before adapter calls. User-controlled values
   must remain argv entries or encoded URL segments, never shell fragments.
 - Telemetry initialization/export failure degrades to a bounded stderr
@@ -244,9 +251,10 @@ log completeness/freshness passthrough, lifecycle acceptance semantics,
 public-interface endpoint/timeout policy, in-memory MCP span/log/metric
 correlation, protected-input exclusion, error-only capture, structural Sentry
 allowlisting, real synthetic OTLP HTTP construction, stdio shutdown flushing,
-and failed-close telemetry custody. High-value missing contract tests are the complete
-MCP registration surface by transport, public-interface auth/error
-normalization, structured response shape, and HTTP OAuth/session behavior.
+and failed-close telemetry custody. High-value missing contract tests are the
+complete stdio registration surface, public-interface auth/error
+normalization, structured response shape, production OAuth verification, and
+cross-replica HTTP session behavior.
 These are test gaps, not permission to create a second implementation.
 
 ## Change navigation

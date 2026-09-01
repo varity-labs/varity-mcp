@@ -21,6 +21,7 @@ import { registerSetEnvTool } from "./tools/set-env.js";
 import { registerRedeployTool } from "./tools/redeploy.js";
 import { createOAuthProvider } from "./auth/provider.js";
 import { instrumentMcpServer } from "./telemetry.js";
+import type { OAuthServerProvider } from "@modelcontextprotocol/sdk/server/auth/provider.js";
 
 const require = createRequire(import.meta.url);
 const packageMetadata = require("../package.json") as { version?: unknown };
@@ -46,54 +47,61 @@ export type TransportMode = "stdio" | "http";
  *   - Deploy own code: deploy, deploy-status, deploy-logs, delete-deployment
  *   - Operate: set-env, redeploy (trackable configuration reapply; not verified restart)
  *   - Deploy certified templates: list-templates, template-info, deploy-template
+ *   - Hosted HTTP: authenticated live documentation search only
  *   - Local-dev (stdio only): open-browser, dev-server
  *   - Project ops: create-repo, migrate
  */
-export function createVarityServer(mode: TransportMode = "stdio"): McpServer {
+export function createVarityServer(
+  mode: TransportMode = "stdio",
+  httpAuthProvider?: OAuthServerProvider,
+): McpServer {
+  const authProvider = mode === "http"
+    ? httpAuthProvider ?? createOAuthProvider()
+    : undefined;
   const server = new McpServer({
     name: "varity",
     version: VERSION,
-    ...(mode === "http" ? { authProvider: createOAuthProvider() } : {}),
+    ...(authProvider ? { authProvider } : {}),
   });
 
   // Instrument the registration seam once so every resource, prompt, and tool
   // runs inside the same secret-safe MCP server span implementation.
   instrumentMcpServer(server, mode);
 
-  // ── Resources (deploy reference for AI context) ──
+  // Hosted HTTP is intentionally a minimal authenticated public-read surface.
+  // It never touches the server filesystem, spawns a process, mutates Varity,
+  // or reads customer data through the host's deploy key.
+  if (mode === "http") {
+    registerSearchDocsTool(server);
+    return server;
+  }
+
+  // ── Resources (deploy reference for local AI context) ──
   registerResources(server);
 
-  // ── Prompts (workflow templates for common tasks) ──
+  // ── Prompts (local workflows may use filesystem/process tools) ──
   registerPrompts(server);
 
-  // ── Public tools (no auth required) ──
+  // ── Local discovery tools ──
   registerSearchDocsTool(server);
   registerCostCalculatorTool(server);
   registerDoctorTool(server);
 
-  // ── Development tools (all transports, run on MCP server's local filesystem) ──
+  // ── Development tools (stdio owns the caller's local filesystem) ──
   registerLoginTool(server);
   registerInstallDepsTool(server);
   registerBuildTool(server);
+  registerOpenBrowserTool(server);
+  registerDevServerTool(server);
 
-  // ── Local-environment tools (stdio only, require a local browser or local process on the client machine) ──
-  if (mode === "stdio") {
-    registerOpenBrowserTool(server);
-    registerDevServerTool(server);
-  }
-
-  // ── Deployment tools (all transports) ──
+  // ── Deployment and project tools (stdio only) ──
   registerCreateRepoTool(server);
   registerDeployTool(server);
   registerDeployStatusTool(server);
   registerDeployLogsTool(server);
   registerDeleteDeploymentTool(server);
-
-  // ── Operate tools (edit env + trackable configuration reapply) ──
   registerSetEnvTool(server);
   registerRedeployTool(server);
-
-  // ── Template tools (gateway-owned certified catalog, plus legacy aliases) ──
   registerAgentTools(server);
   registerMigrateTool(server);
 

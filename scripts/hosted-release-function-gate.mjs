@@ -2,7 +2,7 @@
 
 const DEFAULT_ENDPOINT = "https://mcp.varity.so/mcp";
 const PROTOCOL_VERSION = "2025-06-18";
-const READ_TOOL = "varity_deploy_status";
+const PUBLIC_READ_TOOL = "varity_search_docs";
 const REQUEST_TIMEOUT_MS = 25_000;
 
 class GateFailure extends Error {
@@ -32,6 +32,40 @@ function accessTokenFromEnvironment() {
     throw new GateFailure("configuration", "VARITY_MCP_ACCESS_TOKEN is required");
   }
   return token;
+}
+
+function expectedReleaseFromEnvironment() {
+  const version = process.env.VARITY_MCP_EXPECTED_VERSION;
+  if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
+    throw new GateFailure("configuration", "VARITY_MCP_EXPECTED_VERSION must be an exact semantic version");
+  }
+  return version;
+}
+
+async function assertExactRelease(endpoint, expectedVersion) {
+  const healthEndpoint = new URL("/health", endpoint);
+  let response;
+  try {
+    response = await fetch(healthEndpoint, {
+      method: "GET",
+      redirect: "manual",
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch {
+    throw new GateFailure("release identity", "health request failed or timed out");
+  }
+  if (response.status !== 200) {
+    throw new GateFailure("release identity", "health returned unexpected HTTP " + response.status);
+  }
+  let health;
+  try {
+    health = await response.json();
+  } catch {
+    throw new GateFailure("release identity", "health did not return JSON");
+  }
+  if (health?.status !== "ok" || health?.transport !== "http" || health?.version !== expectedVersion) {
+    throw new GateFailure("release identity", "health does not identify exact expected HTTP release " + expectedVersion);
+  }
 }
 
 function parseRpcPayload(text, expectedId, stage) {
@@ -139,6 +173,10 @@ async function closeSession(endpoint, token, sessionId) {
 export async function runHostedReleaseFunctionGate() {
   const endpoint = endpointFromEnvironment();
   const token = accessTokenFromEnvironment();
+  const expectedVersion = expectedReleaseFromEnvironment();
+
+  await assertExactRelease(endpoint, expectedVersion);
+  console.log("  ✓ exact HTTP release " + expectedVersion + " identified");
 
   await assertAnonymousRejection(endpoint);
   console.log("  ✓ anonymous initialize rejected");
@@ -148,6 +186,9 @@ export async function runHostedReleaseFunctionGate() {
     body: initializeRequest(2),
     expectedId: 2,
   });
+  if (initialized.payload.result.serverInfo?.version !== expectedVersion) {
+    throw new GateFailure("authenticated initialize", "serverInfo.version does not match exact expected release " + expectedVersion);
+  }
   const sessionId = initialized.response.headers.get("mcp-session-id");
   if (!sessionId) throw new GateFailure("authenticated initialize", "Mcp-Session-Id header is missing");
   console.log("  ✓ authenticated initialize created an opaque session");
@@ -167,26 +208,13 @@ export async function runHostedReleaseFunctionGate() {
       expectedId: 3,
     });
     const availableTools = tools.payload.result.tools;
-    if (!Array.isArray(availableTools) || !availableTools.some((tool) => tool?.name === READ_TOOL)) {
-      throw new GateFailure("tools/list", READ_TOOL + " is not registered");
+    const toolNames = Array.isArray(availableTools)
+      ? availableTools.map((tool) => tool?.name).sort()
+      : [];
+    if (toolNames.length !== 1 || toolNames[0] !== PUBLIC_READ_TOOL) {
+      throw new GateFailure("tools/list", "hosted HTTP tool allowlist differs from " + PUBLIC_READ_TOOL);
     }
-    console.log("  ✓ session continuation and tools/list expose " + READ_TOOL);
-
-    const read = await protocolRequest(endpoint, token, {
-      stage: "bounded authorized read",
-      sessionId,
-      body: {
-        jsonrpc: "2.0",
-        id: 4,
-        method: "tools/call",
-        params: { name: READ_TOOL, arguments: { limit: 1 } },
-      },
-      expectedId: 4,
-    });
-    if (read.payload.result.isError === true) {
-      throw new GateFailure("bounded authorized read", READ_TOOL + " returned an MCP error result");
-    }
-    console.log("  ✓ bounded authorized " + READ_TOOL + " read succeeded");
+    console.log("  ✓ authenticated session continuity and exact public-read tool allowlist");
   } finally {
     await closeSession(endpoint, token, sessionId);
   }

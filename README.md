@@ -66,10 +66,11 @@ The hosted process is reachable at:
 https://mcp.varity.so
 ```
 
-Hosted OAuth and per-user deployment authorization are not currently certified
-end to end. Do not use this endpoint for owner-scoped production operations yet;
-use the stdio package until the repository architecture's OAuth verification bar
-passes.
+Hosted HTTP requires OAuth and intentionally exposes only
+`varity_search_docs`, an in-process read of public documentation. Every
+filesystem, process, deployment, customer-data, and mutation tool remains
+stdio-only. Hosted OAuth is not currently certified end to end; use the stdio
+package for every deployment or owner-scoped operation.
 
 ### Any MCP-compatible client (stdio)
 
@@ -187,7 +188,8 @@ npx -y @varity-labs/mcp --transport http --port 3100
 ```
 
 The process is hosted at `https://mcp.varity.so`, but authenticated hosted use
-is not currently certified. Use stdio for owner-scoped operations.
+is not currently certified. Its HTTP tool allowlist contains only
+`varity_search_docs`; use stdio for every other operation.
 
 ## Prerequisites
 

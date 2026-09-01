@@ -6,6 +6,7 @@ import { test } from "node:test";
 
 const gateScript = new URL("../scripts/hosted-release-function-gate.mjs", import.meta.url);
 const token = "opaque-test-token-never-print";
+const expectedVersion = "9.8.7";
 
 async function runGate(handler) {
   const requests = [];
@@ -31,6 +32,7 @@ async function runGate(handler) {
       ...process.env,
       VARITY_MCP_URL: "http://127.0.0.1:" + address.port + "/mcp",
       VARITY_MCP_ACCESS_TOKEN: token,
+      VARITY_MCP_EXPECTED_VERSION: expectedVersion,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -54,47 +56,122 @@ function json(response, status, body, headers = {}) {
   response.end(body === undefined ? undefined : JSON.stringify(body));
 }
 
-test("hosted gate proves rejection, session continuation, tools/list, and a bounded read", async () => {
+function successfulHandler({ request, response, body }) {
+  if (request.method === "GET" && request.url === "/health") {
+    return json(response, 200, { status: "ok", version: expectedVersion, transport: "http" });
+  }
+  if (!request.headers.authorization) return json(response, 401, { error: "invalid_token" });
+  if (body?.method === "initialize") {
+    return json(response, 200, {
+      jsonrpc: "2.0",
+      id: body.id,
+      result: {
+        protocolVersion: "2025-06-18",
+        serverInfo: { name: "varity", version: expectedVersion },
+      },
+    }, { "Mcp-Session-Id": "opaque-session" });
+  }
+  if (body?.method === "notifications/initialized") return json(response, 202);
+  if (body?.method === "tools/list") {
+    return json(response, 200, {
+      jsonrpc: "2.0",
+      id: body.id,
+      result: { tools: [{ name: "varity_search_docs" }] },
+    });
+  }
+  if (request.method === "DELETE") return json(response, 204);
+  return json(response, 500, { error: "unexpected" });
+}
+
+test("hosted gate proves exact release, rejection, session continuity, and tools/list", async () => {
+  const result = await runGate(successfulHandler);
+
+  assert.equal(result.exitCode, 0, result.stderr);
+  assert.match(result.stdout, /hosted-mcp-release-function-gate: passed/);
+  assert.deepEqual(result.requests[0], {
+    method: "GET",
+    authorization: undefined,
+    sessionId: undefined,
+    body: undefined,
+  });
+  assert.equal(result.requests[1].authorization, undefined);
+  assert(result.requests.slice(2).every((request) => request.authorization === "Bearer " + token));
+  assert(result.requests.slice(3).every((request) => request.sessionId === "opaque-session"));
+  assert.equal(
+    result.requests.some((request) => request.body?.method === "tools/call"),
+    false,
+    "a host-global downstream key must not pass as owner-principal equality",
+  );
+  assert.doesNotMatch(result.stdout + result.stderr, new RegExp(token));
+  assert.doesNotMatch(result.stdout + result.stderr, /opaque-session/);
+});
+
+test("hosted gate fails closed when HTTP exposes an extra tool", async () => {
   const result = await runGate(({ request, response, body }) => {
-    if (!request.headers.authorization) return json(response, 401, { error: "unauthorized" });
+    if (request.method === "GET") {
+      return json(response, 200, { status: "ok", version: expectedVersion, transport: "http" });
+    }
+    if (!request.headers.authorization) return json(response, 401, { error: "invalid_token" });
     if (body?.method === "initialize") {
-      return json(response, 200, { jsonrpc: "2.0", id: body.id, result: { protocolVersion: "2025-06-18" } }, { "Mcp-Session-Id": "opaque-session" });
+      return json(response, 200, {
+        jsonrpc: "2.0",
+        id: body.id,
+        result: {
+          protocolVersion: "2025-06-18",
+          serverInfo: { name: "varity", version: expectedVersion },
+        },
+      }, { "Mcp-Session-Id": "opaque-session" });
     }
     if (body?.method === "notifications/initialized") return json(response, 202);
     if (body?.method === "tools/list") {
-      return json(response, 200, { jsonrpc: "2.0", id: body.id, result: { tools: [{ name: "varity_deploy_status" }] } });
-    }
-    if (body?.method === "tools/call") {
-      return json(response, 200, { jsonrpc: "2.0", id: body.id, result: { isError: false, content: [] } });
+      return json(response, 200, {
+        jsonrpc: "2.0",
+        id: body.id,
+        result: { tools: [{ name: "varity_search_docs" }, { name: "varity_deploy_status" }] },
+      });
     }
     if (request.method === "DELETE") return json(response, 204);
     return json(response, 500, { error: "unexpected" });
   });
 
-  assert.equal(result.exitCode, 0, result.stderr);
-  assert.match(result.stdout, /hosted-mcp-release-function-gate: passed/);
-  assert.equal(result.requests[0].authorization, undefined);
-  assert(result.requests.slice(1).every((request) => request.authorization === "Bearer " + token));
-  assert(result.requests.slice(2).every((request) => request.sessionId === "opaque-session"));
-  const toolCall = result.requests.find((request) => request.body?.method === "tools/call");
-  assert.deepEqual(toolCall?.body.params, { name: "varity_deploy_status", arguments: { limit: 1 } });
+  assert.equal(result.exitCode, 1);
+  assert.match(result.stderr, /tools\/list: hosted HTTP tool allowlist differs/);
   assert.doesNotMatch(result.stdout + result.stderr, new RegExp(token));
-  assert.doesNotMatch(result.stdout + result.stderr, /opaque-session/);
+});
+
+test("hosted gate fails closed when the release identity differs", async () => {
+  const result = await runGate(({ request, response }) => {
+    if (request.method === "GET") {
+      return json(response, 200, { status: "ok", version: "9.8.6", transport: "http" });
+    }
+    return json(response, 500, { error: "unexpected" });
+  });
+
+  assert.equal(result.exitCode, 1);
+  assert.match(result.stderr, /release identity: health does not identify exact expected HTTP release 9.8.7/);
+  assert.equal(result.requests.length, 1);
+  assert.doesNotMatch(result.stdout + result.stderr, new RegExp(token));
 });
 
 test("hosted gate fails closed when anonymous initialize is accepted", async () => {
-  const result = await runGate(({ response, body }) => {
+  const result = await runGate(({ request, response, body }) => {
+    if (request.method === "GET") {
+      return json(response, 200, { status: "ok", version: expectedVersion, transport: "http" });
+    }
     json(response, 200, { jsonrpc: "2.0", id: body?.id, result: {} });
   });
 
   assert.equal(result.exitCode, 1);
   assert.match(result.stderr, /anonymous rejection: expected HTTP 401 or 403, received 200/);
-  assert.equal(result.requests.length, 1, "authorized protocol requests must not run after an anonymous false-green");
+  assert.equal(result.requests.length, 2, "authorized protocol requests must not run after an anonymous false-green");
   assert.doesNotMatch(result.stdout + result.stderr, new RegExp(token));
 });
 
 test("hosted gate never prints an access token or an untrusted response body", async () => {
   const result = await runGate(({ request, response, body }) => {
+    if (request.method === "GET") {
+      return json(response, 200, { status: "ok", version: expectedVersion, transport: "http" });
+    }
     if (!request.headers.authorization) return json(response, 401, { error: "unauthorized" });
     json(response, 500, { error: token, body, session: "sensitive-session" });
   });
