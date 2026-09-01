@@ -72,7 +72,7 @@ the public interface or CLI did not return.
 
 | Module | Interface and invariants | Implementation / adapters | Test surface |
 |---|---|---|---|
-| Transport entrypoint | `--transport stdio\|http`, optional HTTP port, lifecycle and health | `src/index.ts` | process startup, HTTP protocol/session tests are currently missing |
+| Transport entrypoint | `--transport stdio\|http`, optional HTTP port, lifecycle and health | `src/index.ts` | package-version health test plus a credential-opaque hosted release gate covering anonymous rejection, initialization, session continuation, tool discovery, and one bounded owner-scoped read |
 | MCP composition | One registered tool/resource/prompt surface; local-only tools are mode-sensitive | `src/server.ts` | registration/contract tests are currently missing |
 | Tool modules | Zod-validated MCP input; structured text result; no orchestration policy | `src/tools/`, `src/resources/`, `src/prompts/` | exercise each registered tool through its result interface |
 | CLI bridge | argv arrays, bounded timeout, cwd, machine-readable output, structured exit result, durable lifecycle run extraction | `src/utils/cli-bridge.ts`; `varitykit` and `python -m varitykit` adapters | `test/cli-bridge-env.mjs`, lifecycle projection tests, plus command-specific tool tests |

@@ -19,7 +19,8 @@
     "start": "node dist/index.js",
     "start:http": "node dist/index.js --transport http --port 3100",
     "prepublishOnly": "npm run build && node scripts/prepublish-guard.cjs",
-    "test": "node --test test/*.mjs"
+    "test": "node --test test/*.mjs",
+    "gate:hosted": "node scripts/hosted-release-function-gate.mjs"
   },
   "keywords": [
     "varity",
