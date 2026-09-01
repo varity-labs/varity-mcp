@@ -60,6 +60,22 @@ test("malformed or non-GHCR references are rejected before any credential-bearin
   }
 });
 
+test("the two-alias workflow validates a malformed second ref before reading a token or probing the valid first ref", async () => {
+  let tokenReads = 0;
+  let requests = 0;
+  const options = {
+    actor: "release-actor",
+    get token() { tokenReads += 1; return registryCredential; },
+    request: async () => { requests += 1; return { status: 404, body: manifestUnknown }; },
+  };
+  await assert.rejects(
+    assertAliasesAbsent([alias, "ghcr.io/varity-labs/varity-mcp:../../token"], options),
+    /reference is malformed/,
+  );
+  assert.equal(tokenReads, 0);
+  assert.equal(requests, 0);
+});
+
 test("the default registry transport rejects oversized diagnostics before reading them", async (t) => {
   const originalFetch = globalThis.fetch;
   t.after(() => { globalThis.fetch = originalFetch; });
@@ -67,13 +83,42 @@ test("the default registry transport rejects oversized diagnostics before readin
   globalThis.fetch = async () => ({
     status: 404,
     headers: { get: () => String(64 * 1024 + 1) },
-    text: async () => { bodyRead = true; return manifestUnknown; },
+    body: { getReader: () => { bodyRead = true; } },
   });
   await assert.rejects(
     registryRequest({ url: "https://ghcr.io/token", headers: {} }),
     /size limit/,
   );
   assert.equal(bodyRead, false);
+});
+
+test("the default registry transport cancels a no-content-length stream before allocating beyond 64 KiB", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  let reads = 0;
+  let cancelled = false;
+  globalThis.fetch = async () => ({
+    status: 404,
+    headers: { get: () => null },
+    body: {
+      getReader: () => ({
+        read: async () => {
+          reads += 1;
+          return reads === 1
+            ? { done: false, value: new Uint8Array(64 * 1024) }
+            : { done: false, value: new Uint8Array(1) };
+        },
+        cancel: async () => { cancelled = true; },
+        releaseLock: () => {},
+      }),
+    },
+  });
+  await assert.rejects(
+    registryRequest({ url: "https://ghcr.io/token", headers: {} }),
+    /size limit/,
+  );
+  assert.equal(reads, 2);
+  assert.equal(cancelled, true);
 });
 
 test("only HTTP 404 plus MANIFEST_UNKNOWN is absent; every other registry outcome fails closed", async () => {

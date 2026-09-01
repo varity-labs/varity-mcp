@@ -27,11 +27,29 @@ async function readBoundedBody(response) {
   if (Number.isFinite(contentLength) && contentLength > MAX_RESPONSE_BYTES) {
     throw new Error("registry response exceeded the size limit");
   }
-  const body = await response.text();
-  if (Buffer.byteLength(body) > MAX_RESPONSE_BYTES) {
-    throw new Error("registry response exceeded the size limit");
+
+  const reader = response.body?.getReader?.();
+  if (!reader) throw new Error("registry response body is not a readable stream");
+  const chunks = [];
+  let bytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!(value instanceof Uint8Array)) {
+        throw new Error("registry response stream returned malformed data");
+      }
+      bytes += value.byteLength;
+      if (bytes > MAX_RESPONSE_BYTES) {
+        try { await reader.cancel(); } catch { /* the size failure remains authoritative */ }
+        throw new Error("registry response exceeded the size limit");
+      }
+      chunks.push(Buffer.from(value));
+    }
+  } finally {
+    reader.releaseLock?.();
   }
-  return body;
+  return Buffer.concat(chunks, bytes).toString("utf8");
 }
 
 export async function registryRequest({ url, headers }) {
@@ -116,6 +134,10 @@ export async function assertAliasesAbsent(references, options = {}) {
   if (!Array.isArray(references) || references.length === 0) {
     throw new Error("at least one immutable alias is required");
   }
+
+  // Validate the complete release set before reading credentials or issuing a
+  // request. A malformed second alias must not leak auth to probe the first.
+  references.forEach(parseReference);
 
   for (const reference of references) {
     const classification = await inspectAlias(reference, options);
