@@ -79,6 +79,27 @@ function successfulHandler({ request, response, body }) {
       result: { tools: [{ name: "varity_search_docs" }] },
     });
   }
+  if (body?.method === "tools/call") {
+    return json(response, 200, {
+      jsonrpc: "2.0",
+      id: body.id,
+      result: {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            success: true,
+            data: {
+              results: [{ title: "Deploy", url: "https://docs.varity.so", content: "Deploy an application." }],
+              query: "deploy",
+              totalResults: 1,
+              docsUrl: "https://docs.varity.so",
+            },
+            message: "Found 1 result(s) for deploy",
+          }),
+        }],
+      },
+    });
+  }
   if (request.method === "DELETE") return json(response, 204);
   return json(response, 500, { error: "unexpected" });
 }
@@ -97,11 +118,11 @@ test("hosted gate proves exact release, rejection, session continuity, and tools
   assert.equal(result.requests[1].authorization, undefined);
   assert(result.requests.slice(2).every((request) => request.authorization === "Bearer " + token));
   assert(result.requests.slice(3).every((request) => request.sessionId === "opaque-session"));
-  assert.equal(
-    result.requests.some((request) => request.body?.method === "tools/call"),
-    false,
-    "a host-global downstream key must not pass as owner-principal equality",
-  );
+  const toolCall = result.requests.find((request) => request.body?.method === "tools/call");
+  assert.deepEqual(toolCall?.body?.params, {
+    name: "varity_search_docs",
+    arguments: { query: "deploy", maxResults: 1 },
+  });
   assert.doesNotMatch(result.stdout + result.stderr, new RegExp(token));
   assert.doesNotMatch(result.stdout + result.stderr, /opaque-session/);
 });
@@ -136,6 +157,44 @@ test("hosted gate fails closed when HTTP exposes an extra tool", async () => {
 
   assert.equal(result.exitCode, 1);
   assert.match(result.stderr, /tools\/list: hosted HTTP tool allowlist differs/);
+  assert.doesNotMatch(result.stdout + result.stderr, new RegExp(token));
+});
+
+test("hosted gate fails closed when the advertised documentation function is broken", async () => {
+  const result = await runGate(({ request, response, body }) => {
+    if (request.method === "GET") {
+      return json(response, 200, { status: "ok", version: expectedVersion, transport: "http" });
+    }
+    if (!request.headers.authorization) return json(response, 401, { error: "invalid_token" });
+    if (body?.method === "initialize") {
+      return json(response, 200, {
+        jsonrpc: "2.0",
+        id: body.id,
+        result: { protocolVersion: "2025-06-18", serverInfo: { name: "varity", version: expectedVersion } },
+      }, { "Mcp-Session-Id": "opaque-session" });
+    }
+    if (body?.method === "notifications/initialized") return json(response, 202);
+    if (body?.method === "tools/list") {
+      return json(response, 200, {
+        jsonrpc: "2.0",
+        id: body.id,
+        result: { tools: [{ name: "varity_search_docs" }] },
+      });
+    }
+    if (body?.method === "tools/call") {
+      return json(response, 200, {
+        jsonrpc: "2.0",
+        id: body.id,
+        result: { content: [{ type: "text", text: JSON.stringify({ success: true, data: { results: [] } }) }] },
+      });
+    }
+    if (request.method === "DELETE") return json(response, 204);
+    return json(response, 500, { error: "unexpected" });
+  });
+
+  assert.equal(result.exitCode, 1);
+  assert.match(result.stderr, /tools\/call: documentation search did not return one bounded public result/);
+  assert(result.requests.some((request) => request.body?.method === "tools/call"));
   assert.doesNotMatch(result.stdout + result.stderr, new RegExp(token));
 });
 

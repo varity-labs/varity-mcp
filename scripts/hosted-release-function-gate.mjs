@@ -3,6 +3,7 @@
 const DEFAULT_ENDPOINT = "https://mcp.varity.so/mcp";
 const PROTOCOL_VERSION = "2025-06-18";
 const PUBLIC_READ_TOOL = "varity_search_docs";
+const PUBLIC_DOCS_URL = "https://docs.varity.so";
 const REQUEST_TIMEOUT_MS = 25_000;
 
 class GateFailure extends Error {
@@ -157,6 +158,41 @@ function initializeRequest(id) {
   };
 }
 
+function assertPublicDocsResult(payload) {
+  const content = payload?.result?.content;
+  if (!Array.isArray(content) || content.length !== 1 || content[0]?.type !== "text") {
+    throw new GateFailure("tools/call", "documentation search returned an unexpected MCP result shape");
+  }
+  if (typeof content[0].text !== "string" || content[0].text.length > 5_000) {
+    throw new GateFailure("tools/call", "documentation search result is absent or exceeds the public-result bound");
+  }
+
+  let projection;
+  try {
+    projection = JSON.parse(content[0].text);
+  } catch {
+    throw new GateFailure("tools/call", "documentation search result is not structured JSON");
+  }
+  const results = projection?.data?.results;
+  if (
+    projection?.success !== true ||
+    projection?.data?.docsUrl !== PUBLIC_DOCS_URL ||
+    projection?.data?.query !== "deploy" ||
+    !Array.isArray(results) ||
+    results.length !== 1
+  ) {
+    throw new GateFailure("tools/call", "documentation search did not return one bounded public result");
+  }
+  const result = results[0];
+  if (
+    typeof result?.title !== "string" || result.title.length === 0 || result.title.length > 256 ||
+    result?.url !== PUBLIC_DOCS_URL ||
+    typeof result?.content !== "string" || result.content.length === 0 || result.content.length > 1_200
+  ) {
+    throw new GateFailure("tools/call", "documentation search returned an invalid public result");
+  }
+}
+
 async function closeSession(endpoint, token, sessionId) {
   try {
     await fetch(endpoint, {
@@ -215,6 +251,20 @@ export async function runHostedReleaseFunctionGate() {
       throw new GateFailure("tools/list", "hosted HTTP tool allowlist differs from " + PUBLIC_READ_TOOL);
     }
     console.log("  ✓ authenticated session continuity and exact public-read tool allowlist");
+
+    const called = await protocolRequest(endpoint, token, {
+      stage: "tools/call",
+      sessionId,
+      body: {
+        jsonrpc: "2.0",
+        id: 4,
+        method: "tools/call",
+        params: { name: PUBLIC_READ_TOOL, arguments: { query: "deploy", maxResults: 1 } },
+      },
+      expectedId: 4,
+    });
+    assertPublicDocsResult(called.payload);
+    console.log("  ✓ public documentation search returned one bounded result");
   } finally {
     await closeSession(endpoint, token, sessionId);
   }

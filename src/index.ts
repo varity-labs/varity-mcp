@@ -2,7 +2,6 @@
 
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { pathToFileURL } from "node:url";
 import { createVarityServer, VERSION } from "./server.js";
 import type { TransportMode } from "./server.js";
 import { logger, logHttpRequest } from "./utils/logger.js";
@@ -381,8 +380,7 @@ async function main(): Promise<void> {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main().catch((error) => {
+main().catch((error) => {
   const err = error instanceof Error ? error : new Error(String(error));
   const failure = failureAttributes(
     "inspect_runtime_configuration_and_error_before_restart",
@@ -400,5 +398,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     "error.type": err.name,
   });
   void stopTelemetry().finally(() => process.exit(1));
-  });
-}
+});

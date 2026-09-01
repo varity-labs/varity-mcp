@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
-import { startHttp } from "../dist/index.js";
 import { test } from "node:test";
 
 const require = createRequire(import.meta.url);
 const { version } = require("../package.json");
-const devToken = "real-server-contract-token-never-print";
+const principalAToken = "principal-a-token-never-print";
+const principalBToken = "principal-b-token-never-print";
+const missingPrincipalToken = "missing-principal-token-never-print";
 
 async function reservePort() {
   const server = createServer();
@@ -56,16 +58,66 @@ async function rpcResult(response, expectedId) {
 }
 
 test("real HTTP server rejects anonymous initialize and preserves an authenticated session", async (t) => {
+  const gateway = createServer((request, response) => {
+    if (request.method !== "POST" || request.url !== "/api/auth/verify") {
+      response.writeHead(404).end();
+      return;
+    }
+    const authorization = request.headers.authorization;
+    const identity = authorization === "Bearer " + principalAToken
+      ? { user_id: "principal-a", scopes: ["read"] }
+      : authorization === "Bearer " + principalBToken
+        ? { user_id: "principal-b", scopes: ["read"] }
+        : authorization === "Bearer " + missingPrincipalToken
+          ? { scopes: ["read"] }
+          : undefined;
+    if (!identity) {
+      response.writeHead(401, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ error: "invalid_token" }));
+      return;
+    }
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(JSON.stringify(identity));
+  });
+  gateway.listen(0, "127.0.0.1");
+  await once(gateway, "listening");
+  const gatewayAddress = gateway.address();
+  assert(gatewayAddress && typeof gatewayAddress === "object");
+
   const port = await reservePort();
   const baseUrl = "http://127.0.0.1:" + port;
-  const previousDevToken = process.env.VARITY_MCP_DEV_TOKEN;
-  process.env.VARITY_MCP_DEV_TOKEN = devToken;
-  const shutdown = await startHttp(port);
-  t.after(async () => {
-    if (previousDevToken === undefined) delete process.env.VARITY_MCP_DEV_TOKEN;
-    else process.env.VARITY_MCP_DEV_TOKEN = previousDevToken;
-    await shutdown();
+  const childEnv = {
+    ...process.env,
+    VARITY_GATEWAY_URL: "http://127.0.0.1:" + gatewayAddress.port,
+  };
+  delete childEnv.VARITY_MCP_DEV_TOKEN;
+  const child = spawn(process.execPath, ["dist/index.js", "--transport", "http", "--port", String(port)], {
+    cwd: new URL("..", import.meta.url),
+    env: childEnv,
+    stdio: ["ignore", "ignore", "pipe"],
   });
+  const stderr = [];
+  child.stderr.on("data", (chunk) => stderr.push(chunk));
+  t.after(async () => {
+    if (child.exitCode === null) {
+      child.kill("SIGTERM");
+      await once(child, "exit");
+    }
+    gateway.close();
+    await once(gateway, "close");
+  });
+
+  const deadline = Date.now() + 30_000;
+  let health;
+  while (Date.now() < deadline && child.exitCode === null) {
+    try {
+      health = await fetch(baseUrl + "/health");
+      if (health.ok) break;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+  assert(health?.ok, Buffer.concat(stderr).toString("utf8") || "real MCP runtime did not start");
 
   const anonymous = await fetch(baseUrl + "/mcp", {
     method: "POST",
@@ -83,7 +135,23 @@ test("real HTTP server rejects anonymous initialize and preserves an authenticat
     error_description: "A valid Bearer access token is required",
   });
 
-  const authorization = { Authorization: "Bearer " + devToken };
+  const missingPrincipal = await fetch(baseUrl + "/mcp", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer " + missingPrincipalToken,
+      Accept: "application/json, text/event-stream",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(initializeRequest()),
+  });
+  assert.equal(missingPrincipal.status, 401);
+  assert.equal(missingPrincipal.headers.get("mcp-session-id"), null);
+  assert.deepEqual(await missingPrincipal.json(), {
+    error: "invalid_token",
+    error_description: "The Bearer access token is invalid or expired",
+  });
+
+  const authorization = { Authorization: "Bearer " + principalAToken };
   const initialized = await fetch(baseUrl + "/mcp", {
     method: "POST",
     headers: {
@@ -112,6 +180,22 @@ test("real HTTP server rejects anonymous initialize and preserves an authenticat
   assert([200, 202, 204].includes(continued.status));
   await continued.arrayBuffer();
 
+  const mismatchedPrincipal = await fetch(baseUrl + "/mcp", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer " + principalBToken,
+      Accept: "application/json, text/event-stream",
+      "Content-Type": "application/json",
+      "Mcp-Session-Id": sessionId,
+    },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }),
+  });
+  assert.equal(mismatchedPrincipal.status, 403);
+  assert.deepEqual(await mismatchedPrincipal.json(), {
+    error: "insufficient_scope",
+    error_description: "The MCP session belongs to a different authenticated principal",
+  });
+
   const listed = await fetch(baseUrl + "/mcp", {
     method: "POST",
     headers: {
@@ -132,4 +216,8 @@ test("real HTTP server rejects anonymous initialize and preserves an authenticat
   });
   assert([200, 202, 204].includes(closed.status));
   await closed.arrayBuffer();
+  const diagnostics = Buffer.concat(stderr).toString("utf8");
+  for (const token of [principalAToken, principalBToken, missingPrincipalToken]) {
+    assert.doesNotMatch(diagnostics, new RegExp(token));
+  }
 });

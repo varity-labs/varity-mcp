@@ -29,3 +29,38 @@ jobs:
         run: npm test
       - name: Build runtime container
         run: docker build --tag varity-mcp-ci:${{ github.sha }} .
+      - name: Verify Node 22 runtime container starts and serves exact health
+        run: |
+          set -euo pipefail
+          container_name="varity-mcp-ci-${{ github.run_id }}-${{ github.run_attempt }}"
+          cleanup() { docker rm --force "$container_name" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          docker run --detach --name "$container_name" --publish 127.0.0.1:3100:3100 "varity-mcp-ci:${{ github.sha }}"
+          for attempt in {1..30}; do
+            if body="$(curl --fail --silent --show-error http://127.0.0.1:3100/health)"; then
+              node -e 'const value=JSON.parse(process.argv[1]); if(value.status!=="ok"||value.transport!=="http"||value.version!==require("./package.json").version) process.exit(1)' "$body"
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs "$container_name"
+          exit 1
+
+  runtime-version:
+    name: runtime-node-${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Install exact dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Build
+        run: npm run build
+      - name: Execute package entrypoint and verify exact health
+        run: node --test test/runtime-version.mjs
