@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { writeFileSync } from "node:fs";
+
 const DEFAULT_ENDPOINT = "https://mcp.varity.so/mcp";
 const PROTOCOL_VERSION = "2025-06-18";
 const PUBLIC_READ_TOOL = "varity_search_docs";
@@ -67,6 +69,7 @@ async function assertExactRelease(endpoint, expectedVersion) {
   if (health?.status !== "ok" || health?.transport !== "http" || health?.version !== expectedVersion) {
     throw new GateFailure("release identity", "health does not identify exact expected HTTP release " + expectedVersion);
   }
+  return health;
 }
 
 function parseRpcPayload(text, expectedId, stage) {
@@ -191,6 +194,7 @@ function assertPublicDocsResult(payload) {
   ) {
     throw new GateFailure("tools/call", "documentation search returned an invalid public result");
   }
+  return { docsUrl: projection.data.docsUrl, resultCount: results.length };
 }
 
 async function closeSession(endpoint, token, sessionId) {
@@ -211,7 +215,7 @@ export async function runHostedReleaseFunctionGate() {
   const token = accessTokenFromEnvironment();
   const expectedVersion = expectedReleaseFromEnvironment();
 
-  await assertExactRelease(endpoint, expectedVersion);
+  const health = await assertExactRelease(endpoint, expectedVersion);
   console.log("  ✓ exact HTTP release " + expectedVersion + " identified");
 
   await assertAnonymousRejection(endpoint);
@@ -263,8 +267,22 @@ export async function runHostedReleaseFunctionGate() {
       },
       expectedId: 4,
     });
-    assertPublicDocsResult(called.payload);
+    const docsResult = assertPublicDocsResult(called.payload);
     console.log("  ✓ public documentation search returned one bounded result");
+    return {
+      version: health.version,
+      serverInfoVersion: initialized.payload.result.serverInfo.version,
+      anonymous: "rejected",
+      tools: toolNames,
+      toolsCall: {
+        name: PUBLIC_READ_TOOL,
+        query: "deploy",
+        maxResults: 1,
+        result: "bounded-public-docs-pass",
+        docsUrl: docsResult.docsUrl,
+        resultCount: docsResult.resultCount,
+      },
+    };
   } finally {
     await closeSession(endpoint, token, sessionId);
   }
@@ -273,7 +291,11 @@ export async function runHostedReleaseFunctionGate() {
 if (import.meta.url === "file://" + process.argv[1]) {
   console.log("hosted-mcp-release-function-gate:");
   runHostedReleaseFunctionGate().then(
-    () => console.log("hosted-mcp-release-function-gate: passed"),
+    (receipt) => {
+      const receiptPath = process.env.VARITY_MCP_RECEIPT_PATH;
+      if (receiptPath) writeFileSync(receiptPath, JSON.stringify(receipt, null, 2) + "\n", { mode: 0o600 });
+      console.log("hosted-mcp-release-function-gate: passed");
+    },
     (error) => {
       const message = error instanceof GateFailure ? error.message : "unexpected internal failure";
       console.error("hosted-mcp-release-function-gate: FAILED — " + message);

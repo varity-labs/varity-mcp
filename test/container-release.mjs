@@ -38,7 +38,9 @@ test("GHCR release builds once, accepts by digest, attests, then promotes", () =
   assert.match(workflow, /id-token: write/);
   assert.match(workflow, /attestations: write/);
   assert.match(workflow, /package_version=.*package\.json/);
-  assert.match(workflow, /immutable release alias .* already exists/);
+  assert.match(workflow, /release-alias-gate\.mjs assert-absent/);
+  assert.match(workflow, /group: varity-mcp-container-release/);
+  assert.match(workflow, /cancel-in-progress: false/);
   assert.match(workflow, /docker\/build-push-action@v6/);
   assert.match(workflow, /push: true/);
   assert.match(workflow, /provenance: mode=max/);
@@ -50,9 +52,10 @@ test("GHCR release builds once, accepts by digest, attests, then promotes", () =
   assert.match(workflow, /hosted-release-function-gate\.mjs/);
   assert.match(workflow, /echo "::add-mask::\$\{release_token\}"/);
   assert.match(workflow, /VARITY_MCP_ACCESS_TOKEN="\$release_token"/);
-  assert.match(workflow, /rg -Fq "\$release_token" "\$evidence"/);
-  assert.match(workflow, /scan_status=.*\$\?/);
-  assert.match(workflow, /scan_status.*-ne 1/);
+  assert.match(workflow, /VARITY_MCP_RECEIPT_PATH="\$evidence\/gate\.receipt\.json"/);
+  assert.match(workflow, /validate-release-evidence\.mjs/);
+  assert.match(workflow, /RELEASE_EVIDENCE_BEARER="\$release_token"/);
+  assert.match(workflow, /ACCEPTANCE PASS digest=%s version=%s/);
   assert.match(workflow, /actions\/attest-build-provenance@v3/);
   assert.match(workflow, /subject-digest: \$\{\{ steps\.candidate\.outputs\.digest \}\}/);
   assert.match(workflow, /docker buildx imagetools create/);
@@ -69,8 +72,13 @@ test("GHCR release builds once, accepts by digest, attests, then promotes", () =
   );
   assert(
     workflow.indexOf("Attest accepted image digest") <
+      workflow.indexOf("Revalidate immutable aliases immediately before promotion"),
+  );
+  assert(
+    workflow.indexOf("Revalidate immutable aliases immediately before promotion") <
       workflow.indexOf("Promote exact accepted image digest"),
   );
+  assert.equal((workflow.match(/release-alias-gate\.mjs assert-absent/g) ?? []).length, 2);
   assert.equal((workflow.match(/docker\/build-push-action@v6/g) ?? []).length, 1);
   assert.doesNotMatch(workflow, /provenance: false/);
   assert.doesNotMatch(workflow, /Upload acceptance evidence\n\s+if: always\(\)/);
