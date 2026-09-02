@@ -8,11 +8,11 @@ import { assertAliasesAbsent, inspectAlias, registryRequest } from "../scripts/r
 import { validateReleaseEvidence } from "../scripts/validate-release-evidence.mjs";
 
 const digest = `sha256:${"a".repeat(64)}`;
-const version = "2.3.16";
+const version = "2.3.17";
 const bearer = "release-bearer-that-must-remain-opaque";
 const registryCredential = "github-token-that-must-remain-opaque";
 const registryBearer = "ghcr-bearer-that-must-remain-opaque";
-const alias = "ghcr.io/varity-labs/varity-mcp:2.3.16";
+const alias = "ghcr.io/varity-labs/varity-mcp:2.3.17";
 const manifestUnknown = JSON.stringify({ errors: [{ code: "MANIFEST_UNKNOWN", message: "manifest unknown" }] });
 
 function mockTransport(manifestOutcome, { authOutcome, calls = [] } = {}) {
@@ -36,14 +36,14 @@ test("authenticated GHCR manifest probe binds absence to the exact repository an
   assert.equal(authUrl.origin + authUrl.pathname, "https://ghcr.io/token");
   assert.equal(authUrl.searchParams.get("service"), "ghcr.io");
   assert.equal(authUrl.searchParams.get("scope"), "repository:varity-labs/varity-mcp:pull");
-  assert.equal(transport.calls[1].url, "https://ghcr.io/v2/varity-labs/varity-mcp/manifests/2.3.16");
+  assert.equal(transport.calls[1].url, "https://ghcr.io/v2/varity-labs/varity-mcp/manifests/2.3.17");
   assert.match(transport.calls[0].headers.Authorization, /^Basic /);
   assert.equal(transport.calls[1].headers.Authorization, `Bearer ${registryBearer}`);
 });
 
 test("malformed or non-GHCR references are rejected before any credential-bearing request", async () => {
   for (const reference of [
-    "docker.io/varity-labs/varity-mcp:2.3.16",
+    "docker.io/varity-labs/varity-mcp:2.3.17",
     "ghcr.io/varity-labs/varity-mcp@sha256:abc",
     "ghcr.io/varity-labs/varity-mcp:../../token",
   ]) {
