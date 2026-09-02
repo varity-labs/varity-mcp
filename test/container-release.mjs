@@ -44,7 +44,12 @@ test("GHCR release builds once, accepts by digest, attests, then promotes", () =
   assert.equal((workflow.match(/GHCR_TOKEN: \$\{\{ secrets\.GHCR_PAT \|\| github\.token \}\}/g) ?? []).length, 2);
   assert.match(workflow, /group: varity-mcp-container-release/);
   assert.match(workflow, /cancel-in-progress: false/);
+  assert.match(
+    workflow,
+    /id: buildx\n\s+uses: docker\/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4\.3\.0\n\s+with:\n\s+driver: docker-container/,
+  );
   assert.match(workflow, /docker\/build-push-action@v6/);
+  assert.match(workflow, /builder: \$\{\{ steps\.buildx\.outputs\.name \}\}/);
   assert.match(workflow, /push: true/);
   assert.match(workflow, /provenance: mode=max/);
   assert.match(workflow, /sbom: true/);
@@ -66,6 +71,10 @@ test("GHCR release builds once, accepts by digest, attests, then promotes", () =
   assert.match(workflow, /for tag in "\$VERSIONED_TAG" "\$VERSION" latest/);
   assert.match(workflow, /promoted.*!=.*CANDIDATE_DIGEST/);
   assert(
+    workflow.indexOf("Set up attestation-capable Buildx") <
+      workflow.indexOf("Build and push candidate image once"),
+  );
+  assert(
     workflow.indexOf("Build and push candidate image once") <
       workflow.indexOf("Accept exact candidate digest"),
   );
@@ -83,6 +92,8 @@ test("GHCR release builds once, accepts by digest, attests, then promotes", () =
   );
   assert.equal((workflow.match(/release-alias-gate\.mjs assert-absent/g) ?? []).length, 2);
   assert.equal((workflow.match(/docker\/build-push-action@v6/g) ?? []).length, 1);
+  assert.equal((workflow.match(/docker\/setup-buildx-action@/g) ?? []).length, 1);
+  assert.doesNotMatch(workflow, /docker\/setup-buildx-action@(?:v\d|main|master)/);
   assert.doesNotMatch(workflow, /provenance: false/);
   assert.doesNotMatch(workflow, /Upload acceptance evidence\n\s+if: always\(\)/);
   assert.doesNotMatch(workflow, /--env [^\n]*release_token|docker logs .*\|/);
