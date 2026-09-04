@@ -63,16 +63,21 @@ if (process.env.GITHUB_EVENT_NAME === "pull_request") {
   } else {
     const event = JSON.parse(fs.readFileSync(eventPath, "utf8"));
     const body = event.pull_request?.body ?? "";
-    if (!/^Architecture impact:\s*(none|updated)\s*$/im.test(body)) {
-      fail("pull request body must declare `Architecture impact: none` or `Architecture impact: updated`");
-    }
-    for (const field of [
-      "Reason:",
-      "Affected runtime services/modules:",
-      "Interfaces/data/security/topology changed:",
-      "Architecture/ADR files:",
-    ]) {
-      if (!body.includes(field)) fail(`pull request body is missing architecture field: ${field}`);
+    const actor = event.pull_request?.user?.login;
+    // Dependabot owns its generated PR body; all other actors must provide the
+    // repository's architecture declaration and supporting fields.
+    if (actor !== "dependabot[bot]") {
+      if (!/^Architecture impact:\s*(none|updated)\s*$/im.test(body)) {
+        fail("pull request body must declare `Architecture impact: none` or `Architecture impact: updated`");
+      }
+      for (const field of [
+        "Reason:",
+        "Affected runtime services/modules:",
+        "Interfaces/data/security/topology changed:",
+        "Architecture/ADR files:",
+      ]) {
+        if (!body.includes(field)) fail(`pull request body is missing architecture field: ${field}`);
+      }
     }
   }
 }
