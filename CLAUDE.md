@@ -1,12 +1,12 @@
 # CLAUDE.md — varity-mcp-standalone
 
-The CANONICAL home of **`@varity-labs/mcp`** (npm, public repo) — the thin MCP server that shells to `varitykit`. Same engine, no second implementation; the orchestration lives in `varitykit` / the gateway, never here.
+The CANONICAL home of **`@varity-labs/mcp`** (npm, public repo) — the thin MCP client for the gateway-owned Varity Public API. Selected mutations adapt through `varitykit`; reads and other operations may call the public interface directly. Same backend engine, no second implementation; orchestration never lives here.
 
 ## STATUS (verified 2026-06-24)
 Live and published to npm (`latest`). Develop MCP changes HERE only. Do not sync into the frozen in-repo mirror at `../varity-sdk-private/packages/cli/varity-mcp/`; that mirror is unmaintained and out of product scope. For the published version + tool count, see the manifest `product.packages."@varity-labs/mcp"` (do not restate here).
 
 ## WIRES IN
-- **Downstream (this calls):** shells `varitykit` for every deploy operation; `varity_cost_calculator` hits the gateway `/api/pricing`. It does NOT talk to Akash/IPFS/db-proxy directly — those are reached only through `varitykit` / the gateway.
+- **Downstream (this calls):** uses `varitykit` for selected deployment mutations and a direct public-interface adapter for reads/logs/pricing. Both converge on the gateway-owned Varity Public API. It does NOT talk to Akash/IPFS/db-proxy directly.
 - **Upstream (calls this):** AI coding tools — Claude Code / Cursor / Codex — via MCP (stdio + HTTP transport).
 - **Where it sits in the architecture:** one of the **two** products (`varitykit` + this MCP) and the secondary distribution channel (MCP-in-AI-IDE; the Developer Portal is primary PLG). It is a thin client over the same deploy engine, so it inherits the honest deploy surface and feeds the same deployment telemetry / orchestration path.
 - Exact backend versions / DSEQs / health (gateway, deploy-api, etc.): `../varity.manifest.yaml` → `state.services`. Never hardcode them here.
