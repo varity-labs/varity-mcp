@@ -96,6 +96,18 @@ export async function execCLI(
 }
 
 /**
+ * True when varitykit rejected a subcommand it does not know: the installed
+ * CLI predates the feature the MCP is bridging to. Surfacing this as an
+ * upgrade instruction beats the raw click usage text.
+ */
+export function isOutdatedVaritykit(result: CLIResult): boolean {
+  return result.exitCode !== 0 && /No such command/i.test(`${result.stderr}\n${result.stdout}`);
+}
+
+export const VARITYKIT_UPGRADE_HINT =
+  "Upgrade the CLI: `pipx upgrade varitykit` (or `pip install -U varitykit`), then retry.";
+
+/**
  * Check if a CLI tool is available on the system.
  */
 export async function isCLIAvailable(command: string): Promise<boolean> {

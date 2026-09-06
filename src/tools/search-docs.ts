@@ -13,6 +13,7 @@ interface DocSection {
 }
 
 let sectionsCache: DocSection[] | null = null;
+let lastFetchFailure: string | null = null;
 
 /** Fetch the live llms docs (full content, falling back to the index) and split into sections. */
 async function getDocSections(): Promise<DocSection[]> {
@@ -27,15 +28,18 @@ async function getDocSections(): Promise<DocSection[]> {
       const timeout = setTimeout(() => controller.abort(), 6000);
       const res = await fetch(url, { signal: controller.signal });
       clearTimeout(timeout);
-      if (!res.ok) continue;
+      if (!res.ok) {
+        lastFetchFailure = `${url} returned HTTP ${res.status}`;
+        continue;
+      }
       const text = await res.text();
       const sections = splitIntoSections(text);
       if (sections.length) {
         sectionsCache = sections;
         return sections;
       }
-    } catch {
-      // try the next source
+    } catch (err) {
+      lastFetchFailure = `${url}: ${err instanceof Error ? err.message : String(err)}`;
     }
   }
   return [];
@@ -108,7 +112,7 @@ export function registerSearchDocsTool(server: McpServer): void {
         if (!sections.length) {
           return successResponse(
             { results: [], docsUrl: INFRASTRUCTURE.DOCS },
-            `Couldn't reach the live docs right now. Browse them at ${INFRASTRUCTURE.DOCS}`
+            `Couldn't reach the live docs right now${lastFetchFailure ? ` (${lastFetchFailure})` : ""}. Browse them at ${INFRASTRUCTURE.DOCS}`
           );
         }
 

@@ -7,6 +7,7 @@ export function registerDeleteDeploymentTool(server: McpServer): void {
   server.registerTool(
     "varity_delete_deployment",
     {
+      annotations: { destructiveHint: true },
       title: "Delete a Deployment and Stop Its Billing",
       description:
         "Request deletion of an existing Varity deployment by name and track it until billing stop is proven. " +

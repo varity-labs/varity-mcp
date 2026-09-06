@@ -7,6 +7,7 @@ export function registerSetEnvTool(server: McpServer): void {
   server.registerTool(
     "varity_set_env",
     {
+      annotations: { destructiveHint: true },
       title: "Set Environment Variables on an Existing Deployment",
       description:
         "Set or update environment variables (config + secrets) on an app that is ALREADY deployed, " +

@@ -1,8 +1,17 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
-import { execVaritykit, execCLI } from "../utils/cli-bridge.js";
+import { execVaritykit, execCLI, type CLIResult } from "../utils/cli-bridge.js";
 import { INFRASTRUCTURE, isAuthenticated } from "../utils/config.js";
+
+/**
+ * True when `varitykit login --key` did not persist a usable key. Older CLIs
+ * print "Invalid deploy key" and still exit 0, so the exit code alone is not
+ * enough to tell a rejected key from a saved one.
+ */
+export function loginRejected(result: CLIResult): boolean {
+  return result.exitCode !== 0 || /invalid deploy key/i.test(`${result.stdout}\n${result.stderr}`);
+}
 
 export function registerLoginTool(server: McpServer): void {
   server.registerTool(
@@ -29,7 +38,7 @@ export function registerLoginTool(server: McpServer): void {
         // Authenticate with the provided key via varitykit CLI
         const result = await execVaritykit("login", ["--key", deploy_key]);
 
-        if (result.exitCode === 0) {
+        if (!loginRejected(result)) {
           const cliMessage = result.stdout.trim();
           return successResponse(
             {
