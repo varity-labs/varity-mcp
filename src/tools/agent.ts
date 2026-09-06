@@ -1,7 +1,25 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
-import { execVaritykit } from "../utils/cli-bridge.js";
+import { execVaritykit, isOutdatedVaritykit, VARITYKIT_UPGRADE_HINT } from "../utils/cli-bridge.js";
+
+/** The installed varitykit predates the `app templates` command. */
+class VaritykitOutdatedError extends Error {}
+
+function catalogError(error: unknown) {
+  if (error instanceof VaritykitOutdatedError) {
+    return errorResponse(
+      "VARITYKIT_OUTDATED",
+      "The installed varitykit CLI is too old to read the template catalog (it has no `app templates` command).",
+      VARITYKIT_UPGRADE_HINT
+    );
+  }
+  return errorResponse(
+    "TEMPLATE_CATALOG_UNAVAILABLE",
+    `Could not load Varity templates: ${error instanceof Error ? error.message : "unknown error"}`,
+    "Run varity_login or set VARITY_DEPLOY_KEY, then retry."
+  );
+}
 
 interface TemplateMeta {
   id: string;
@@ -22,6 +40,7 @@ interface TemplateMeta {
 async function fetchTemplateCatalog(): Promise<TemplateMeta[]> {
   const result = await execVaritykit("app", ["templates", "--json"], { timeout: 120_000 });
   if (result.exitCode !== 0) {
+    if (isOutdatedVaritykit(result)) throw new VaritykitOutdatedError();
     const detail = (result.stderr || result.stdout || "").trim() || "unknown error";
     throw new Error(detail);
   }
@@ -66,11 +85,7 @@ async function listTemplates() {
       `${templates.length} certified Varity templates available:\n\n${summary}\n\nDeploy with varity_deploy_template or varity_deploy_agent.`
     );
   } catch (error) {
-    return errorResponse(
-      "TEMPLATE_CATALOG_UNAVAILABLE",
-      `Could not load Varity templates: ${error instanceof Error ? error.message : "unknown error"}`,
-      "Run varity_login or set VARITY_DEPLOY_KEY, then retry."
-    );
+    return catalogError(error);
   }
 }
 
@@ -97,11 +112,7 @@ async function templateInfo(id: string) {
         `Certification: ${template.certification?.state ?? "unknown"}`
     );
   } catch (error) {
-    return errorResponse(
-      "TEMPLATE_CATALOG_UNAVAILABLE",
-      `Could not load Varity templates: ${error instanceof Error ? error.message : "unknown error"}`,
-      "Run varity_login or set VARITY_DEPLOY_KEY, then retry."
-    );
+    return catalogError(error);
   }
 }
 
@@ -118,11 +129,7 @@ async function deployTemplate(templateId: string, name?: string, env?: Record<st
       );
     }
   } catch (error) {
-    return errorResponse(
-      "TEMPLATE_CATALOG_UNAVAILABLE",
-      `Could not load Varity templates: ${error instanceof Error ? error.message : "unknown error"}`,
-      "Run varity_login or set VARITY_DEPLOY_KEY, then retry."
-    );
+    return catalogError(error);
   }
 
   const providedKeys = new Set(env ? Object.keys(env) : []);
@@ -168,6 +175,7 @@ export function registerAgentTools(server: McpServer): void {
   server.registerTool(
     "varity_list_templates",
     {
+      annotations: { readOnlyHint: true },
       title: "List Certified Varity Templates",
       description:
         "List the certified Varity deploy templates from the gateway-owned catalog. Use this before deploying a template.",
@@ -179,6 +187,7 @@ export function registerAgentTools(server: McpServer): void {
   server.registerTool(
     "varity_template_info",
     {
+      annotations: { readOnlyHint: true },
       title: "Show Varity Template Details",
       description:
         "Show full details for a certified Varity template: required env, resources, access mode, hardware profile, and certification state.",
@@ -192,6 +201,7 @@ export function registerAgentTools(server: McpServer): void {
   server.registerTool(
     "varity_deploy_template",
     {
+      annotations: { destructiveHint: true },
       title: "Deploy a Varity Template",
       description:
         "Deploy a certified Varity template through varitykit. Call varity_template_info first for required environment variables.",
@@ -213,6 +223,7 @@ export function registerAgentTools(server: McpServer): void {
   server.registerTool(
     "varity_list_agents",
     {
+      annotations: { readOnlyHint: true },
       title: "List Available AI Agent Templates",
       description:
         "Backward-compatible alias for varity_list_templates. Returns the gateway-owned certified template catalog, not a hardcoded MCP list.",
@@ -224,6 +235,7 @@ export function registerAgentTools(server: McpServer): void {
   server.registerTool(
     "varity_agent_info",
     {
+      annotations: { readOnlyHint: true },
       title: "Show AI Agent Template Details",
       description:
         "Backward-compatible alias for varity_template_info. Pass a certified template ID from varity_list_templates.",
@@ -237,6 +249,7 @@ export function registerAgentTools(server: McpServer): void {
   server.registerTool(
     "varity_deploy_agent",
     {
+      annotations: { destructiveHint: true },
       title: "Deploy an AI Agent Template",
       description:
         "Backward-compatible alias for varity_deploy_template. Deploys a certified Varity template by ID.",

@@ -60,17 +60,10 @@ Add to `mcp_config.json`:
 
 ### Claude.ai / ChatGPT (HTTP)
 
-The hosted process is reachable at:
-
-```
-https://mcp.varity.so
-```
-
-Hosted HTTP requires OAuth and intentionally exposes only
-`varity_search_docs`, an in-process read of public documentation. Every
-filesystem, process, deployment, customer-data, and mutation tool remains
-stdio-only. Hosted OAuth is not currently certified end to end; use the stdio
-package for every deployment or owner-scoped operation.
+The hosted endpoint `mcp.varity.so` is retired. Browser-based tools that only
+accept a remote MCP URL are not supported today; use the stdio package from
+Claude Code, Cursor, VS Code, or Windsurf. Every filesystem, process,
+deployment, customer-data, and mutation tool is stdio-only.
 
 ### Any MCP-compatible client (stdio)
 
@@ -187,8 +180,8 @@ For browser-based AI tools. Claude.ai, ChatGPT.
 npx -y @varity-labs/mcp --transport http --port 3100
 ```
 
-The process is hosted at `https://mcp.varity.so`, but authenticated hosted use
-is not currently certified. Its HTTP tool allowlist contains only
+The HTTP transport is for self-hosting only; the former hosted endpoint
+`mcp.varity.so` is retired. Its tool allowlist contains only
 `varity_search_docs`; use stdio for every other operation.
 
 ## Prerequisites
