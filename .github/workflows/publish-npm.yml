@@ -1,0 +1,60 @@
+name: Publish npm package
+
+# Publishes @varity-labs/mcp to npm on a release tag (mcp-v<major>.<minor>.<patch>)
+# or on demand. The package's own `prepublishOnly` (build + prepublish guard)
+# still runs. Requires the repository secret NPM_TOKEN (npm automation token
+# with publish rights on @varity-labs). Without it the job fails closed.
+
+on:
+  push:
+    tags:
+      - "mcp-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.11.0
+          registry-url: https://registry.npmjs.org
+      - name: Verify the tag matches package.json
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          requested="${GITHUB_REF_NAME#mcp-v}"
+          package_version="$(node -p 'require("./package.json").version')"
+          if [[ "$requested" != "$package_version" ]]; then
+            echo "::error::tag mcp-v${requested} does not match package.json version ${package_version}"
+            exit 1
+          fi
+      - name: Refuse to publish without a token
+        shell: bash
+        run: |
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "::error::repository secret NPM_TOKEN is not set; refusing to publish"
+            exit 1
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - run: npm ci
+      - name: Refuse to overwrite a published version
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="$(node -p 'require("./package.json").name')"
+          version="$(node -p 'require("./package.json").version')"
+          if npm view "${name}@${version}" version >/dev/null 2>&1; then
+            echo "::error::${name}@${version} is already published"
+            exit 1
+          fi
+      - run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
