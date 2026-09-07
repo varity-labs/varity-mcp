@@ -8,7 +8,8 @@ billing policy, or a second embedded-consumption path.
 ## Read first
 
 Cross-repository authority lives in the `varity-engineering` control
-repository, checked out at `/workspaces/varity-engineering/`:
+repository, checked out at `/home/macoding/varity-v2/varity-engineering/`
+on this host. Read its `CLAUDE.md` for current scope and retirement rules:
 
 1. `varity-engineering/CURRENT-STATE.md` for dated shipped, unfinished and
    blocker status, and `varity-engineering/repos.yaml` for repository topology.
@@ -24,7 +25,8 @@ operational truth.
 
 ## Actual runtime shape
 
-- Upstream callers are MCP clients over stdio or Streamable HTTP.
+- The published package serves MCP clients over stdio. Streamable HTTP
+  implementation remains in source; hosted MCP is retired.
 - Deployment mutations, template operations, login, and migration use the
   `varitykit` CLI adapter in `src/utils/cli-bridge.ts`.
 - Deployment/status/log and pricing reads use the owner-scoped public Varity
@@ -32,9 +34,9 @@ operational truth.
 - Several developer tools operate directly on the MCP host's filesystem or
   processes; this is naturally the user's machine in stdio mode, but not in a
   hosted HTTP process.
-- Hosted HTTP OAuth is not currently certified: the token verifier targets a
-  gateway route absent from the current release, and hosted/repository versions
-  differ. A health response is not authorization proof. See `ARCHITECTURE.md`.
+- Hosted MCP and its OAuth offering are retired under control `CLAUDE.md`.
+  Historical certification procedures in `ARCHITECTURE.md` do not authorize
+  reactivation.
 - The MCP never calls provider, static-storage, db-proxy, credential-proxy, or
   billing internals directly.
 
@@ -48,7 +50,7 @@ migrates callers and proves behavior through their interfaces.
 npm run build
 npm test
 npm run check:architecture
-npm run start:http
+npm start
 ```
 
 Publishing is a founder/release action. Keep `package.json` and
@@ -66,8 +68,7 @@ guard. Do not publish from an architecture-only branch.
   tokens as secrets.
 - Preserve stdio/HTTP differences deliberately. A local-filesystem tool is not
   automatically safe or meaningful in hosted HTTP mode.
-- Do not present `mcp.varity.so` as authenticated production access until the
-  exact-release OAuth and owner-binding certification bar passes.
+- Do not present retired `mcp.varity.so` as an active hosted offering.
 - Update `ARCHITECTURE.md` in the same change when ownership, an adapter
   interface, auth/custody, persistent or process-local state, transport
   topology, or failure semantics change.
@@ -81,3 +82,9 @@ guard. Do not publish from an architecture-only branch.
 - Dormant SDK, UI kit, types, create-app, SaaS-template, App Store, and
   blockchain-era code.
 - Provider-specific orchestration or a separate path for embedded consumers.
+
+## Agent skills
+
+- GitHub Issues and shared operations: [issue tracker](docs/agents/issue-tracker.md).
+- Canonical triage roles: [label mapping](docs/agents/triage-labels.md).
+- Existing ownership maps, decisions and code: [domain routes](docs/agents/domain.md).
