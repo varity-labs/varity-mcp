@@ -107,9 +107,6 @@ CURSOR (.cursor/mcp.json):
 CLAUDE CODE:
   claude mcp add varity -- npx -y @varity-labs/mcp
 
-HOSTED (Claude.ai / ChatGPT):
-  URL: https://mcp.varity.so
-
 DOCS: https://docs.varity.so/ai-tools/mcp-server-spec
 `);
 }

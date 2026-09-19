@@ -12,13 +12,18 @@ interface Check {
   fix?: string;
 }
 
+/** Node floor that agrees with package.json `engines.node` (">=22.11.0"). */
+const NODE_MAJOR = 22;
+const NODE_MINOR = 11;
+
 /**
- * Parse a semver-like version string and return the major version number.
- * Handles formats like "v18.17.0", "18.17.0", "v20.11.1", etc.
+ * Parse a semver-like version string and return its major/minor numbers.
+ * Handles formats like "v22.11.0", "22.11.0", "v24.0.1", etc.
  */
-function parseMajorVersion(raw: string): number | null {
-  const match = raw.trim().match(/v?(\d+)/);
-  return match ? parseInt(match[1]!, 10) : null;
+function parseNodeVersion(raw: string): { major: number; minor: number } | null {
+  const match = raw.trim().match(/v?(\d+)(?:\.(\d+))?/);
+  if (!match) return null;
+  return { major: parseInt(match[1]!, 10), minor: match[2] ? parseInt(match[2], 10) : 0 };
 }
 
 export function registerDoctorTool(server: McpServer): void {
@@ -39,11 +44,15 @@ export function registerDoctorTool(server: McpServer): void {
       const checks: Check[] = [];
       const nextSteps: string[] = [];
 
-      // 1. Node.js, require >= 18
+      // 1. Node.js, require >= 22.11 (matches package.json engines)
       const nodeResult = await execCLI("node", ["--version"], { timeout: 10_000 });
       if (nodeResult.exitCode === 0 && nodeResult.stdout) {
-        const major = parseMajorVersion(nodeResult.stdout);
-        if (major !== null && major >= 18) {
+        const detected = parseNodeVersion(nodeResult.stdout);
+        const meetsFloor =
+          detected !== null &&
+          (detected.major > NODE_MAJOR ||
+            (detected.major === NODE_MAJOR && detected.minor >= NODE_MINOR));
+        if (meetsFloor) {
           checks.push({
             name: "Node.js",
             status: "pass",
@@ -55,19 +64,19 @@ export function registerDoctorTool(server: McpServer): void {
             name: "Node.js",
             status: "fail",
             version: nodeResult.stdout.trim(),
-            message: `Node.js >= 18 is required (found ${nodeResult.stdout.trim()})`,
-            fix: "Install Node.js 18+ from https://nodejs.org",
+            message: `Node.js >= ${NODE_MAJOR}.${NODE_MINOR} is required (found ${nodeResult.stdout.trim()})`,
+            fix: `Install Node.js ${NODE_MAJOR}.${NODE_MINOR}+ from https://nodejs.org`,
           });
-          nextSteps.push("Install Node.js 18+ from https://nodejs.org");
+          nextSteps.push(`Install Node.js ${NODE_MAJOR}.${NODE_MINOR}+ from https://nodejs.org`);
         }
       } else {
         checks.push({
           name: "Node.js",
           status: "fail",
           message: "Node.js is not installed",
-          fix: "Install Node.js 18+ from https://nodejs.org",
+          fix: `Install Node.js ${NODE_MAJOR}.${NODE_MINOR}+ from https://nodejs.org`,
         });
-        nextSteps.push("Install Node.js 18+ from https://nodejs.org");
+        nextSteps.push(`Install Node.js ${NODE_MAJOR}.${NODE_MINOR}+ from https://nodejs.org`);
       }
 
       // 2. npm
@@ -84,9 +93,9 @@ export function registerDoctorTool(server: McpServer): void {
           name: "npm",
           status: "fail",
           message: "npm is not installed",
-          fix: "npm is included with Node.js, install Node.js 18+ from https://nodejs.org",
+          fix: `npm is included with Node.js, install Node.js ${NODE_MAJOR}.${NODE_MINOR}+ from https://nodejs.org`,
         });
-        nextSteps.push("Install Node.js 18+ from https://nodejs.org (includes npm)");
+        nextSteps.push(`Install Node.js ${NODE_MAJOR}.${NODE_MINOR}+ from https://nodejs.org (includes npm)`);
       }
 
       // 3. varitykit CLI

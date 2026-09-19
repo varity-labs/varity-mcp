@@ -79,7 +79,7 @@ the public interface or CLI did not return.
 | Public-interface client | stdio-only deploy-key auth, 60-second GET timeout, normalized error codes/actions; never receives an HTTP OAuth bearer | `src/utils/public-api.ts`; gateway adapter | adapter tests cover gateway configuration and timeout policy plus selected response projections |
 | Response module | `{success,data,message}` or MCP error `{success:false,error}` | `src/utils/responses.ts` | contract tests are currently missing |
 | Credential/config lookup | environment key first, then `~/.varitykit/config.json` | `src/utils/config.ts` | precedence/redaction tests are currently missing |
-| HTTP OAuth provider | proxies OAuth endpoints to `auth.varity.so`; verifies every `/mcp` bearer before the transport, rejects verification without a stable non-empty `user_id`, and binds each session to that verified principal; production verification currently targets a missing gateway route | `src/auth/provider.ts`, `src/auth/http-bearer.ts` | a real-package test proves anonymous rejection, missing-principal rejection, authenticated session continuity, cross-principal HTTP 403, and one bounded public-documentation tool result through the production verifier and tool implementations; live production verification and downstream owner equality are not certified |
+| HTTP OAuth provider | proxies OAuth endpoints to `auth.varity.so`; verifies every `/mcp` bearer before the transport, rejects verification without a stable non-empty `user_id`, and binds each session to that verified principal; production verification targets a gateway route absent from the published contract | `src/auth/provider.ts`, `src/auth/http-bearer.ts` | a real-package test proves anonymous rejection, missing-principal rejection, authenticated session continuity, cross-principal HTTP 403, and one bounded public-documentation tool result through the production verifier and tool implementations; live production verification and downstream owner equality are not certified |
 | Runtime telemetry | Optional MCP server spans, correlated logs, operation-duration metrics, startup custody, and error capture; stdout and protected inputs are excluded | `src/telemetry.ts`, `src/runtime-shutdown.ts`, `src/utils/logger.ts`; OTLP and error-ingest adapters | in-memory signal correlation, synthetic OTLP transport, secret allowlist, stdout, shutdown-flush, and failed-close custody tests |
 | Runtime container release | Tag `mcp-v<package-version>`; one globally locked run creates an official, commit-pinned Buildx `docker-container` builder, builds one candidate index with max provenance and an SBOM, accepts and attests its digest, revalidates both immutable aliases, then promotes to `v<version>`, bare semver, and `latest` | `Dockerfile`, `.dockerignore`, `.github/workflows/release-container.yml`; `scripts/release-alias-gate.mjs` exchanges the masked workflow credential for a repository-scoped GHCR bearer and treats only the exact manifest request's HTTP 404 plus `MANIFEST_UNKNOWN` as absence; `scripts/validate-release-evidence.mjs` validates the complete artifact; GitHub Actions owns build/push credentials; `scripts/release-auth-fixture.mjs` supplies only an ephemeral test principal | PR CI starts the Node 22 image and validates exact health; the workflow contract pins the official Buildx action, requires its attestation-capable driver before the only build; executable mock-transport tests prove present, absent, auth, throttling, outage, network, oversized, and malformed registry outcomes stay fail closed and credential opaque; a promotion-time recheck catches an intervening alias; evidence is exact and credential-opaque; every promoted alias resolves to the accepted digest |
 
@@ -133,11 +133,13 @@ design.
 
 The code configures OAuth authorization/token/registration endpoints at
 `auth.varity.so`, but `verifyAccessToken()` calls gateway
-`POST /api/auth/verify`. The gateway release current at the audit has no such
-route and the live endpoint returned HTTP 404 on 2026-07-18. The hosted process
-and current repository also reported different versions. These facts prove
-neither exact-release parity nor an authenticated protocol session. Hosted HTTP
-OAuth is not end-to-end certified.
+`POST /api/auth/verify`. That route is absent from the published contract
+(`GET varity.app/api/openapi.json`, version 2026-09-16, 34 paths, measured
+2026-09-19), so no client can depend on it. The gateway does answer the path
+(401 `invalid_token` without credentials), but a published-contract route is
+the only verifier this client may rely on. Hosted HTTP OAuth is therefore not
+end-to-end certified, and `mcp.varity.so` is retired (its `/health` returns
+404).
 
 Protocol authentication does not establish downstream owner equality. Option B
 therefore excludes every owner-scoped tool from hosted HTTP. The stdio-only

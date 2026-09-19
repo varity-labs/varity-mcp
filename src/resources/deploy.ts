@@ -5,7 +5,7 @@ export const DEPLOY_REFERENCE = `
 
 ## Prerequisites
 
-- **Node.js 18+** and npm/pnpm
+- **Node.js >= 22.11** and npm/pnpm
 - **Python 3.10+** (for varitykit CLI). Check your version: \`python3 --version\`
   - If you're on a system where upgrading Python is difficult (corporate machine, Linux distro with system Python 3.8), use **pyenv**: \`curl https://pyenv.run | bash\` then \`pyenv install 3.11 && pyenv global 3.11\`
   - Alternatively, install varitykit in an isolated environment: \`pip install pipx && pipx install varitykit\`
@@ -148,9 +148,7 @@ varitykit app templates      # List certified deploy templates
 varitykit app deploy         # Build and deploy
 varitykit app deploy --template <id>  # Deploy a certified template
 varitykit app list           # List your deployed apps
-varitykit deploy status      # Check deployment status
-varitykit deploy logs        # View deployment logs
-varitykit platforms          # List available target platforms
+varitykit app status         # Check deployment status
 \`\`\`
 
 ## ID Reference
