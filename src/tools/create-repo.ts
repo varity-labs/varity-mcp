@@ -7,8 +7,9 @@
  */
 
 import { z } from "zod";
-import { execFileSync, execSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
@@ -18,6 +19,7 @@ interface GitHubRepo {
   html_url: string;
   clone_url: string;
   ssh_url: string;
+  private: boolean;
 }
 
 /**
@@ -45,8 +47,14 @@ async function createEmptyGitHubRepo(
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: response.statusText })) as { message?: string };
-    if (response.status === 422 && error.message?.includes("already exists")) {
+    const error = await response.json().catch(() => ({ message: response.statusText })) as {
+      message?: string;
+      errors?: Array<{ code?: string; message?: string }>;
+    };
+    const nameAlreadyExists = error.errors?.some((item) =>
+      item.code === "already_exists" || item.message?.toLowerCase().includes("already exists")
+    );
+    if (response.status === 422 && (nameAlreadyExists || error.message?.toLowerCase().includes("already exists"))) {
       throw new Error(`Repository '${name}' already exists`);
     }
     throw new Error(error.message || `GitHub API error: ${response.statusText}`);
@@ -55,13 +63,12 @@ async function createEmptyGitHubRepo(
   return response.json();
 }
 
-const DEFAULT_IGNORES = [
+const DEFAULT_EXCLUDES = [
+  ".git/",
   "node_modules/",
   "__pycache__/",
   "*.pyc",
-  ".env",
-  ".env.local",
-  ".env.*.local",
+  ".env*",
   "dist/",
   "build/",
   ".venv/",
@@ -69,72 +76,192 @@ const DEFAULT_IGNORES = [
   ".DS_Store",
 ];
 
-function ensureGitignore(projectPath: string): void {
-  const gitignorePath = path.join(projectPath, ".gitignore");
+const SENSITIVE_BASENAMES = new Set([
+  ".git-credentials",
+  ".npmrc",
+  ".pypirc",
+  ".netrc",
+  ".dockercfg",
+  "credentials",
+  "credentials.json",
+  "application_default_credentials.json",
+  "service-account.json",
+  "service_account.json",
+  "id_rsa",
+  "id_dsa",
+  "id_ecdsa",
+  "id_ed25519",
+]);
+const SENSITIVE_DIRECTORIES = new Set([".aws", ".azure", ".kube"]);
+const SENSITIVE_EXTENSIONS = new Set([".pem", ".key", ".p12", ".pfx", ".jks", ".keystore"]);
 
-  let existing = "";
-  try {
-    existing = readFileSync(gitignorePath, "utf-8");
-  } catch {
-    // File doesn't exist, will create it
-  }
-
-  const existingLines = existing.split("\n").map((l) => l.trim());
-  const missing = DEFAULT_IGNORES.filter((entry) => {
-    const bare = entry.replace(/\/$/, "");
-    return !existingLines.some((l) => l === entry || l === bare);
-  });
-
-  if (missing.length === 0) return;
-
-  const separator = existing && !existing.endsWith("\n") ? "\n" : "";
-  const header = existing ? "\n# Added by Varity\n" : "# Common ignores\n";
-  writeFileSync(gitignorePath, existing + separator + header + missing.join("\n") + "\n");
+function isSensitivePath(relativePath: string): boolean {
+  const normalized = relativePath.split(path.sep).join("/");
+  const lowerNormalized = normalized.toLowerCase();
+  const segments = normalized.split("/");
+  const basename = segments.at(-1) ?? "";
+  const lower = basename.toLowerCase();
+  return (
+    basename.startsWith(".env") ||
+    SENSITIVE_BASENAMES.has(lower) ||
+    SENSITIVE_EXTENSIONS.has(path.posix.extname(lower)) ||
+    segments.some((segment) => SENSITIVE_DIRECTORIES.has(segment.toLowerCase())) ||
+    lowerNormalized.includes(".config/gcloud/") ||
+    lowerNormalized === ".docker/config.json" ||
+    lowerNormalized.endsWith("/.docker/config.json") ||
+    lowerNormalized === ".config/gh/hosts.yml" ||
+    lowerNormalized.endsWith("/.config/gh/hosts.yml") ||
+    /(?:^|[-_])service[-_]?account\.json$/i.test(basename) ||
+    /^(?:secret|secrets)\.json$/i.test(basename)
+  );
 }
 
-/**
- * Push local project directory to GitHub repo.
- * Handles: git init, remote setup, initial commit, push.
- */
-function pushLocalProject(projectPath: string, cloneUrl: string, token: string): void {
-  // Embed token in URL for authentication (HTTPS push)
-  const authUrl = cloneUrl.replace("https://", `https://${token}@`);
-  const opts = { cwd: projectPath, stdio: "pipe" as const };
+function findSensitivePaths(projectPath: string, directory = projectPath): string[] {
+  const matches: string[] = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const absolutePath = path.join(directory, entry.name);
+    const relativePath = path.relative(projectPath, absolutePath).split(path.sep).join("/");
+    if (isSensitivePath(relativePath)) {
+      matches.push(relativePath);
+      continue;
+    }
+    if (entry.isDirectory() && entry.name !== ".git") {
+      matches.push(...findSensitivePaths(projectPath, absolutePath));
+    }
+  }
+  return matches;
+}
 
-  // Init git if not already
-  try { execFileSync("git", ["init"], opts); } catch { /* already init */ }
+function refuseSensitivePaths(paths: string[]): void {
+  if (paths.length === 0) return;
+  throw new Error(
+    `Refusing to push credential-bearing paths: ${paths.sort().join(", ")}. ` +
+    "Remove them from the project and Git index, and store only reviewed, non-secret examples under different names."
+  );
+}
 
-  // Set git user config for automated environment (needed if no global config)
-  try { execFileSync("git", ["config", "user.email", "varity-mcp@varity.so"], opts); } catch { /* ok */ }
-  try { execFileSync("git", ["config", "user.name", "Varity MCP"], opts); } catch { /* ok */ }
-
-  // Set or update remote origin, authUrl passed as array arg, never shell-interpolated
+function isGitRepository(projectPath: string, env: NodeJS.ProcessEnv): boolean {
   try {
-    execFileSync("git", ["remote", "add", "origin", authUrl], opts);
+    return execFileSync("git", ["rev-parse", "--is-inside-work-tree"], {
+      cwd: projectPath,
+      env,
+      encoding: "utf8",
+      stdio: "pipe",
+    }).trim() === "true";
   } catch {
-    execFileSync("git", ["remote", "set-url", "origin", authUrl], opts);
+    return false;
+  }
+}
+
+function gitRepositoryRoot(projectPath: string, env: NodeJS.ProcessEnv): string {
+  return execFileSync("git", ["rev-parse", "--show-toplevel"], {
+    cwd: projectPath,
+    env,
+    encoding: "utf8",
+    stdio: "pipe",
+  }).trim();
+}
+
+function sanitizedGitEnvironment(): NodeJS.ProcessEnv {
+  const childEnv = { ...process.env };
+  for (const name of Object.keys(childEnv)) {
+    if (
+      name.startsWith("GIT_") ||
+      name === "GITHUB_TOKEN" ||
+      name === "GH_TOKEN"
+    ) {
+      delete childEnv[name];
+    }
+  }
+  return childEnv;
+}
+
+export interface PreparedLocalProject {
+  push(cloneUrl: string, token: string): void;
+  cleanup(): void;
+}
+
+/** Build a reviewed, hook-free snapshot before any remote repository exists. */
+export function prepareLocalProject(projectPath: string): PreparedLocalProject {
+  const childEnv = sanitizedGitEnvironment();
+  refuseSensitivePaths(findSensitivePaths(projectPath));
+  const localOpts = {
+    cwd: projectPath,
+    stdio: "pipe" as const,
+    env: childEnv,
+  };
+
+  if (isGitRepository(projectPath, childEnv)) {
+    const repositoryRoot = gitRepositoryRoot(projectPath, childEnv);
+    if (path.resolve(repositoryRoot) !== path.resolve(projectPath)) {
+      throw new Error(`Refusing to push parent repository ${repositoryRoot}; pass its exact root path.`);
+    }
   }
 
-  ensureGitignore(projectPath);
-
-  execFileSync("git", ["add", "-A"], opts);
-
-  // Commit (skip if nothing to commit)
+  const isolatedGitDirectory = mkdtempSync(path.join(tmpdir(), "varity-mcp-repository-"));
   try {
-    execFileSync("git", ["commit", "-m", "Initial commit"], opts);
-  } catch {
-    // Nothing to commit or already committed, ok
+    const isolatedGlobalConfig = path.join(isolatedGitDirectory, "global-config");
+    writeFileSync(isolatedGlobalConfig, "");
+    const isolatedEnv = {
+      ...childEnv,
+      GIT_DIR: isolatedGitDirectory,
+      GIT_WORK_TREE: projectPath,
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_CONFIG_GLOBAL: isolatedGlobalConfig,
+    };
+    const isolatedOpts = { ...localOpts, env: isolatedEnv };
+    execFileSync("git", ["init", "--template="], isolatedOpts);
+    const isolatedHooksDirectory = path.join(isolatedGitDirectory, "hooks-disabled");
+    mkdirSync(isolatedHooksDirectory);
+    execFileSync("git", ["config", "core.hooksPath", isolatedHooksDirectory], isolatedOpts);
+    execFileSync("git", ["config", "user.email", "varity-mcp@varity.so"], isolatedOpts);
+    execFileSync("git", ["config", "user.name", "Varity MCP"], isolatedOpts);
+    mkdirSync(path.join(isolatedGitDirectory, "info"), { recursive: true });
+    writeFileSync(path.join(isolatedGitDirectory, "info", "exclude"), `${DEFAULT_EXCLUDES.join("\n")}\n`);
+    execFileSync("git", ["add", "--", "."], isolatedOpts);
+    const stagedPaths = execFileSync("git", ["ls-files", "-z"], {
+      ...isolatedOpts,
+      encoding: "utf8",
+    }).split("\0").filter(Boolean);
+    refuseSensitivePaths(stagedPaths.filter((file) => isSensitivePath(file)));
+    execFileSync("git", ["commit", "-m", "Initial commit"], isolatedOpts);
+    let cleaned = false;
+    return {
+      push(cloneUrl: string, token: string): void {
+        const basicCredential = Buffer.from(`x-access-token:${token}`).toString("base64");
+        execFileSync("git", ["push", cloneUrl, "HEAD:main"], {
+          ...isolatedOpts,
+          env: {
+            ...isolatedEnv,
+            GIT_TERMINAL_PROMPT: "0",
+            // Supported by the repository's Git 2.25 host. The isolated
+            // hooks/config boundary prevents child processes from observing it.
+            GIT_CONFIG_PARAMETERS:
+              `'http.https://github.com/.extraheader=AUTHORIZATION: basic ${basicCredential}' ` +
+              `'credential.helper='`,
+          },
+        });
+      },
+      cleanup(): void {
+        if (cleaned) return;
+        cleaned = true;
+        rmSync(isolatedGitDirectory, { recursive: true, force: true });
+      },
+    };
+  } catch (error) {
+    rmSync(isolatedGitDirectory, { recursive: true, force: true });
+    throw error;
   }
+}
 
-  // Push to main branch (rename if needed)
+/** Prepare, push, and clean an isolated snapshot without mutating the caller. */
+export function pushLocalProject(projectPath: string, cloneUrl: string, token: string): void {
+  const prepared = prepareLocalProject(projectPath);
   try {
-    execFileSync("git", ["branch", "-M", "main"], opts);
-  } catch { /* ok */ }
-
-  execFileSync("git", ["push", "-u", "origin", "main", "--force"], opts);
-
-  // Remove token from remote URL immediately after push, token must not persist in .git/config
-  execFileSync("git", ["remote", "set-url", "origin", cloneUrl], opts);
+    prepared.push(cloneUrl, token);
+  } finally {
+    prepared.cleanup();
+  }
 }
 
 /**
@@ -174,7 +301,7 @@ export function registerCreateRepoTool(server: McpServer): void {
         "Pass the 'path' parameter with the local project directory. This creates an empty repo " +
         "and pushes your actual code to GitHub. " +
         "The GitHub URL is required for dynamic deployments, so call this before varity_deploy when you have code locally but no repo yet. " +
-        "Requires a GitHub personal access token (classic) with repo scope from https://github.com/settings/tokens.",
+        "Requires GitHub CLI authentication or a GITHUB_TOKEN/GH_TOKEN environment variable with repository access.",
       inputSchema: {
         name: z
           .string()
@@ -191,87 +318,74 @@ export function registerCreateRepoTool(server: McpServer): void {
             "(e.g. '/home/user/my-app'). Pushes the actual project code. " +
             "Required for apps that will use varity_deploy with dynamic hosting."
           ),
-        visibility: z.enum(["public", "private"]).default("public").describe("Repository visibility"),
-        github_token: z
-          .string()
-          .optional()
-          .describe("GitHub personal access token (optional if GITHUB_TOKEN env var is set). Needs 'repo' scope."),
+        visibility: z.enum(["public", "private"]).default("private").describe("Repository visibility"),
       },
       annotations: {
         destructiveHint: true,
       },
     },
-    async ({ name, description, path: projectPath, visibility, github_token }) => {
-      // Resolve token
-      let token = github_token || process.env.GITHUB_TOKEN;
+    async ({ name, description, path: projectPath, visibility }) => {
+      // Credentials are read from the MCP host, never accepted in tool arguments.
+      let token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
       if (!token) {
         try {
-          const ghToken = execSync("gh auth token", { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
+          const ghToken = execFileSync("gh", ["auth", "token"], {
+            encoding: "utf-8",
+            stdio: ["pipe", "pipe", "pipe"],
+          }).trim();
           if (ghToken) token = ghToken;
         } catch { /* gh CLI not available */ }
       }
       if (!token) {
         return errorResponse(
           "MISSING_TOKEN",
-          "GitHub token required. Either pass github_token parameter or set GITHUB_TOKEN environment variable.",
-          "Get a token from https://github.com/settings/tokens (needs 'repo' scope). Tip: Install the GitHub CLI (gh) and run 'gh auth login' for automatic token detection."
+          "GitHub authentication is required, but no GitHub CLI session or GITHUB_TOKEN/GH_TOKEN environment variable was found.",
+          "Run `gh auth login`, or set GITHUB_TOKEN/GH_TOKEN in the MCP process environment. Do not pass credentials in chat or tool arguments."
         );
       }
 
       try {
         if (projectPath) {
           // === PRIMARY FLOW: Push local project to GitHub repo ===
-          // First try to push to existing repo (update flow)
-          let repo: GitHubRepo;
-          let usedName = name;
-          let wasTaken = false;
-          let isUpdate = false;
-
+          let prepared: PreparedLocalProject;
           try {
-            // Check if repo already exists
-            const userRes = await fetch("https://api.github.com/user", { headers: { Authorization: `token ${token}` } });
-            const userData = await userRes.json() as { login: string };
-            const checkRes = await fetch(`https://api.github.com/repos/${userData.login}/${name}`, {
-              headers: { Authorization: `token ${token}` },
-            });
-            if (checkRes.ok) {
-              // Repo exists, push update to it
-              repo = await checkRes.json() as GitHubRepo;
-              isUpdate = true;
-            } else {
-              // Repo doesn't exist, create it
-              const result = await createRepoWithRetry(
-                (n) => createEmptyGitHubRepo(n, description, visibility, token!),
-                name
-              );
-              repo = result.repo;
-              usedName = result.usedName;
-              wasTaken = result.wasTaken;
-            }
-          } catch {
-            // Fallback, create new
-            const result = await createRepoWithRetry(
-              (n) => createEmptyGitHubRepo(n, description, visibility, token!),
-              name
+            prepared = prepareLocalProject(projectPath);
+          } catch (preflightError) {
+            return errorResponse(
+              "LOCAL_PROJECT_REFUSED",
+              `The local project could not be prepared safely: ${preflightError instanceof Error ? preflightError.message : String(preflightError)}`,
+              "Review the path and reported credential-bearing files. No GitHub repository was created."
             );
-            repo = result.repo;
-            usedName = result.usedName;
-            wasTaken = result.wasTaken;
+          }
+          try {
+          // This tool creates a new repository. A same-name repository is never
+          // reused: retry with a suffix so requested visibility cannot be
+          // bypassed by an existing public repository.
+          const result = await createRepoWithRetry(
+            (n) => createEmptyGitHubRepo(n, description, visibility, token!),
+            name
+          );
+          const { repo, usedName, wasTaken } = result;
+          if (repo.private !== (visibility === "private")) {
+            return errorResponse(
+              "VISIBILITY_MISMATCH",
+              `GitHub created ${repo.html_url} with visibility that does not match the request. No code was pushed.`,
+              "Inspect the repository visibility in GitHub before taking any further action."
+            );
           }
 
-          // Push local project to the repo (works for both new and existing)
+          // Push the preflighted snapshot only after repository creation.
           try {
-            pushLocalProject(projectPath, repo.clone_url, token!);
+            prepared.push(repo.clone_url, token!);
           } catch (pushErr) {
             const pushMsg = pushErr instanceof Error ? pushErr.message : String(pushErr);
             return errorResponse(
               "PUSH_FAILED",
-              `Repository ${isUpdate ? "exists" : "created"} at ${repo.html_url} but failed to push: ${pushMsg}`,
-              "Push manually: git init && git remote add origin " + repo.clone_url + " && git add -A && git commit -m 'Update' && git push -u origin main --force"
+              `Repository created at ${repo.html_url} but failed to push: ${pushMsg}`,
+              "Inspect the local Git status and remote history, confirm Git authentication is configured, then push the reviewed commit without force after resolving any divergence."
             );
           }
 
-          const gitpodUrl = `https://gitpod.io/#${repo.html_url}`;
           const nameNote = wasTaken
             ? `⚠️ '${name}' was already taken, repository created as '${usedName}'.`
             : undefined;
@@ -290,11 +404,14 @@ export function registerCreateRepoTool(server: McpServer): void {
               next_steps: [
                 `Repository: ${repo.html_url}`,
                 "Code pushed successfully, ready to deploy",
-                "Next: call varity_deploy to go live (the GitHub URL is now auto-configured)",
+                "Next: pass repo_url from this result to varity_deploy",
               ],
             },
             `Repository created and code pushed: ${repo.html_url}${nameNote ? ` (${nameNote})` : ""}`
           );
+          } finally {
+            prepared.cleanup();
+          }
 
         } else {
           return errorResponse(

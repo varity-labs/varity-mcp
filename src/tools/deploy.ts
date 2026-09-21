@@ -2,7 +2,8 @@ import { z } from "zod";
 import { access } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
-import { execCLI, execVaritykit, isCLIAvailable, stripAnsi } from "../utils/cli-bridge.js";
+import { execVaritykit, isCLIAvailable, stripAnsi } from "../utils/cli-bridge.js";
+import { lifecycleAcceptance } from "../utils/lifecycle-acceptance.js";
 
 /** Strip ANSI escape codes from CLI output before string matching. */
 // eslint-disable-next-line no-control-regex
@@ -11,19 +12,20 @@ function extractPublicVarityUrl(output: string): string | null {
   return match?.[0] ?? null;
 }
 
-function cardSlugFromUrl(rawUrl: string): string | null {
-  try {
-    const url = new URL(rawUrl);
-    if (url.hostname.endsWith(".varity.app")) {
-      return url.hostname.slice(0, -".varity.app".length);
-    }
-    if (url.hostname === "varity.app") {
-      return url.pathname.split("/").filter(Boolean)[0] ?? null;
-    }
-  } catch {
-    return null;
-  }
-  return null;
+export function deployAccepted(stdout: string, stderr = "") {
+  const output = stripAnsi(`${stdout}\n${stderr}`);
+  const acceptance = lifecycleAcceptance(stdout, "deploying");
+  const reportedUrl = extractPublicVarityUrl(output);
+  return successResponse(
+    {
+      accepted: true,
+      ...acceptance,
+      reported_url: reportedUrl,
+    },
+    acceptance.status_command
+      ? `Deploy accepted. Track its terminal outcome with: ${acceptance.status_command}`
+      : "The deploy command returned success without a durable tracking reference. A live deployment is not yet proven; inspect varity_deploy_status before reporting completion."
+  );
 }
 
 export function registerDeployTool(server: McpServer): void {
@@ -32,10 +34,8 @@ export function registerDeployTool(server: McpServer): void {
     {
       title: "Deploy to Production",
       description:
-        "Deploy the current project to production on Varity. " +
-        "Detects the framework, selects the right hosting, and ships it live at https://varity.app/<name>/. " +
-        "Zero configuration required. Paid apps bill up to a fixed monthly maximum for the reserved resources, prorated by running time; " +
-        "for an unchanged profile, traffic alone does not change the price. Static sites are free for verified accounts. " +
+        "Submit the current project to Varity's deployment owner through varitykit. " +
+        "The CLI and control plane detect the framework, select hosting, build, and manage lifecycle state. " +
         "Use this when a developer wants to deploy, publish, ship, or make their app live. " +
         "If the developer wants to deploy a certified template rather than their own code, " +
         "use varity_deploy_template instead. To stop a deployment and its billing, use varity_delete_deployment.",
@@ -75,14 +75,6 @@ export function registerDeployTool(server: McpServer): void {
             "building from source. Use when the developer has a container image rather than a repo/project. " +
             "Mutually exclusive with repo_url."
           ),
-        image_credentials: z
-          .object({
-            host: z.string().describe("registry host, e.g. ghcr.io or docker.io"),
-            username: z.string(),
-            password: z.string(),
-          })
-          .optional()
-          .describe("Pull credentials for a PRIVATE image registry. Omit for public images."),
         port: z
           .number()
           .int()
@@ -108,7 +100,7 @@ export function registerDeployTool(server: McpServer): void {
         destructiveHint: true, // Deploys real infrastructure
       },
     },
-    async ({ path, repo_url, app_name, image, image_credentials, port, volume_size, volume_path }) => {
+    async ({ path, repo_url, app_name, image, port, volume_size, volume_path }) => {
       // Check if varitykit is installed, auto-install if missing
       let hasVaritykit = await isCLIAvailable("varitykit");
       if (!hasVaritykit) {
@@ -141,41 +133,6 @@ export function registerDeployTool(server: McpServer): void {
         }
       }
 
-      // Pre-check Python version, varitykit requires 3.10+. Fail fast with an
-      // actionable message rather than letting varitykit crash with a confusing
-      // traceback (ImportError / SyntaxError).
-      {
-        const pyCmd = process.platform === "win32" ? "python" : "python3";
-        const pyCheck = await execCLI(pyCmd, ["--version"], { timeout: 5_000 });
-        if (pyCheck.exitCode === 0 && pyCheck.stdout) {
-          const verMatch = pyCheck.stdout.trim().match(/Python\s+(\d+)\.(\d+)/i);
-          const pyMajor = verMatch ? parseInt(verMatch[1]!, 10) : null;
-          const pyMinor = verMatch ? parseInt(verMatch[2]!, 10) : null;
-          const meetsReq =
-            pyMajor !== null &&
-            pyMinor !== null &&
-            (pyMajor > 3 || (pyMajor === 3 && pyMinor >= 10));
-          if (!meetsReq) {
-            const detected = pyCheck.stdout.trim();
-            return errorResponse(
-              "PYTHON_VERSION_REQUIRED",
-              `Deployment requires Python 3.10+ but ${detected} was detected. varitykit (the Varity deploy CLI) requires Python 3.10 or higher.`,
-              `Fix: upgrade Python to 3.10+ using one of these methods:\n\n` +
-              `  Fastest (pyenv, works on any machine):\n` +
-              `    curl https://pyenv.run | bash\n` +
-              `    pyenv install 3.11\n` +
-              `    pyenv global 3.11\n\n` +
-              `  macOS (Homebrew):\n` +
-              `    brew install python@3.11\n\n` +
-              `  Windows / direct download:\n` +
-              `    https://python.org/downloads  (pick 3.11 or 3.12)\n\n` +
-              `After upgrading, run varity_doctor to confirm everything is ready, then try deploying again.`
-            );
-          }
-        }
-        // If Python is not detectable, let varitykit surface the error naturally
-      }
-
       const cwd = path || process.cwd();
 
       // Validate that the project directory exists before attempting deploy
@@ -203,13 +160,6 @@ export function registerDeployTool(server: McpServer): void {
         // Docker-image source: forward to the CLI, which routes it to the
         // gateway-owned image deployment path (no clone/build).
         args.push("--image", image);
-        if (image_credentials) {
-          args.push(
-            "--image-registry", image_credentials.host,
-            "--image-username", image_credentials.username,
-            "--image-password", image_credentials.password,
-          );
-        }
         if (port) {
           args.push("--port", String(port));
         }
@@ -232,28 +182,7 @@ export function registerDeployTool(server: McpServer): void {
       });
 
       if (result.exitCode === 0) {
-        const output = stripAnsi(result.stdout + "\n" + result.stderr);
-
-        const deployUrl = extractPublicVarityUrl(output) ?? "Check varity_deploy_status for the URL";
-        const deploymentId = "unknown";
-        const cardSlug = cardSlugFromUrl(deployUrl);
-        const cardUrl = cardSlug ? `https://varity.app/card/${cardSlug}` : "";
-
-        return successResponse(
-          {
-            url: deployUrl,
-            deployment_id: deploymentId,
-            status: "deployed",
-            share_card: cardUrl || undefined,
-            share_image: cardUrl ? `${cardUrl}/image.png` : undefined,
-            next_steps: [
-              `App live at: ${deployUrl}`,
-              ...(cardUrl ? [`Share your deployment: ${cardUrl}`] : []),
-              `Manage at: https://developer.store.varity.so`,
-            ],
-          },
-          `Deployed successfully! Live at: ${deployUrl}${cardUrl ? ` | Share: ${cardUrl}` : ""}`
-        );
+        return deployAccepted(result.stdout, result.stderr);
       }
 
       // Deploy failed, parse error for helpful suggestion.
@@ -286,10 +215,7 @@ export function registerDeployTool(server: McpServer): void {
             ? `The deploy process was killed due to insufficient memory (exit code ${result.exitCode}). Build output:\n${output.slice(-2000)}`
             : `The deploy process crashed unexpectedly. Output:\n${output.slice(-2000)}`,
           isOom
-            ? "Not enough free RAM for the deploy process. To fix:\n" +
-              "1. Free up RAM by closing other applications.\n" +
-              "2. Or upgrade to a larger machine/instance type (Next.js builds need ~2 GB free RAM).\n" +
-              "3. If running in a cloud IDE or CI: set NODE_OPTIONS=--max-old-space-size=2048 in your environment before deploying."
+            ? "The local deploy process exhausted available memory. Free memory or use a larger development environment, then retry; the required memory depends on the project and build toolchain."
             : "Run varity_doctor to check your environment. If varitykit is broken, reinstall with: pip install --upgrade varitykit"
         );
       }
@@ -315,8 +241,8 @@ export function registerDeployTool(server: McpServer): void {
       ) {
         return errorResponse(
           "CLI_BROKEN",
-          "The varitykit CLI is installed but not working, Python cannot load it. This usually means Python 3.10+ is not active.",
-          "1. Check Python version: python3 --version (need 3.10+)\n2. Run varity_doctor for detailed diagnosis and fix instructions\n3. After fixing Python, reinstall: pip install --upgrade varitykit"
+          "The varitykit CLI is installed but not working; its runtime or dependencies could not load.",
+          "Run varity_doctor for detailed diagnosis, then reinstall in an isolated environment with: pipx install --force varitykit"
         );
       }
 

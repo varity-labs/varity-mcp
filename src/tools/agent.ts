@@ -2,6 +2,7 @@ import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { execVaritykit, isOutdatedVaritykit, VARITYKIT_UPGRADE_HINT } from "../utils/cli-bridge.js";
+import { lifecycleAcceptance } from "../utils/lifecycle-acceptance.js";
 
 /** The installed varitykit predates the `app templates` command. */
 class VaritykitOutdatedError extends Error {}
@@ -21,7 +22,7 @@ function catalogError(error: unknown) {
   );
 }
 
-interface TemplateMeta {
+export interface TemplateMeta {
   id: string;
   name?: string;
   description?: string;
@@ -37,8 +38,23 @@ interface TemplateMeta {
   certification?: { state?: string; reason?: string };
 }
 
-async function fetchTemplateCatalog(): Promise<TemplateMeta[]> {
-  const result = await execVaritykit("app", ["templates", "--json"], { timeout: 120_000 });
+export function templateDeployAccepted(template: TemplateMeta, name: string | undefined, stdout: string) {
+  const acceptance = lifecycleAcceptance(stdout, "deploying");
+  return successResponse(
+    {
+      template: template.id,
+      name: name || null,
+      accepted: true,
+      ...acceptance,
+    },
+    acceptance.status_command
+      ? `Template deploy accepted for ${template.name ?? template.id}. Track its terminal outcome with: ${acceptance.status_command}`
+      : `The template deploy command returned success for ${template.name ?? template.id} without a durable tracking reference. The terminal outcome is not proven; inspect varity_deploy_status before reporting completion.`
+  );
+}
+
+async function fetchTemplateCatalog(execute: typeof execVaritykit = execVaritykit): Promise<TemplateMeta[]> {
+  const result = await execute("app", ["templates", "--json"], { timeout: 120_000 });
   if (result.exitCode !== 0) {
     if (isOutdatedVaritykit(result)) throw new VaritykitOutdatedError();
     const detail = (result.stderr || result.stdout || "").trim() || "unknown error";
@@ -116,10 +132,14 @@ async function templateInfo(id: string) {
   }
 }
 
-async function deployTemplate(templateId: string, name?: string, env?: Record<string, string>) {
+export async function deployTemplate(
+  templateId: string,
+  name?: string,
+  execute: typeof execVaritykit = execVaritykit
+) {
   let template: TemplateMeta | undefined;
   try {
-    const templates = await fetchTemplateCatalog();
+    const templates = await fetchTemplateCatalog(execute);
     template = findTemplate(templates, templateId);
     if (!template) {
       return errorResponse(
@@ -132,42 +152,32 @@ async function deployTemplate(templateId: string, name?: string, env?: Record<st
     return catalogError(error);
   }
 
-  const providedKeys = new Set(env ? Object.keys(env) : []);
-  const missing = (template.requiredEnv ?? []).filter((key) => !providedKeys.has(key));
-  if (missing.length > 0) {
+  const requiredEnv = template.requiredEnv ?? [];
+  if (template.private || requiredEnv.length > 0) {
+    const restriction = [
+      template.private ? "private access" : null,
+      requiredEnv.length > 0 ? `required environment variables (${requiredEnv.join(", ")})` : null,
+    ].filter(Boolean).join(" and ");
     return errorResponse(
-      "MISSING_REQUIRED_ENV",
-      `Missing required environment variables: ${missing.join(", ")}.`,
-      `Call varity_template_info with template="${template.id}" to see the template contract.`
+      "SECURE_ENV_CONFIGURATION_REQUIRED",
+      `Template ${template.id} uses ${restriction}, which this MCP deployment tool does not configure.`,
+      "Configure and deploy private or secret-bearing templates through the Developer Portal or another approved secret-safe interface. Never place secret values in chat or MCP arguments."
     );
   }
 
   const args: string[] = ["deploy", "--template", template.id];
   if (name) args.push("--name", name);
-  if (env) {
-    for (const [key, value] of Object.entries(env)) {
-      args.push("--env", `${key}=${value}`);
-    }
-  }
 
-  const result = await execVaritykit("app", args, { timeout: 300_000 });
+  const result = await execute("app", args, { timeout: 300_000 });
   if (result.exitCode === 0) {
-    return successResponse(
-      {
-        template: template.id,
-        name: name || null,
-        deployed: true,
-        cli_output: result.stdout,
-      },
-      `Deployed ${template.name ?? template.id}. It may take a few minutes to become fully ready.\n\nCLI output:\n${result.stdout}`
-    );
+    return templateDeployAccepted(template, name, result.stdout);
   }
 
   const errorOutput = (result.stderr || result.stdout || "").trim();
   return errorResponse(
     "DEPLOY_FAILED",
     `Template deploy failed for ${template.id}: ${errorOutput || "unknown error"}`,
-    "Check that you are logged in, that required environment variables are correct, and that the account has sufficient credit."
+    "Check that you are logged in and inspect the CLI error before retrying."
   );
 }
 
@@ -204,20 +214,16 @@ export function registerAgentTools(server: McpServer): void {
       annotations: { destructiveHint: true },
       title: "Deploy a Varity Template",
       description:
-        "Deploy a certified Varity template through varitykit. Call varity_template_info first for required environment variables.",
+        "Deploy a public certified Varity template that declares no required environment variables. Private or secret-bearing templates are refused; call varity_template_info first.",
       inputSchema: {
         template: z.string().describe("Template ID from varity_list_templates."),
         name: z
           .string()
           .optional()
           .describe("Memorable deployment name. Defaults to <template>-derived name if omitted."),
-        env: z
-          .record(z.string(), z.string())
-          .optional()
-          .describe("Environment variables to pass to the template container as key-value strings."),
       },
     },
-    async ({ template, name, env }) => deployTemplate(template, name, env)
+    async ({ template, name }) => deployTemplate(template, name)
   );
 
   server.registerTool(
@@ -252,19 +258,15 @@ export function registerAgentTools(server: McpServer): void {
       annotations: { destructiveHint: true },
       title: "Deploy an AI Agent Template",
       description:
-        "Backward-compatible alias for varity_deploy_template. Deploys a certified Varity template by ID.",
+        "Backward-compatible alias for varity_deploy_template. Deploys only public certified templates with no required environment variables; private or secret-bearing templates are refused.",
       inputSchema: {
         agent: z.string().describe("Template ID from varity_list_templates."),
         name: z
           .string()
           .optional()
           .describe("Memorable deployment name. Defaults to <template>-derived name if omitted."),
-        env: z
-          .record(z.string(), z.string())
-          .optional()
-          .describe("Environment variables to pass to the template container as key-value strings."),
       },
     },
-    async ({ agent, name, env }) => deployTemplate(agent, name, env)
+    async ({ agent, name }) => deployTemplate(agent, name)
   );
 }

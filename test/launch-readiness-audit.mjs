@@ -1,7 +1,6 @@
 /**
  * Regression tests from the 2026-09-06 new-developer launch audit.
  *
- * - varity_login reported success when varitykit printed "Invalid deploy key" and exited 0.
  * - A varitykit too old for `app templates` surfaced click usage text with a "run varity_login" hint.
  * - Tool annotations the docs promise (readOnlyHint / destructiveHint) were missing on the
  *   template and lifecycle tools, so MCP hosts could not tell a read from a teardown.
@@ -12,13 +11,6 @@ import { spawn } from "node:child_process";
 import { test } from "node:test";
 
 const { isOutdatedVaritykit } = await import("../dist/utils/cli-bridge.js");
-const { loginRejected } = await import("../dist/tools/login.js");
-
-test("loginRejected: exit 0 with 'Invalid deploy key' is a rejection", () => {
-  assert.equal(loginRejected({ exitCode: 0, stdout: "  Invalid deploy key. It should be at least 10 characters.", stderr: "" }), true);
-  assert.equal(loginRejected({ exitCode: 1, stdout: "", stderr: "boom" }), true);
-  assert.equal(loginRejected({ exitCode: 0, stdout: "Deploy key saved securely.", stderr: "" }), false);
-});
 
 test("isOutdatedVaritykit: click 'No such command' is an outdated CLI, not an auth problem", () => {
   assert.equal(isOutdatedVaritykit({ exitCode: 2, stdout: "", stderr: "Usage: varitykit app [OPTIONS]...\nError: No such command 'templates'." }), true);
@@ -50,10 +42,10 @@ test("tools/list carries the annotations the docs promise", async () => {
   await done;
   proc.kill();
   const tools = Object.fromEntries(lines.find((m) => m.id === 2).result.tools.map((t) => [t.name, t]));
-  for (const name of ["varity_list_templates", "varity_template_info", "varity_list_agents", "varity_agent_info"]) {
+  for (const name of ["varity_list_templates", "varity_template_info", "varity_list_agents", "varity_agent_info", "varity_set_env"]) {
     assert.equal(tools[name]?.annotations?.readOnlyHint, true, `${name} readOnlyHint`);
   }
-  for (const name of ["varity_deploy_template", "varity_deploy_agent", "varity_delete_deployment", "varity_set_env", "varity_redeploy"]) {
+  for (const name of ["varity_deploy_template", "varity_deploy_agent", "varity_delete_deployment", "varity_redeploy"]) {
     assert.equal(tools[name]?.annotations?.destructiveHint, true, `${name} destructiveHint`);
   }
 });

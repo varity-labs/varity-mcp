@@ -20,9 +20,10 @@ export function registerPrompts(server: McpServer): void {
 
 Steps:
 1. Call varity_doctor to verify the environment
-2. Call varity_build to compile the project
-3. Call varity_deploy to deploy to production
-4. Call varity_open_browser to view the live app`,
+2. Fix any deployment prerequisites reported by varity_doctor
+3. Call varity_deploy once; it delegates build and deployment to varitykit
+4. Track the returned run when available, or call varity_deploy_status
+5. Open the URL only after the deployment owner reports it live`,
           },
         },
       ],

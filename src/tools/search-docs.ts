@@ -3,21 +3,25 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { INFRASTRUCTURE } from "../utils/config.js";
 
-// Thin proxy to the LIVE documentation. The package ships no embedded doc corpus.
-// content is fetched from docs.varity.so at runtime (cached for the process), so the
-// docs are always current and nothing goes stale inside the published package.
+// Thin proxy to live documentation. The package ships no embedded doc corpus.
+// A short bounded cache avoids a network request per tool call without turning
+// one process's first response into permanent documentation authority.
 
 interface DocSection {
   title: string;
   body: string;
 }
 
-let sectionsCache: DocSection[] | null = null;
+const DOC_CACHE_TTL_MS = 5 * 60 * 1000;
+let sectionsCache: { sections: DocSection[]; fetchedAt: number } | null = null;
 let lastFetchFailure: string | null = null;
 
 /** Fetch the live llms docs (full content, falling back to the index) and split into sections. */
 async function getDocSections(): Promise<DocSection[]> {
-  if (sectionsCache) return sectionsCache;
+  if (sectionsCache && Date.now() - sectionsCache.fetchedAt < DOC_CACHE_TTL_MS) {
+    return sectionsCache.sections;
+  }
+  lastFetchFailure = null;
   const sources = [
     `${INFRASTRUCTURE.DOCS}/llms-full.txt`,
     `${INFRASTRUCTURE.DOCS}/llms.txt`,
@@ -26,8 +30,12 @@ async function getDocSections(): Promise<DocSection[]> {
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 6000);
-      const res = await fetch(url, { signal: controller.signal });
-      clearTimeout(timeout);
+      let res: Response;
+      try {
+        res = await fetch(url, { signal: controller.signal });
+      } finally {
+        clearTimeout(timeout);
+      }
       if (!res.ok) {
         lastFetchFailure = `${url} returned HTTP ${res.status}`;
         continue;
@@ -35,7 +43,7 @@ async function getDocSections(): Promise<DocSection[]> {
       const text = await res.text();
       const sections = splitIntoSections(text);
       if (sections.length) {
-        sectionsCache = sections;
+        sectionsCache = { sections, fetchedAt: Date.now() };
         return sections;
       }
     } catch (err) {
@@ -89,7 +97,7 @@ export function registerSearchDocsTool(server: McpServer): void {
       title: "Search Varity Docs",
       description:
         "Search the live Varity documentation for how-to guides, getting-started tutorials, " +
-        "deployment, supported stacks, pricing, and troubleshooting. Always reflects the current docs.",
+        "deployment, supported stacks, pricing, and troubleshooting. Content is fetched from the live docs with a five-minute cache.",
       inputSchema: {
         query: z
           .string()

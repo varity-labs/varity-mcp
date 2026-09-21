@@ -26,18 +26,14 @@ refs, CI receipts, and fresh live evidence own those facts.
 
 ## Actual runtime shape
 
-- The published package serves MCP clients over stdio. Streamable HTTP
-  implementation remains in source; hosted MCP is retired.
+- The published package serves MCP clients over stdio only. Hosted MCP, its
+  OAuth adapter, and its container release lane are retired and absent here.
 - Deployment mutations, template operations, login, and migration use the
   `varitykit` CLI adapter in `src/utils/cli-bridge.ts`.
 - Deployment/status/log and pricing reads use the owner-scoped public Varity
   interface through `src/utils/public-api.ts`.
 - Several developer tools operate directly on the MCP host's filesystem or
-  processes; this is naturally the user's machine in stdio mode, but not in a
-  hosted HTTP process.
-- Hosted MCP and its OAuth offering are retired under control `CLAUDE.md`.
-  Historical certification procedures in `ARCHITECTURE.md` do not authorize
-  reactivation.
+  processes; in stdio mode this is the invoking user's machine.
 - The MCP never calls provider, static-storage, db-proxy, credential-proxy, or
   billing internals directly.
 
@@ -64,12 +60,11 @@ guard. Do not publish from an architecture-only branch.
 - Do not expose internal infrastructure or provider vocabulary in user-facing
   tool descriptions.
 - Do not hardcode pricing; call the public pricing interface.
-- Do not place credentials in arguments that are logged, responses, docs, or
-  fixtures. Treat registry passwords, GitHub tokens, deploy keys, and OAuth
-  tokens as secrets.
-- Preserve stdio/HTTP differences deliberately. A local-filesystem tool is not
-  automatically safe or meaningful in hosted HTTP mode.
-- Do not present retired `mcp.varity.so` as an active hosted offering.
+- Do not place credentials in tool arguments, command arguments, logged values,
+  responses, docs, or fixtures. Treat registry passwords, GitHub tokens, and
+  deploy keys as secrets.
+- Do not reintroduce a network transport or present retired `mcp.varity.so` as
+  an active offering without a separately governed architecture change.
 - Update `ARCHITECTURE.md` in the same change when ownership, an adapter
   interface, auth/custody, persistent or process-local state, transport
   topology, or failure semantics change.

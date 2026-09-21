@@ -33,7 +33,7 @@ test("logger preserves stdout as a clean JSON-RPC channel", () => {
   assert.equal(entries[3].headers, undefined);
   assert.equal(entries[3].sessionId, undefined);
   assert.equal(entries[3].ip, undefined);
-  assert.equal(entries[3]["http.request.method"], "OTHER");
-  assert.equal(entries[3]["url.path"], "/_other");
+  assert.equal(entries[3]["http.request.method"], undefined);
+  assert.equal(entries[3]["url.path"], undefined);
   assert.doesNotMatch(result.stderr, /synthetic-secret|synthetic-session|203\.0\.113\.10/);
 });

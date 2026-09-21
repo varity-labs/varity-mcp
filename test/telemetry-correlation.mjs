@@ -25,12 +25,11 @@ test("MCP operation spans, logs, and metrics correlate without capturing protect
 
   assert.equal(startTelemetry({
     version: "test",
-    transport: "stdio",
     exporters: { spans, logs, metrics },
   }), true);
 
   const server = new McpServer({ name: "telemetry-test", version: "1.0.0" });
-  instrumentMcpServer(server, "stdio");
+  instrumentMcpServer(server);
   server.registerTool("safe_tool", { description: "Test tool" }, async () => ({
     content: [{ type: "text", text: protectedValue }],
   }));
@@ -114,10 +113,10 @@ test("error-only telemetry wraps MCP handlers and captures failure results witho
     async flush() {},
     async shutdown() { shutdownCalled = true; },
   };
-  assert.equal(startTelemetry({ version: "test", transport: "stdio", errorSink }), true);
+  assert.equal(startTelemetry({ version: "test", errorSink }), true);
 
   const server = new McpServer({ name: "error-only-test", version: "1.0.0" });
-  instrumentMcpServer(server, "stdio");
+  instrumentMcpServer(server);
   server.registerTool("known_tool", { description: "Known test tool" }, async () => ({
     content: [{ type: "text", text: "ok" }],
   }));
@@ -150,7 +149,7 @@ function wrappedHandler(handler) {
       registered = next;
     },
   };
-  instrumentMcpServer({ server: protocol }, "stdio");
+  instrumentMcpServer({ server: protocol });
   protocol.setRequestHandler({}, handler);
   assert.ok(registered);
   return registered;
@@ -182,7 +181,6 @@ test("a throwing error sink cannot replace an MCP error result", async () => {
   const canary = "capture-sink-result-canary";
   assert.equal(startTelemetry({
     version: "test",
-    transport: "stdio",
     errorSink: captureThrowingSink(canary),
   }), true);
   const result = { isError: true, content: [{ type: "text", text: "original result" }] };
@@ -199,7 +197,6 @@ test("a throwing error sink cannot replace a handler exception", async () => {
   const canary = "capture-sink-exception-canary";
   assert.equal(startTelemetry({
     version: "test",
-    transport: "stdio",
     errorSink: captureThrowingSink(canary),
   }), true);
   const original = new Error("original handler failure");
@@ -212,8 +209,8 @@ test("a throwing error sink cannot replace a handler exception", async () => {
   await stopTelemetry();
 });
 
-test("failure projection records only the four bounded observed lifecycle stages", () => {
-  const stages = ["mcp_handler", "http_request", "runtime_start", "runtime_shutdown"];
+test("failure projection records only the three bounded observed lifecycle stages", () => {
+  const stages = ["mcp_handler", "runtime_start", "runtime_shutdown"];
   for (const stage of stages) {
     const attributes = failureAttributes("inspect_correlated_trace_before_retry", "synthetic_failure", stage);
     assert.equal(attributes.lifecycle_stage, stage);

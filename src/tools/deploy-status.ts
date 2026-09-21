@@ -17,15 +17,20 @@ interface DeploymentRecord {
   appName: string;
   runtime: string;
   billing?: Record<string, unknown> | null;
+  http_probe?: HttpProbe;
+}
+
+export interface HttpProbe {
+  outcome: "reachable" | "http_error" | "network_error" | "not_applicable";
   http_status?: number;
   latency_ms?: number;
 }
 
 export async function checkLiveness(
   url: string
-): Promise<{ live: boolean; httpStatus?: number; latencyMs?: number }> {
+): Promise<HttpProbe> {
   if (!url || url === "unknown" || !url.startsWith("http")) {
-    return { live: false };
+    return { outcome: "not_applicable" };
   }
   try {
     const start = Date.now();
@@ -34,21 +39,20 @@ export async function checkLiveness(
       signal: AbortSignal.timeout(8000),
       redirect: "follow",
     });
-    return { live: res.ok, httpStatus: res.status, latencyMs: Date.now() - start };
+    return {
+      outcome: res.ok ? "reachable" : "http_error",
+      http_status: res.status,
+      latency_ms: Date.now() - start,
+    };
   } catch {
-    return { live: false };
+    return { outcome: "network_error" };
   }
 }
 
-async function applyLiveness(deployments: DeploymentRecord[]): Promise<void> {
+export async function applyLiveness(deployments: DeploymentRecord[]): Promise<void> {
   const results = await Promise.all(deployments.map((d) => checkLiveness(d.url)));
   for (let i = 0; i < deployments.length; i++) {
-    const { live, httpStatus, latencyMs } = results[i]!;
-    if ((deployments[i]!.status === "deployed" || deployments[i]!.status === "live") && !live) {
-      deployments[i]!.status = "unhealthy";
-    }
-    if (httpStatus !== undefined) deployments[i]!.http_status = httpStatus;
-    if (latencyMs !== undefined) deployments[i]!.latency_ms = latencyMs;
+    deployments[i]!.http_probe = results[i]!;
   }
 }
 
@@ -87,7 +91,8 @@ export function registerDeployStatusTool(server: McpServer): void {
       title: "Deployment Status",
       description:
         "List deployments or get status of a specific deployment. " +
-        "Shows URL, status, framework, size, and creation time. " +
+        "Shows the owner-scoped fields returned by the Varity public interface, including URL, status, runtime when available, and creation time. " +
+        "A separate HTTP probe records reachability without overwriting the owner's lifecycle status; authenticated, POST-only, or transiently unavailable apps may return a non-2xx probe. " +
         "Use this when a developer asks about their deployments, wants to check status, " +
         "or needs to find a deployment URL.",
       inputSchema: {

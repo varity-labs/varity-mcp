@@ -46,10 +46,10 @@ test("standard OTEL environment reaches all local OTLP HTTP signal paths without
     startTelemetry,
     stopTelemetry,
   } = await import("../dist/telemetry.js");
-  assert.equal(startTelemetry({ version: "test", transport: "http" }), true);
+  assert.equal(startTelemetry({ version: "test" }), true);
 
   const server = new McpServer({ name: "otlp-test", version: "1.0.0" });
-  instrumentMcpServer(server, "http");
+  instrumentMcpServer(server);
   server.registerTool("otlp_tool", { description: "OTLP path test" }, async () => ({
     content: [{ type: "text", text: "ok" }],
   }));

@@ -19,9 +19,7 @@ import { registerAgentTools } from "./tools/agent.js";
 import { registerDeleteDeploymentTool } from "./tools/delete-deployment.js";
 import { registerSetEnvTool } from "./tools/set-env.js";
 import { registerRedeployTool } from "./tools/redeploy.js";
-import { createOAuthProvider } from "./auth/provider.js";
 import { instrumentMcpServer } from "./telemetry.js";
-import type { OAuthServerProvider } from "@modelcontextprotocol/sdk/server/auth/provider.js";
 
 const require = createRequire(import.meta.url);
 const packageMetadata = require("../package.json") as { version?: unknown };
@@ -31,8 +29,6 @@ if (typeof packageMetadata.version !== "string" || packageMetadata.version.lengt
 }
 
 export const VERSION = packageMetadata.version;
-
-export type TransportMode = "stdio" | "http";
 
 /**
  * Create and configure the Varity MCP Server.
@@ -45,38 +41,22 @@ export type TransportMode = "stdio" | "http";
  *   - Discovery: search-docs, cost-calculator, doctor
  *   - Setup: install-deps, build, login
  *   - Deploy own code: deploy, deploy-status, deploy-logs, delete-deployment
- *   - Operate: set-env, redeploy (trackable configuration reapply; not verified restart)
+ *   - Operate: secret-safe set-env compatibility route; redeploy (trackable configuration reapply; not verified restart)
  *   - Deploy certified templates: list-templates, template-info, deploy-template
- *   - Hosted HTTP: authenticated live documentation search only
- *   - Local-dev (stdio only): open-browser, dev-server
+ *   - Local development: open-browser, dev-server
  *   - Project ops: create-repo, migrate
  */
-export function createVarityServer(
-  mode: TransportMode = "stdio",
-  httpAuthProvider?: OAuthServerProvider,
-): McpServer {
-  const authProvider = mode === "http"
-    ? httpAuthProvider ?? createOAuthProvider()
-    : undefined;
+export function createVarityServer(): McpServer {
   const server = new McpServer({
     name: "varity",
     version: VERSION,
-    ...(authProvider ? { authProvider } : {}),
   });
 
   // Instrument the registration seam once so every resource, prompt, and tool
   // runs inside the same secret-safe MCP server span implementation.
-  instrumentMcpServer(server, mode);
+  instrumentMcpServer(server);
 
-  // Hosted HTTP is intentionally a minimal authenticated public-read surface.
-  // It never touches the server filesystem, spawns a process, mutates Varity,
-  // or reads customer data through the host's deploy key.
-  if (mode === "http") {
-    registerSearchDocsTool(server);
-    return server;
-  }
-
-  // ── Resources (deploy reference for local AI context) ──
+  // ── Resources (stable routes to live owners) ──
   registerResources(server);
 
   // ── Prompts (local workflows may use filesystem/process tools) ──

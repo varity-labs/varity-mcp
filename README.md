@@ -8,9 +8,8 @@
 
 This repository contains only `@varity-labs/mcp`, the npm MCP server. It is a thin tool wrapper around `varitykit` and Varity's gateway APIs; it is not the Python CLI, the portal, the dormant SDK, or an app-store package.
 
-The Varity MCP Server lets your AI editor build, deploy, and manage supported apps in production for you. Each paid app bills up to a fixed monthly maximum for the resources it reserves, prorated by running time; static sites are free for verified accounts. One server, every AI client, zero commands.
+The Varity MCP Server lets a supported local AI coding client build, deploy, and manage supported apps in production for you.
 
-**Browser usage**: see the [browser usage guide](https://docs.varity.so/ai-tools/browser-usage) for Claude.ai or ChatGPT browser.
 **Quick start**: pick your editor below and run one command.
 
 ## Install
@@ -58,13 +57,6 @@ Add to `mcp_config.json`:
 }
 ```
 
-### Claude.ai / ChatGPT (HTTP)
-
-The hosted endpoint `mcp.varity.so` is retired. Browser-based tools that only
-accept a remote MCP URL are not supported today; use the stdio package from
-Claude Code, Cursor, VS Code, or Windsurf. Every filesystem, process,
-deployment, customer-data, and mutation tool is stdio-only.
-
 ### Any MCP-compatible client (stdio)
 
 ```json
@@ -87,10 +79,10 @@ The MCP exposes Varity's deploy surface so your AI tool can take action — not 
 - "Ship this app live"
 - "What would it cost to deploy this on Varity?"
 
-**Deploy a certified template (one command, no code required)**
+**Deploy a supported public template (one command, no code required)**
 - "What templates can Varity deploy?"
-- "Spin up Agent Zero"
-- "Deploy a private app template for me"
+- "Which templates need no secrets?"
+- "Deploy this public, secret-free template for me"
 
 **Manage live deployments**
 - "Show my deployments"
@@ -98,47 +90,47 @@ The MCP exposes Varity's deploy surface so your AI tool can take action — not 
 - "Stop my-app and stop billing it"
 - "Get the build logs for my deployment"
 
-**Migrate from Vercel**
-- "Migrate my Vercel app at github.com/me/my-app to Varity"
-- "Preview what changes the migration will make"
+**Preview a Vercel migration**
+- "Preview what would change when migrating github.com/me/my-app"
+- "Show me the Vercel-specific artifacts to replace"
 
 **Docs and pricing**
 - "Search Varity docs for environment variables"
-- "How much would it cost to host a 5,000-user API on Varity?"
-- "What's my monthly cost going to be if my app gets traction?"
+- "What is the current estimate for this pricing profile?"
+- "What billing projection does my deployed app report?"
 
 ## Tools
 
 | Tool | What it does |
 |---|---|
 | `varity_search_docs` | Search the Varity documentation |
-| `varity_cost_calculator` | Estimate your monthly cost before you deploy |
+| `varity_cost_calculator` | Project the live owner's monthly or hourly estimate without converting units |
 | `varity_doctor` | Check that your environment is ready to deploy |
-| `varity_login` | Authenticate with your deploy key |
+| `varity_login` | Check authentication and route login through the trusted `varitykit auth login` terminal flow |
 | `varity_install_deps` | Install project dependencies |
 | `varity_build` | Build the project |
-| `varity_open_browser` | Open a URL locally (stdio transports only) |
-| `varity_dev_server` | Start the local development server (stdio transports only) |
+| `varity_open_browser` | Open a URL locally |
+| `varity_dev_server` | Start the local development server |
 | `varity_create_repo` | Create a GitHub repository and push the project |
 | `varity_deploy` | Deploy the current project to production |
 | `varity_deploy_status` | Check the status of a deployment |
 | `varity_deploy_logs` | Read build and runtime logs |
 | `varity_delete_deployment` | Stop a deployment and end its billing |
-| `varity_set_env` | Set or replace environment variables on a live deployment, then redeploy |
+| `varity_set_env` | Preserve the public tool route while refusing secret values and directing configuration to a secret-safe interface |
 | `varity_redeploy` | Reapply an existing deployment's saved configuration; unchanged input may be a no-op |
 | `varity_list_templates` | List certified gateway-owned Varity templates |
 | `varity_template_info` | Show full details for one certified template |
-| `varity_deploy_template` | Deploy a certified template by ID |
+| `varity_deploy_template` | Deploy a public certified template with no required secrets; refuse private or secret-bearing templates |
 | `varity_list_agents` | Backward-compatible alias for `varity_list_templates` |
 | `varity_agent_info` | Backward-compatible alias for `varity_template_info` |
 | `varity_deploy_agent` | Backward-compatible alias for `varity_deploy_template` |
-| `varity_migrate` | Migrate an app from Vercel to Varity |
+| `varity_migrate` | Preview Vercel-to-Varity source transformations without mutating or deploying |
 
 ## Templates
 
-Varity templates come from the gateway-owned certified catalog. Ask your AI editor "what templates can I deploy?" or "deploy Agent Zero for me" and it will list the live catalog, inspect that template contract, and deploy it through `varitykit app deploy --template <id>`.
+Varity templates come from the gateway-owned certified catalog. Ask your AI editor "what templates can I deploy?" and it will list the live catalog and inspect each template contract. The MCP deploy tool supports only public templates that declare no required environment variables; it refuses private or secret-bearing templates and routes those through an approved secret-safe interface.
 
-Each template reserves different hardware. Use `varity_template_info` to see the required environment variables, private/public access mode, resources, hardware profile, and certification state before deploying.
+Each template reserves different hardware. Use `varity_template_info` to see the required environment variables, private/public access mode, resources, hardware profile, and certification state before deciding whether the MCP can deploy it.
 
 ## End-to-end example
 
@@ -146,55 +138,40 @@ From empty folder to deployed app, all in natural language:
 
 ```
 You: "Make me a simple landing page for my coffee shop and deploy it"
-AI:  Wrote the landing page, ran the build, deployed live at
-     https://varity.app/coffee-shop/
+AI:  Wrote the landing page and ran its local build.
+AI:  Deploy accepted. Tracking its durable run until the owner reports a terminal outcome.
+AI:  The status owner now reports the app live at https://varity.app/coffee-shop/
 
 You: "Now deploy Agent Zero"
 AI:  Agent Zero is certified and does not require environment variables.
-AI:  Deployed Agent Zero at https://varity.app/my-agent/
+AI:  Template deploy accepted. No live URL is claimed until varity_deploy_status proves it.
 ```
 
-## How Varity is priced
+## Pricing
 
-- **Fixed monthly maximum per app**: set by the resources your app reserves, billed prorated by running time. Static sites are free for verified accounts.
-- **No usage meters**: for an unchanged profile, traffic alone does not change the price. Changing resources, services, replicas, accelerators, or app count can.
-- **Preset resource menu**: dynamic apps select a Managed Cloud preset (Starter, Growth, Scale, Pro); presets differ in reserved resources, not gated features.
+Pricing profiles and values are owned by Varity's live public interface. Ask
+your AI editor to use `varity_cost_calculator` for a current estimate; this
+package intentionally embeds no price table or billing-policy copy.
 
-Ask your AI editor "how much would this app cost on Varity?" and it will use `varity_cost_calculator` to estimate before you deploy.
+## Transport
 
-## Transports
-
-### stdio (default)
-
-For desktop AI editors. Cursor, Claude Code, VS Code, Windsurf.
+The package supports stdio for local MCP clients such as Cursor, Claude Code,
+VS Code, and Windsurf.
 
 ```bash
 npx -y @varity-labs/mcp
 ```
 
-### HTTP
-
-For browser-based AI tools. Claude.ai, ChatGPT.
-
-```bash
-npx -y @varity-labs/mcp --transport http --port 3100
-```
-
-The HTTP transport is for self-hosting only; the former hosted endpoint
-`mcp.varity.so` is retired. Its tool allowlist contains only
-`varity_search_docs`; use stdio for every other operation.
+The former hosted endpoint and network transport are retired. Browser clients
+that require a remote MCP URL are not supported by this package.
 
 ## Prerequisites
 
 - **Node.js** >= 22.11 (the current supported LTS baseline; EOL Node 18/20 are unsupported)
 - **For deployment**: `pip install varitykit`
 
-## Cost
-
-Varity bills each paid deployment up to a fixed monthly maximum for the reserved profile, prorated by running time. For an unchanged profile, the bill does not grow with traffic, requests, or build minutes. Static sites are free for verified accounts. Use the `varity_cost_calculator` tool from your AI editor for a detailed estimate before you deploy.
-
 ---
 
-**Deploy supported apps from your AI coding tool.** Resource-based pricing with a fixed monthly maximum per app — no usage meters.
+**Deploy supported apps from your AI coding tool.**
 
 [Documentation](https://docs.varity.so/ai-tools/mcp-server-spec) · [GitHub](https://github.com/varity-labs/varity-mcp) · [Discord](https://discord.gg/7vWsdwa2Bg)
