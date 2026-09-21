@@ -47,7 +47,9 @@ flowchart LR
   SERVER --> TELEMETRY[Secret-safe telemetry] --> OTLP[Configured OTLP/error endpoints]
 ```
 
-Every mutation reaches the same downstream control plane through `varitykit`.
+Deployment-lifecycle mutations reach the downstream control plane through
+`varitykit`. Local build, dependency, browser, development-server, and
+repository helpers remain local adapters, as the routing table below records.
 MCP output is a projection of downstream truth: process exit can prove command
 acceptance, but only a durable run or owner-scoped status read can prove later
 lifecycle state.
@@ -100,8 +102,9 @@ alternate flag on this process.
 
 `varity_create_repo` never accepts a credential as MCP input. It reads
 `GITHUB_TOKEN`/`GH_TOKEN` or `gh auth token`, passes the credential to Git only
-through ephemeral environment-backed configuration, stores a credential-free
-remote, stages only the selected project path, and never force-pushes.
+through ephemeral environment-backed configuration, pushes without changing
+the caller's Git configuration, stages only the selected project path, and
+never force-pushes. Its returned `repo_url` is the handoff to `varity_deploy`.
 
 Telemetry is opt-in. Standard `OTEL_EXPORTER_OTLP_*` configuration controls
 OTLP export and `BETTERSTACK_MCP_DSN` controls optional error capture. Telemetry

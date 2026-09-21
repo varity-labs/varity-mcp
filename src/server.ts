@@ -17,6 +17,7 @@ import { registerLoginTool } from "./tools/login.js";
 import { registerMigrateTool } from "./tools/migrate.js";
 import { registerAgentTools } from "./tools/agent.js";
 import { registerDeleteDeploymentTool } from "./tools/delete-deployment.js";
+import { registerSetEnvTool } from "./tools/set-env.js";
 import { registerRedeployTool } from "./tools/redeploy.js";
 import { instrumentMcpServer } from "./telemetry.js";
 
@@ -40,7 +41,7 @@ export const VERSION = packageMetadata.version;
  *   - Discovery: search-docs, cost-calculator, doctor
  *   - Setup: install-deps, build, login
  *   - Deploy own code: deploy, deploy-status, deploy-logs, delete-deployment
- *   - Operate: redeploy (trackable configuration reapply; not verified restart)
+ *   - Operate: secret-safe set-env compatibility route; redeploy (trackable configuration reapply; not verified restart)
  *   - Deploy certified templates: list-templates, template-info, deploy-template
  *   - Local development: open-browser, dev-server
  *   - Project ops: create-repo, migrate
@@ -79,6 +80,7 @@ export function createVarityServer(): McpServer {
   registerDeployStatusTool(server);
   registerDeployLogsTool(server);
   registerDeleteDeploymentTool(server);
+  registerSetEnvTool(server);
   registerRedeployTool(server);
   registerAgentTools(server);
   registerMigrateTool(server);

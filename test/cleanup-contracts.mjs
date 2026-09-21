@@ -19,7 +19,6 @@ test("retired hosted transport and container release files stay absent", async (
     "scripts/validate-release-evidence.mjs",
     "src/auth/http-bearer.ts",
     "src/auth/provider.ts",
-    "src/tools/set-env.ts",
     "test/http-auth.mjs",
     "test/container-release.mjs",
   ];
@@ -58,7 +57,8 @@ test("local repository helper keeps credentials and history fail closed", async 
   assert.match(createRepo, /GIT_CONFIG_PARAMETERS/);
   assert.doesNotMatch(createRepo, /GIT_CONFIG_COUNT:|GIT_CONFIG_KEY_0:|GIT_CONFIG_VALUE_0:/);
   assert.match(createRepo, /"ls-files", "-z"/);
-  assert.match(createRepo, /"push", "-u", "origin", "HEAD:main"/);
+  assert.match(createRepo, /"push", cloneUrl, "HEAD:main"/);
+  assert.match(createRepo, /mkdtempSync/);
 });
 
 test("thin adapters do not restore stale prerequisites or orchestration", async () => {
@@ -87,5 +87,8 @@ test("thin adapters do not restore stale prerequisites or orchestration", async 
   assert.doesNotMatch(deploy, /image_credentials|--image-password/);
   assert.doesNotMatch(templates, /args\.push\("--env"|env:\s*z\.record/);
   assert.doesNotMatch(login, /deploy_key:\s*z|--key/);
-  assert.doesNotMatch(server, /registerSetEnvTool/);
+  assert.match(server, /registerSetEnvTool/);
+  const setEnv = await source("src/tools/set-env.ts");
+  assert.match(setEnv, /SECURE_ENV_CONFIGURATION_REQUIRED/);
+  assert.doesNotMatch(setEnv, /z\.record|execVaritykit|KEY=VALUE/);
 });

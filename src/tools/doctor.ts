@@ -3,13 +3,71 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { execCLI, isCLIAvailable } from "../utils/cli-bridge.js";
 import { getApiKey } from "../utils/config.js";
+import { publicApiGet, VarityPublicApiError } from "../utils/public-api.js";
 
-interface Check {
+export interface Check {
   name: string;
   status: "pass" | "fail" | "warn";
   version?: string;
   message?: string;
   fix?: string;
+}
+
+export function classifyReadiness(checks: Check[]): {
+  developmentReady: boolean;
+  cliDeployReady: boolean;
+  developmentIssues: Check[];
+  cliIssues: Check[];
+} {
+  const developmentChecks = checks.filter((check) =>
+    check.name === "Node.js" || check.name === "npm"
+  );
+  const cliDeployChecks = checks.filter((check) =>
+    check.name === "varitykit CLI" || check.name === "Authentication"
+  );
+  return {
+    developmentReady: developmentChecks.every((check) => check.status === "pass"),
+    cliDeployReady: cliDeployChecks.every((check) => check.status === "pass"),
+    developmentIssues: developmentChecks.filter((check) => check.status === "fail"),
+    cliIssues: cliDeployChecks.filter((check) => check.status === "fail"),
+  };
+}
+
+export async function verifyAuthentication(
+  apiKey: string | null,
+  verify: () => Promise<unknown> = () => publicApiGet<{ deployments?: unknown[] }>("/api/deployments")
+): Promise<Check> {
+  if (!apiKey) {
+    return {
+      name: "Authentication",
+      status: "fail",
+      message: "Not authenticated, no deploy key found in ~/.varitykit/config.json",
+      fix: "varitykit auth login",
+    };
+  }
+  try {
+    await verify();
+    return {
+      name: "Authentication",
+      status: "pass",
+      message: "Authentication verified by the Varity public interface",
+    };
+  } catch (error) {
+    const ownerError = error instanceof VarityPublicApiError ? error : null;
+    const authenticationFailure = ownerError?.status === 401 || ownerError?.status === 403;
+    const detail = ownerError?.message
+      ?? "The Varity public interface could not validate deployment readiness.";
+    return {
+      name: "Authentication",
+      status: "fail",
+      message: authenticationFailure
+        ? `Authentication was rejected by the Varity public interface: ${detail}`
+        : `Deployment readiness could not be verified: ${detail}`,
+      fix: authenticationFailure
+        ? (ownerError?.action ?? "Run `varitykit auth login` in a trusted terminal, then retry varity_doctor.")
+        : (ownerError?.action ?? "Check your connection and retry varity_doctor."),
+    };
+  }
 }
 
 /** Node floor that agrees with package.json `engines.node` (">=22.11.0"). */
@@ -32,8 +90,8 @@ export function registerDoctorTool(server: McpServer): void {
     {
       title: "Check Environment",
       description:
-        "Check if the developer's environment is ready to build and deploy apps with Varity. " +
-        "Verifies Node.js, npm, varitykit CLI, and authentication are properly configured. " +
+        "Check local-development and CLI-deployment readiness independently. " +
+        "Node.js and npm qualify local JavaScript tools; varitykit and authentication qualify deployment. " +
         "Run this before varity_deploy to catch missing prerequisites early.",
       inputSchema: {},
       annotations: {
@@ -131,23 +189,12 @@ export function registerDoctorTool(server: McpServer): void {
         nextSteps.push("pip install varitykit");
       }
 
-      // 4. Authentication, check for deploy_key in config
+      // 4. Authentication. Key presence is not proof: validate it through an
+      // owner-scoped read before declaring the deployment adapter ready.
       const apiKey = await getApiKey();
-      if (apiKey) {
-        checks.push({
-          name: "Authentication",
-          status: "pass",
-          message: "Authenticated (deploy key configured)",
-        });
-      } else {
-        checks.push({
-          name: "Authentication",
-          status: "fail",
-          message: "Not authenticated, no deploy key found in ~/.varitykit/config.json",
-          fix: "varitykit auth login",
-        });
-        nextSteps.push("varitykit auth login");
-      }
+      const authentication = await verifyAuthentication(apiKey);
+      checks.push(authentication);
+      if (authentication.status === "fail") nextSteps.push(authentication.fix ?? "varitykit auth login");
 
       // 5. GitHub token, required specifically for varity_create_repo
       // Treated as "warn" (not "fail") because deployment and all other tools work without it.
@@ -188,23 +235,14 @@ export function registerDoctorTool(server: McpServer): void {
         }
       }
 
-      // Tiered readiness:
-      // - `ready` = Node.js + npm work, so local JavaScript development tools can run.
-      // - `cli_deploy_ready` = varitykit + auth also pass, so the
-      //   MCP's varity_deploy adapter can call varitykit successfully.
-      const coreChecks = checks.filter((c) => c.name === "Node.js" || c.name === "npm");
-      const ready = coreChecks.every((c) => c.status === "pass");
-      const deployChecks = checks.filter((c) =>
-        ["Node.js", "npm", "varitykit CLI", "Authentication"].includes(c.name)
-      );
-      const cliDeployReady = deployChecks.every((c) => c.status === "pass");
+      const {
+        developmentReady,
+        cliDeployReady,
+        developmentIssues,
+        cliIssues,
+      } = classifyReadiness(checks);
 
-      const coreIssues = checks.filter((c) => (c.name === "Node.js" || c.name === "npm") && c.status === "fail");
-      const cliIssues = checks.filter(
-        (c) => !["Node.js", "npm"].includes(c.name) && (c.status === "fail")
-      );
-
-      if (ready && cliDeployReady) {
+      if (developmentReady && cliDeployReady) {
         return successResponse(
           {
             ready: true,
@@ -215,7 +253,7 @@ export function registerDoctorTool(server: McpServer): void {
         );
       }
 
-      if (ready && !cliDeployReady) {
+      if (developmentReady && !cliDeployReady) {
         const cliFixList = cliIssues.map((c) => c.fix || c.message).filter(Boolean);
 
         // Local development works, but the varitykit-backed deploy path is incomplete.
@@ -231,7 +269,22 @@ export function registerDoctorTool(server: McpServer): void {
         );
       }
 
-      // Core tools (Node.js / npm) are broken, nothing works
+      if (!developmentReady && cliDeployReady) {
+        const developmentFixes = developmentIssues.map((c) => c.fix || c.message).filter(Boolean);
+        return successResponse(
+          {
+            ready: false,
+            cli_deploy_ready: true,
+            checks,
+            note: "varity_deploy is ready because varitykit and authentication work. Local JavaScript build and development tools still require Node.js and npm.",
+            development_issues: developmentFixes,
+          },
+          `Ready to deploy through varitykit. Fix ${developmentIssues.length} local-development issue${developmentIssues.length === 1 ? "" : "s"} before using JavaScript build or dev-server tools: ${developmentFixes.join("; ")}`
+        );
+      }
+
+      const developmentFixes = developmentIssues.map((c) => c.fix || c.message).filter(Boolean);
+      const cliFixes = cliIssues.map((c) => c.fix || c.message).filter(Boolean);
       return successResponse(
         {
           ready: false,
@@ -239,7 +292,7 @@ export function registerDoctorTool(server: McpServer): void {
           checks,
           next_steps: nextSteps,
         },
-        `Environment is not ready. Fix ${coreIssues.length} core issue${coreIssues.length === 1 ? "" : "s"} to begin development: ${coreIssues.map((c) => c.fix || c.message).join("; ")}`
+        `Local development and CLI deployment are not ready. Development: ${developmentFixes.join("; ")}. Deployment: ${cliFixes.join("; ")}.`
       );
     }
   );

@@ -2,13 +2,30 @@ import { z } from "zod";
 import { access } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
-import { execVaritykit, isCLIAvailable, lifecycleTracking, stripAnsi } from "../utils/cli-bridge.js";
+import { execVaritykit, isCLIAvailable, stripAnsi } from "../utils/cli-bridge.js";
+import { lifecycleAcceptance } from "../utils/lifecycle-acceptance.js";
 
 /** Strip ANSI escape codes from CLI output before string matching. */
 // eslint-disable-next-line no-control-regex
 function extractPublicVarityUrl(output: string): string | null {
   const match = output.match(/https?:\/\/(?:[a-z0-9-]+\.)?varity\.app(?:\/[^\s"'<>)]*)?/i);
   return match?.[0] ?? null;
+}
+
+export function deployAccepted(stdout: string, stderr = "") {
+  const output = stripAnsi(`${stdout}\n${stderr}`);
+  const acceptance = lifecycleAcceptance(stdout, "deploying");
+  const reportedUrl = extractPublicVarityUrl(output);
+  return successResponse(
+    {
+      accepted: true,
+      ...acceptance,
+      reported_url: reportedUrl,
+    },
+    acceptance.status_command
+      ? `Deploy accepted. Track its terminal outcome with: ${acceptance.status_command}`
+      : "The deploy command returned success without a durable tracking reference. A live deployment is not yet proven; inspect varity_deploy_status before reporting completion."
+  );
 }
 
 export function registerDeployTool(server: McpServer): void {
@@ -165,22 +182,7 @@ export function registerDeployTool(server: McpServer): void {
       });
 
       if (result.exitCode === 0) {
-        const output = stripAnsi(result.stdout + "\n" + result.stderr);
-        const tracking = lifecycleTracking(result.stdout);
-        const reportedUrl = extractPublicVarityUrl(output);
-
-        return successResponse(
-          {
-            accepted: true,
-            status: tracking.runId ? "deploying" : "outcome_unconfirmed",
-            run_id: tracking.runId,
-            status_command: tracking.statusCommand,
-            reported_url: reportedUrl,
-          },
-          tracking.statusCommand
-            ? `Deploy accepted. Track its terminal outcome with: ${tracking.statusCommand}`
-            : "The deploy command returned success without a durable tracking reference. A live deployment is not yet proven; inspect varity_deploy_status before reporting completion."
-        );
+        return deployAccepted(result.stdout, result.stderr);
       }
 
       // Deploy failed, parse error for helpful suggestion.

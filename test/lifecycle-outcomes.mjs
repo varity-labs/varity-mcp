@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
 const { lifecycleTracking } = await import("../dist/utils/cli-bridge.js");
+const { lifecycleAcceptance } = await import("../dist/utils/lifecycle-acceptance.js");
+const { deployAccepted } = await import("../dist/tools/deploy.js");
+const { redeployAccepted } = await import("../dist/tools/redeploy.js");
+const { deleteAccepted } = await import("../dist/tools/delete-deployment.js");
+const { templateDeployAccepted } = await import("../dist/tools/agent.js");
 
 const RUN_ID = "19c9f0b2-5ffa-4391-a096-dd964787f929";
 
@@ -24,32 +28,65 @@ test("lifecycle tracking extracts only a valid durable run reference", () => {
   });
 });
 
-test("lifecycle tools preserve acceptance and never manufacture completion", async () => {
-  const [redeploy, deletion, deploy, templates] = await Promise.all([
-    readFile(new URL("../src/tools/redeploy.ts", import.meta.url), "utf8"),
-    readFile(new URL("../src/tools/delete-deployment.ts", import.meta.url), "utf8"),
-    readFile(new URL("../src/tools/deploy.ts", import.meta.url), "utf8"),
-    readFile(new URL("../src/tools/agent.ts", import.meta.url), "utf8"),
-  ]);
-
-  for (const source of [redeploy, deletion, deploy, templates]) {
-    assert.match(source, /lifecycleTracking/);
-    assert.match(source, /outcome_unconfirmed/);
-    assert.doesNotMatch(source, /goes live in about a minute/i);
-    assert.doesNotMatch(source, /status:\s*["']deployed["']/i);
-  }
-  assert.match(deletion, /deleted: false/);
-  assert.doesNotMatch(deletion, /billing has stopped/i);
-  assert.doesNotMatch(deploy, /deploymentId\s*=\s*["']unknown["']/);
-  assert.doesNotMatch(templates, /deployed:\s*true/);
+test("one lifecycle projector owns tracked versus unconfirmed status", () => {
+  assert.deepEqual(lifecycleAcceptance(`Accepted\nvaritykit app status ${RUN_ID}`, "deploying"), {
+    status: "deploying",
+    run_id: RUN_ID,
+    status_command: `varitykit app status ${RUN_ID}`,
+  });
+  assert.deepEqual(lifecycleAcceptance("Accepted without tracking", "deploying"), {
+    status: "outcome_unconfirmed",
+    run_id: null,
+    status_command: null,
+  });
 });
 
-test("redeploy is never described as a verified restart", async () => {
-  const source = await readFile(new URL("../src/tools/redeploy.ts", import.meta.url), "utf8");
+function payload(response) {
+  return JSON.parse(response.content[0].text);
+}
 
-  assert.doesNotMatch(source, /redeploy or restart/i);
-  assert.doesNotMatch(source, /restarts the container/i);
-  assert.doesNotMatch(source, /my app is stuck/i);
-  assert.doesNotMatch(source, /no extra (?:hardware )?reservation/i);
-  assert.match(source, /unchanged configuration may be a no-op/i);
+test("lifecycle acceptance adapters expose exact in-progress and unconfirmed outcomes", () => {
+  const trackedOutput = `Accepted\nvaritykit app status ${RUN_ID}`;
+  const cases = [
+    {
+      name: "deploy",
+      invoke: (stdout) => deployAccepted(stdout, "https://demo.varity.app/"),
+      trackedStatus: "deploying",
+    },
+    {
+      name: "redeploy",
+      invoke: (stdout) => redeployAccepted("demo", stdout),
+      trackedStatus: "redeploying",
+    },
+    {
+      name: "delete",
+      invoke: (stdout) => deleteAccepted("demo", stdout),
+      trackedStatus: "deleting",
+    },
+    {
+      name: "template",
+      invoke: (stdout) => templateDeployAccepted({ id: "demo", name: "Demo" }, "demo-app", stdout),
+      trackedStatus: "deploying",
+    },
+  ];
+
+  for (const scenario of cases) {
+    const tracked = payload(scenario.invoke(trackedOutput));
+    assert.equal(tracked.success, true, scenario.name);
+    assert.equal(tracked.data.status, scenario.trackedStatus, scenario.name);
+    assert.equal(tracked.data.run_id, RUN_ID, scenario.name);
+    assert.equal(tracked.data.status_command, `varitykit app status ${RUN_ID}`, scenario.name);
+    assert.match(tracked.message, /Track its terminal outcome|Track it with/, scenario.name);
+
+    const untracked = payload(scenario.invoke("Accepted without durable run"));
+    assert.equal(untracked.success, true, scenario.name);
+    assert.equal(untracked.data.status, "outcome_unconfirmed", scenario.name);
+    assert.equal(untracked.data.run_id, null, scenario.name);
+    assert.equal(untracked.data.status_command, null, scenario.name);
+    assert.match(untracked.message, /not (?:yet )?proven|not proven/, scenario.name);
+    assert.doesNotMatch(untracked.message, /completed|went live|billing has stopped/i, scenario.name);
+  }
+
+  assert.equal(payload(deleteAccepted("demo", trackedOutput)).data.deleted, false);
+  assert.equal(payload(deployAccepted("Accepted without durable run")).data.reported_url, null);
 });

@@ -70,8 +70,20 @@ test("retired transport arguments fail closed", () => {
   );
   assert.equal(result.status, 2);
   assert.equal(result.stdout, "");
-  assert.match(result.stderr, /Unsupported argument/);
+  assert.match(result.stderr, /Unsupported command-line arguments/);
   assert.doesNotMatch(result.stderr, /running on http/i);
+});
+
+test("unsupported arguments never echo credential-shaped values", () => {
+  const secret = "synthetic-secret-canary";
+  const result = spawnSync(
+    process.execPath,
+    ["dist/index.js", "--token", secret],
+    { cwd: new URL("..", import.meta.url), encoding: "utf8" },
+  );
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /Unsupported command-line arguments/);
+  assert.doesNotMatch(result.stderr, new RegExp(secret));
 });
 
 test("explicit stdio transport spelling remains compatible", async (t) => {

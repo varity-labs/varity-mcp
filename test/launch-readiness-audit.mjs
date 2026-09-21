@@ -42,7 +42,7 @@ test("tools/list carries the annotations the docs promise", async () => {
   await done;
   proc.kill();
   const tools = Object.fromEntries(lines.find((m) => m.id === 2).result.tools.map((t) => [t.name, t]));
-  for (const name of ["varity_list_templates", "varity_template_info", "varity_list_agents", "varity_agent_info"]) {
+  for (const name of ["varity_list_templates", "varity_template_info", "varity_list_agents", "varity_agent_info", "varity_set_env"]) {
     assert.equal(tools[name]?.annotations?.readOnlyHint, true, `${name} readOnlyHint`);
   }
   for (const name of ["varity_deploy_template", "varity_deploy_agent", "varity_delete_deployment", "varity_redeploy"]) {

@@ -1,7 +1,22 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
-import { execVaritykit, lifecycleTracking } from "../utils/cli-bridge.js";
+import { execVaritykit } from "../utils/cli-bridge.js";
+import { lifecycleAcceptance } from "../utils/lifecycle-acceptance.js";
+
+export function deleteAccepted(name: string, stdout: string) {
+  const acceptance = lifecycleAcceptance(stdout, "deleting");
+  return successResponse(
+    {
+      name,
+      ...acceptance,
+      deleted: false,
+    },
+    acceptance.status_command
+      ? `Delete accepted for "${name}". Route removal, reserved hardware release, and billing stop are not complete until the run reaches a terminal success. Track it with: ${acceptance.status_command}`
+      : `The delete command returned success for "${name}" without a durable tracking reference. Deletion and billing stop are not proven; upgrade varitykit and inspect varity_deploy_status before retrying.`
+  );
+}
 
 export function registerDeleteDeploymentTool(server: McpServer): void {
   server.registerTool(
@@ -43,19 +58,7 @@ export function registerDeleteDeploymentTool(server: McpServer): void {
       const result = await execVaritykit("app", ["delete", "--yes", "--", name], { timeout: 120_000 });
 
       if (result.exitCode === 0) {
-        const tracking = lifecycleTracking(result.stdout);
-        return successResponse(
-          {
-            name,
-            status: tracking.runId ? "deleting" : "outcome_unconfirmed",
-            deleted: false,
-            run_id: tracking.runId,
-            status_command: tracking.statusCommand,
-          },
-          tracking.statusCommand
-            ? `Delete accepted for "${name}". Route removal, reserved hardware release, and billing stop are not complete until the run reaches a terminal success. Track it with: ${tracking.statusCommand}`
-            : `The delete command returned success for "${name}" without a durable tracking reference. Deletion and billing stop are not proven; upgrade varitykit and inspect varity_deploy_status before retrying.`
-        );
+        return deleteAccepted(name, result.stdout);
       }
 
       const errorOutput = (result.stderr || result.stdout || "").trim();

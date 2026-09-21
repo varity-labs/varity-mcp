@@ -44,7 +44,7 @@ async function authHeaders(): Promise<Record<string, string>> {
       "Not authenticated with Varity.",
       "NOT_AUTHENTICATED",
       401,
-      "Run varity_login with a Developer Portal deploy key."
+      "Run varity_login, then complete `varitykit auth login` in a trusted terminal."
     );
   }
   return { Authorization: `Bearer ${key}`, Accept: "application/json" };

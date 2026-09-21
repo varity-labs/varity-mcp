@@ -10,9 +10,25 @@ import { getDeployment, publicApiGet, VarityPublicApiError } from "../utils/publ
  * forwards estimate inputs or projects the billing fields returned for an
  * owner-scoped deployment; it owns no profile catalog or billing defaults.
  *
- * The tool reports only the monthly estimate field returned by the owner.
- * No comparisons, markups, billing defaults, or savings math happen here.
+ * The tool reports the monthly or hourly estimate field returned by the owner.
+ * It never converts between units or invents a monthly projection.
  */
+
+export type OwnerPricingProjection =
+  | { unit: "month"; fixed_monthly_cost_usd: number }
+  | { unit: "hour"; hourly_cost_usd: number };
+
+export function projectOwnerPricing(data: Record<string, unknown>): OwnerPricingProjection | null {
+  const monthly = data.fixed_monthly_cost_usd ?? data.varityMonthly;
+  if (typeof monthly === "number" && Number.isFinite(monthly)) {
+    return { unit: "month", fixed_monthly_cost_usd: monthly };
+  }
+  const hourly = data.hourly_cost_usd;
+  if (typeof hourly === "number" && Number.isFinite(hourly)) {
+    return { unit: "hour", hourly_cost_usd: hourly };
+  }
+  return null;
+}
 
 export function registerCostCalculatorTool(server: McpServer): void {
   server.registerTool(
@@ -57,6 +73,7 @@ export function registerCostCalculatorTool(server: McpServer): void {
               billing.fixed_monthly_cost_usd ??
               billing.fixed_monthly_usd ??
               billing.monthlyUsd,
+            hourly_cost_usd: billing.hourly_cost_usd,
             billing_model: billing.billing_model,
             deployment,
           };
@@ -81,8 +98,8 @@ export function registerCostCalculatorTool(server: McpServer): void {
         );
       }
 
-      const v = (data.fixed_monthly_cost_usd ?? data.varityMonthly) as number;
-      if (typeof v !== "number") {
+      const projection = projectOwnerPricing(data);
+      if (!projection) {
         return errorResponse(
           "pricing_unavailable",
           "Varity pricing is not available for that request.",
@@ -91,7 +108,10 @@ export function registerCostCalculatorTool(server: McpServer): void {
       }
       const fmt = (n: number) => `$${Number(n).toLocaleString("en-US")}`;
       const estimateName = subdomain ?? data.profile ?? app_profile ?? "current default profile";
-      const summary = `${String(estimateName)}: ${fmt(v)}/mo estimate returned by the current Varity pricing interface.`;
+      const amount = projection.unit === "month"
+        ? projection.fixed_monthly_cost_usd
+        : projection.hourly_cost_usd;
+      const summary = `${String(estimateName)}: ${fmt(amount)}/${projection.unit === "month" ? "mo" : "hour"} estimate returned by the current Varity pricing interface.`;
 
       return successResponse(
         {
@@ -101,7 +121,9 @@ export function registerCostCalculatorTool(server: McpServer): void {
           // Never spread the raw response into the tool result.
           profile: data.profile,
           currency: data.currency,
-          fixed_monthly_cost_usd: v,
+          ...(projection.unit === "month"
+            ? { fixed_monthly_cost_usd: projection.fixed_monthly_cost_usd }
+            : { hourly_cost_usd: projection.hourly_cost_usd }),
           billing_model: data.billing_model,
           mode: data.mode,
           verified: data.verified,

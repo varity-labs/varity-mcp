@@ -34,7 +34,7 @@ function handleArguments(): void {
     process.exit(0);
   }
 
-  console.error(`Unsupported argument(s): ${args.join(" ")}`);
+  console.error("Unsupported command-line arguments. Values are not echoed because arguments may contain credentials.");
   printHelp();
   process.exit(2);
 }

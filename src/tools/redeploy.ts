@@ -1,7 +1,22 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
-import { execVaritykit, lifecycleTracking } from "../utils/cli-bridge.js";
+import { execVaritykit } from "../utils/cli-bridge.js";
+import { lifecycleAcceptance } from "../utils/lifecycle-acceptance.js";
+
+export function redeployAccepted(name: string, stdout: string) {
+  const acceptance = lifecycleAcceptance(stdout, "redeploying");
+  return successResponse(
+    {
+      name,
+      action: "redeploy",
+      ...acceptance,
+    },
+    acceptance.status_command
+      ? `Reapply accepted for "${name}" on the same app URL. Track its terminal outcome with: ${acceptance.status_command}`
+      : `The reapply command returned success for "${name}" without a durable tracking reference. The terminal outcome is not proven; upgrade varitykit and inspect varity_deploy_status before retrying.`
+  );
+}
 
 export function registerRedeployTool(server: McpServer): void {
   server.registerTool(
@@ -39,19 +54,7 @@ export function registerRedeployTool(server: McpServer): void {
       const result = await execVaritykit("app", ["redeploy", "--", name], { timeout: 120_000 });
 
       if (result.exitCode === 0) {
-        const tracking = lifecycleTracking(result.stdout);
-        return successResponse(
-          {
-            name,
-            action: "redeploy",
-            status: tracking.runId ? "redeploying" : "outcome_unconfirmed",
-            run_id: tracking.runId,
-            status_command: tracking.statusCommand,
-          },
-          tracking.statusCommand
-            ? `Reapply accepted for "${name}" on the same app URL. Track its terminal outcome with: ${tracking.statusCommand}`
-            : `The reapply command returned success for "${name}" without a durable tracking reference. The terminal outcome is not proven; upgrade varitykit and inspect varity_deploy_status before retrying.`
-        );
+        return redeployAccepted(name, result.stdout);
       }
 
       const errorOutput = (result.stderr || result.stdout || "").trim();

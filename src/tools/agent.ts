@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
-import { execVaritykit, isOutdatedVaritykit, lifecycleTracking, VARITYKIT_UPGRADE_HINT } from "../utils/cli-bridge.js";
+import { execVaritykit, isOutdatedVaritykit, VARITYKIT_UPGRADE_HINT } from "../utils/cli-bridge.js";
+import { lifecycleAcceptance } from "../utils/lifecycle-acceptance.js";
 
 /** The installed varitykit predates the `app templates` command. */
 class VaritykitOutdatedError extends Error {}
@@ -21,7 +22,7 @@ function catalogError(error: unknown) {
   );
 }
 
-interface TemplateMeta {
+export interface TemplateMeta {
   id: string;
   name?: string;
   description?: string;
@@ -37,8 +38,23 @@ interface TemplateMeta {
   certification?: { state?: string; reason?: string };
 }
 
-async function fetchTemplateCatalog(): Promise<TemplateMeta[]> {
-  const result = await execVaritykit("app", ["templates", "--json"], { timeout: 120_000 });
+export function templateDeployAccepted(template: TemplateMeta, name: string | undefined, stdout: string) {
+  const acceptance = lifecycleAcceptance(stdout, "deploying");
+  return successResponse(
+    {
+      template: template.id,
+      name: name || null,
+      accepted: true,
+      ...acceptance,
+    },
+    acceptance.status_command
+      ? `Template deploy accepted for ${template.name ?? template.id}. Track its terminal outcome with: ${acceptance.status_command}`
+      : `The template deploy command returned success for ${template.name ?? template.id} without a durable tracking reference. The terminal outcome is not proven; inspect varity_deploy_status before reporting completion.`
+  );
+}
+
+async function fetchTemplateCatalog(execute: typeof execVaritykit = execVaritykit): Promise<TemplateMeta[]> {
+  const result = await execute("app", ["templates", "--json"], { timeout: 120_000 });
   if (result.exitCode !== 0) {
     if (isOutdatedVaritykit(result)) throw new VaritykitOutdatedError();
     const detail = (result.stderr || result.stdout || "").trim() || "unknown error";
@@ -116,10 +132,14 @@ async function templateInfo(id: string) {
   }
 }
 
-async function deployTemplate(templateId: string, name?: string) {
+export async function deployTemplate(
+  templateId: string,
+  name?: string,
+  execute: typeof execVaritykit = execVaritykit
+) {
   let template: TemplateMeta | undefined;
   try {
-    const templates = await fetchTemplateCatalog();
+    const templates = await fetchTemplateCatalog(execute);
     template = findTemplate(templates, templateId);
     if (!template) {
       return errorResponse(
@@ -148,22 +168,9 @@ async function deployTemplate(templateId: string, name?: string) {
   const args: string[] = ["deploy", "--template", template.id];
   if (name) args.push("--name", name);
 
-  const result = await execVaritykit("app", args, { timeout: 300_000 });
+  const result = await execute("app", args, { timeout: 300_000 });
   if (result.exitCode === 0) {
-    const tracking = lifecycleTracking(result.stdout);
-    return successResponse(
-      {
-        template: template.id,
-        name: name || null,
-        accepted: true,
-        status: tracking.runId ? "deploying" : "outcome_unconfirmed",
-        run_id: tracking.runId,
-        status_command: tracking.statusCommand,
-      },
-      tracking.statusCommand
-        ? `Template deploy accepted for ${template.name ?? template.id}. Track its terminal outcome with: ${tracking.statusCommand}`
-        : `The template deploy command returned success for ${template.name ?? template.id} without a durable tracking reference. The terminal outcome is not proven; inspect varity_deploy_status before reporting completion.`
-    );
+    return templateDeployAccepted(template, name, result.stdout);
   }
 
   const errorOutput = (result.stderr || result.stdout || "").trim();

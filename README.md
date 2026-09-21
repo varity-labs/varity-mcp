@@ -96,17 +96,17 @@ The MCP exposes Varity's deploy surface so your AI tool can take action — not 
 
 **Docs and pricing**
 - "Search Varity docs for environment variables"
-- "How much would it cost to host a 5,000-user API on Varity?"
-- "What's my monthly cost going to be if my app gets traction?"
+- "What is the current estimate for this pricing profile?"
+- "What billing projection does my deployed app report?"
 
 ## Tools
 
 | Tool | What it does |
 |---|---|
 | `varity_search_docs` | Search the Varity documentation |
-| `varity_cost_calculator` | Estimate your monthly cost before you deploy |
+| `varity_cost_calculator` | Project the live owner's monthly or hourly estimate without converting units |
 | `varity_doctor` | Check that your environment is ready to deploy |
-| `varity_login` | Authenticate with your deploy key |
+| `varity_login` | Check authentication and route login through the trusted `varitykit auth login` terminal flow |
 | `varity_install_deps` | Install project dependencies |
 | `varity_build` | Build the project |
 | `varity_open_browser` | Open a URL locally |
@@ -116,6 +116,7 @@ The MCP exposes Varity's deploy surface so your AI tool can take action — not 
 | `varity_deploy_status` | Check the status of a deployment |
 | `varity_deploy_logs` | Read build and runtime logs |
 | `varity_delete_deployment` | Stop a deployment and end its billing |
+| `varity_set_env` | Preserve the public tool route while refusing secret values and directing configuration to a secret-safe interface |
 | `varity_redeploy` | Reapply an existing deployment's saved configuration; unchanged input may be a no-op |
 | `varity_list_templates` | List certified gateway-owned Varity templates |
 | `varity_template_info` | Show full details for one certified template |
@@ -137,12 +138,13 @@ From empty folder to deployed app, all in natural language:
 
 ```
 You: "Make me a simple landing page for my coffee shop and deploy it"
-AI:  Wrote the landing page, ran the build, deployed live at
-     https://varity.app/coffee-shop/
+AI:  Wrote the landing page and ran its local build.
+AI:  Deploy accepted. Tracking its durable run until the owner reports a terminal outcome.
+AI:  The status owner now reports the app live at https://varity.app/coffee-shop/
 
 You: "Now deploy Agent Zero"
 AI:  Agent Zero is certified and does not require environment variables.
-AI:  Deployed Agent Zero at https://varity.app/my-agent/
+AI:  Template deploy accepted. No live URL is claimed until varity_deploy_status proves it.
 ```
 
 ## Pricing

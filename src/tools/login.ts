@@ -3,6 +3,17 @@ import { successResponse } from "../utils/responses.js";
 import { execCLI } from "../utils/cli-bridge.js";
 import { INFRASTRUCTURE, isAuthenticated } from "../utils/config.js";
 
+export function configuredCredentialResponse() {
+  return successResponse(
+    {
+      credential_present: true,
+      authentication_verified: false,
+      next_step: "Call varity_doctor to verify the complete deployment setup.",
+    },
+    "A Varity deploy credential is configured but has not been verified. Call varity_doctor before deploying."
+  );
+}
+
 export function registerLoginTool(server: McpServer): void {
   server.registerTool(
     "varity_login",
@@ -16,14 +27,7 @@ export function registerLoginTool(server: McpServer): void {
     },
     async () => {
       if (await isAuthenticated()) {
-        return successResponse(
-          {
-            authenticated: true,
-            already_logged_in: true,
-            next_step: "Call varity_doctor to verify the complete deployment setup.",
-          },
-          "Already logged in to Varity. Call varity_doctor before deploying."
-        );
+        return configuredCredentialResponse();
       }
 
       const settingsUrl = `${INFRASTRUCTURE.DEVELOPER_PORTAL}/dashboard/settings`;
