@@ -1,330 +1,186 @@
 # `@varity-labs/mcp` Architecture
 
 Status: current implementation map
-Last code-grounded audit: 2026-09-01
-Scope: stable ownership, interfaces, adapters, state, auth, failures, and tests
+Scope: stable ownership, interfaces, adapters, state, security, failures, and tests
 
-This document is the repository-level layer of Varity's progressive
-architecture disclosure. `varity-engineering/architecture/likec4/` owns the
-cross-repository system view (this repository is the `varity.mcp` element);
-source and tests remain the detailed executable truth. Live versions and shipped
-capability come from exact deployed refs and fresh evidence;
-`varity-engineering/CURRENT-STATE.md` is a dated observation log, not an owner.
+This repository is the public stdio MCP adapter for Varity. Cross-repository
+concept ownership is routed by `varity-engineering/architecture/CHANGE-IMPACT.md`;
+source and tests here own the package's executable behavior. Live versions,
+pricing, deployment state, and supported capability come from their executable
+owners rather than copied prose.
 
 ## Ownership
 
 This repository owns:
 
-- the MCP tool, resource, and prompt interface presented to AI coding clients;
-- stdio full-surface and Streamable HTTP public-read transport composition;
-- translation from MCP inputs to either local `varitykit` commands or the
-  deploy-key-authenticated public Varity interface;
+- the MCP tool, compatibility resource, and prompt interface presented to local
+  AI coding clients;
+- stdio process composition and JSON-RPC channel custody;
+- translation from validated MCP inputs to either local `varitykit` commands or
+  the deploy-key-authenticated public Varity interface;
 - consistent structured success/error responses;
-- secret-safe, trace-correlated runtime telemetry projected through standard
-  OpenTelemetry and optional Better Stack error ingestion;
-- bounded local developer helpers such as build, dependency installation,
-  browser opening, and development-server management.
+- secret-safe telemetry through standard OpenTelemetry exporters and optional
+  Better Stack error ingestion;
+- bounded local helpers for builds, dependencies, browser opening, development
+  servers, migration, and repository creation.
 
-It explicitly does not own:
+It does not own:
 
-- workload planning, builds performed by Varity infrastructure, provider
-  selection, deployment execution, route activation, cleanup, or remediation;
-- durable operation/release state, public deployment truth, credentials,
-  billing ledgers, or pricing policy;
-- a separate deployment engine for portal, CLI, MCP, or embedded consumers;
-- direct provider, static-storage, db-proxy, credential-proxy, or billing-meter
-  integration.
-- Better Stack sources, error projects, dashboards, monitors, incidents, or
-  deployment configuration.
+- a hosted or self-hosted network MCP transport, OAuth service, or container
+  release;
+- workload planning, hosting selection, deployment execution, route activation,
+  cleanup, or remediation policy;
+- durable deployment/release state, credentials, billing ledgers, profile
+  catalogs, pricing policy, or copied deployment guidance;
+- direct provider, static-storage, database-proxy, credential-proxy, or billing
+  integrations.
 
 ## Context and call flow
 
 ```mermaid
 flowchart LR
-  CLIENT[MCP client]
-  STDIO[stdio transport]
-  HTTP[Streamable HTTP transport]
-  SERVER[MCP composition]
-  TOOLS[Tools, resources, prompts]
-  CLI[CLI bridge adapter]
-  PUBLIC[Public-interface adapter]
-  LOCAL[Local filesystem, processes, GitHub]
-  VK[varitykit]
-  GATEWAY[Varity gateway/public control plane]
-  TELEMETRY[Telemetry module]
-  OTLP[OTLP trace, log, and metric ingest]
-  ERRORS[Optional error ingest]
-
-  CLIENT --> STDIO --> SERVER
-  CLIENT --> HTTP --> SERVER
-  SERVER --> TOOLS
-  TOOLS --> CLI --> VK --> GATEWAY
-  TOOLS --> PUBLIC --> GATEWAY
-  TOOLS --> LOCAL
-  SERVER --> TELEMETRY --> OTLP
-  TELEMETRY --> ERRORS
+  CLIENT[Local MCP client] -->|stdio JSON-RPC| SERVER[MCP composition]
+  SERVER --> TOOLS[Tools, resource router, prompts]
+  TOOLS --> CLI[CLI bridge] --> VK[varitykit] --> CONTROL[Varity public control plane]
+  TOOLS --> PUBLIC[Public-interface adapter] --> CONTROL
+  TOOLS --> LOCAL[Local filesystem and processes]
+  SERVER --> TELEMETRY[Secret-safe telemetry] --> OTLP[Configured OTLP/error endpoints]
 ```
 
-All deployment paths converge on the same Varity control plane. MCP output is a
-projection of downstream truth; a tool must not invent a lifecycle state that
-the public interface or CLI did not return.
+Every mutation reaches the same downstream control plane through `varitykit`.
+MCP output is a projection of downstream truth: process exit can prove command
+acceptance, but only a durable run or owner-scoped status read can prove later
+lifecycle state.
 
 ## Runtime modules and interfaces
 
-| Module | Interface and invariants | Implementation / adapters | Test surface |
+| Module | Interface and invariant | Implementation | Verification |
 |---|---|---|---|
-| Transport entrypoint | `--transport stdio\|http`, optional HTTP port, lifecycle and health | `src/index.ts` | direct package startup at the exact Node 22.11 LTS minimum and on Node 24, actual Node 22 container health, real-server authentication/session contract, and a credential-opaque hosted function gate; downstream owner equality remains uncertified |
-| MCP composition | stdio registers the full local/deployment surface; hosted HTTP registers only authenticated `varity_search_docs` | `src/server.ts` | the real-server contract asserts the exact HTTP tool allowlist and the release gate executes one bounded public documentation result; complete stdio registration coverage is still missing |
-| Tool modules | Zod-validated MCP input; structured text result; no orchestration policy | `src/tools/`, `src/resources/`, `src/prompts/` | exercise each registered tool through its result interface |
-| CLI bridge | argv arrays, bounded timeout, cwd, machine-readable output, structured exit result, durable lifecycle run extraction | `src/utils/cli-bridge.ts`; `varitykit` and `python -m varitykit` adapters | `test/cli-bridge-env.mjs`, lifecycle projection tests, plus command-specific tool tests |
-| Public-interface client | stdio-only deploy-key auth, 60-second GET timeout, normalized error codes/actions; never receives an HTTP OAuth bearer | `src/utils/public-api.ts`; gateway adapter | adapter tests cover gateway configuration and timeout policy plus selected response projections |
-| Response module | `{success,data,message}` or MCP error `{success:false,error}` | `src/utils/responses.ts` | contract tests are currently missing |
-| Credential/config lookup | environment key first, then `~/.varitykit/config.json` | `src/utils/config.ts` | precedence/redaction tests are currently missing |
-| HTTP OAuth provider | proxies OAuth endpoints to `auth.varity.so`; verifies every `/mcp` bearer before the transport, rejects verification without a stable non-empty `user_id`, and binds each session to that verified principal; production verification targets a gateway route absent from the published contract | `src/auth/provider.ts`, `src/auth/http-bearer.ts` | a real-package test proves anonymous rejection, missing-principal rejection, authenticated session continuity, cross-principal HTTP 403, and one bounded public-documentation tool result through the production verifier and tool implementations; live production verification and downstream owner equality are not certified |
-| Runtime telemetry | Optional MCP server spans, correlated logs, operation-duration metrics, startup custody, and error capture; stdout and protected inputs are excluded | `src/telemetry.ts`, `src/runtime-shutdown.ts`, `src/utils/logger.ts`; OTLP and error-ingest adapters | in-memory signal correlation, synthetic OTLP transport, secret allowlist, stdout, shutdown-flush, and failed-close custody tests |
-| Runtime container release | Tag `mcp-v<package-version>`; one globally locked run creates an official, commit-pinned Buildx `docker-container` builder, builds one candidate index with max provenance and an SBOM, accepts and attests its digest, revalidates both immutable aliases, then promotes to `v<version>`, bare semver, and `latest` | `Dockerfile`, `.dockerignore`, `.github/workflows/release-container.yml`; `scripts/release-alias-gate.mjs` exchanges the masked workflow credential for a repository-scoped GHCR bearer and treats only the exact manifest request's HTTP 404 plus `MANIFEST_UNKNOWN` as absence; `scripts/validate-release-evidence.mjs` validates the complete artifact; GitHub Actions owns build/push credentials; `scripts/release-auth-fixture.mjs` supplies only an ephemeral test principal | PR CI starts the Node 22 image and validates exact health; the workflow contract pins the official Buildx action, requires its attestation-capable driver before the only build; executable mock-transport tests prove present, absent, auth, throttling, outage, network, oversized, and malformed registry outcomes stay fail closed and credential opaque; a promotion-time recheck catches an intervening alias; evidence is exact and credential-opaque; every promoted alias resolves to the accepted digest |
+| Entrypoint | stdio only; stdout contains JSON-RPC only; unknown/retired transport flags fail closed | `src/index.ts` | `test/runtime-version.mjs`, `test/logger-stdio-channel.mjs`, runtime matrix |
+| MCP composition | one complete local surface; no transport-specific alternate registration | `src/server.ts` | `test/launch-readiness-audit.mjs` plus package startup tests |
+| Tools | Zod-validated input and shared structured responses; no provider or orchestration policy | `src/tools/` | per-adapter and regression tests under `test/` |
+| Compatibility resource | `varity://deploy/reference` remains stable but routes mutable facts to live docs/tools | `src/resources/index.ts` | cleanup contract and architecture checks |
+| CLI bridge | argv arrays, bounded timeouts/output, normalized environment, durable run-reference extraction | `src/utils/cli-bridge.ts` | `test/cli-bridge-env.mjs`, `test/lifecycle-outcomes.mjs` |
+| Public-interface client | deploy-key auth, bounded GETs, normalized errors; no copied pricing or lifecycle state | `src/utils/public-api.ts` | `test/public-api-budget.mjs`, status/log tests |
+| Local GitHub helper | credentials come from process environment or `gh`; clean remote URL; normal non-force push | `src/tools/create-repo.ts` | cleanup contract plus Git behavior review |
+| Runtime telemetry | opt-in spans/logs/metrics/errors; protected inputs and stdout excluded | `src/telemetry.ts`, `src/runtime-shutdown.ts`, `src/utils/logger.ts` | telemetry, logger, and shutdown tests |
 
-The CLI bridge and public-interface client are two real adapter seams: callers
-already vary between them. Removing either adapter without migrating its
-callers would spread command execution, auth, timeout, parsing, and error
-complexity across tool modules, so both pass the deletion test.
+The CLI bridge and public-interface client are separate deep adapters because
+their current callers need different downstream interfaces. Removing either
+without migrating its callers would spread auth, timeout, parsing, and failure
+logic into individual tools.
 
 ## Tool routing
 
-| Behavior | Current path | Important qualification |
+| Behavior | Current path | Qualification |
 |---|---|---|
-| Deploy source/image | MCP tool -> CLI bridge -> `varitykit app deploy` | Requires Python and `varitykit` on the MCP host |
-| Delete, env update, redeploy | MCP tool -> CLI bridge -> `varitykit app ...` | Successful acceptance projects the durable run ID; missing tracking is explicit and never presented as terminal completion |
-| Template list/detail/deploy | MCP tool -> CLI bridge -> `varitykit` | Catalog truth is gateway-owned, not embedded here |
-| Migration and login | MCP tool -> local process/CLI bridge | Reads or changes the MCP host's checkout/config |
-| Deployment list/status | MCP tool -> public-interface adapter; optional public URL liveness probe | Liveness can downgrade a reported live state for the response; it is not durable lifecycle authority |
-| Runtime logs | MCP tool -> public-interface adapter | Owner-scoped gateway response is canonical for this client |
-| Cost estimate | MCP tool -> public pricing interface | Markdown and tool code must not own numeric pricing |
-| Build, install, browser, dev server, create repo | Direct local process/filesystem or GitHub operations | Runs where the MCP process runs; HTTP does not imply access to the remote caller's machine |
+| Deploy source/public image | MCP tool → CLI bridge → `varitykit app deploy` | Requires a working `varitykit`; its package owns interpreter requirements, while CLI/control plane own build and hosting policy |
+| Delete and reapply | MCP tool → CLI bridge → `varitykit app ...` | A successful command is accepted/in progress only when a durable run is returned; otherwise outcome is unconfirmed |
+| Template list/detail/deploy | MCP tool → CLI bridge → `varitykit` | Catalog, certification, hardware, and price fields are downstream-owned |
+| Migration preview | temporary clone → `varitykit migrate apply --dry-run` → exact cleanup | URL-based apply/deploy fails closed until transformed-source custody is explicit |
+| Deployment list/status/logs | MCP tool → public-interface adapter | Owner-scoped response is authoritative for this client |
+| Cost estimate | MCP tool → public pricing/deployment interface | Profile keys, currency, billing model, and values are returned by the live owner |
+| Docs search | MCP tool → public `llms-full.txt`/`llms.txt` | Five-minute process cache; stale entries are not served after expiry if refresh fails |
+| Build, install, browser, dev server, repository creation | local process/filesystem adapters | Operate on the invoking user's machine and credentials |
 
 ## Transport, auth, and trust
 
-### stdio
+The package has one transport: stdio. The MCP process runs under the invoking
+user and may act on explicitly supplied local paths. Varity operations use the
+deploy key resolved by `varitykit` or `src/utils/config.ts`.
 
-The MCP process normally runs on the user's machine. It can therefore operate
-on an explicitly supplied local project path and reuse the user's
-`~/.varitykit/config.json`. Authentication for Varity operations is the deploy
-key used by `varitykit` or the public-interface adapter.
+**stdout is the JSON-RPC channel.** Diagnostics go to stderr through the
+central logger or `console.error`. A single unrelated stdout byte can corrupt
+the client protocol.
 
-**stdout is the JSON-RPC channel and nothing else may write to it.** Every
-diagnostic goes to stderr, via `src/utils/logger.ts` or `console.error`. This is
-a hard invariant, not a style preference: one stray byte on stdout corrupts the
-protocol stream for the client. A Winston logger whose Console transport wrote
-every level, `error` included, to stdout with ANSI colour codes was removed on
-2026-08-25 for exactly this reason.
+Hosted MCP, Streamable HTTP, OAuth proxying, sessions, request rate limits, the
+runtime container, and GHCR release aliases are retired and absent. Reintroducing
+a network transport is a cross-repository security/topology change, not an
+alternate flag on this process.
 
-### Streamable HTTP
+`varity_create_repo` never accepts a credential as MCP input. It reads
+`GITHUB_TOKEN`/`GH_TOKEN` or `gh auth token`, passes the credential to Git only
+through ephemeral environment-backed configuration, stores a credential-free
+remote, stages only the selected project path, and never force-pushes.
 
-HTTP authenticates every non-preflight `/mcp` request before it reaches the
-SDK transport, attaches the verified `AuthInfo` at the SDK request interface,
-requires the owning verification interface to return a stable non-empty
-`user_id`, and binds each in-memory session to that verified principal. A
-different verified principal receives HTTP 403 before the SDK. The HTTP
-composition registers exactly one tool: `varity_search_docs`, an in-process
-read of public documentation. It registers no filesystem, process, deploy-key,
-customer-data, or mutation path. It creates one MCP server/transport pair per
-session. Rate-limit counters and MCP sessions are process-local, so a restart
-discards them and horizontal replicas require explicit shared-session/routing
-design.
-
-The code configures OAuth authorization/token/registration endpoints at
-`auth.varity.so`, but `verifyAccessToken()` calls gateway
-`POST /api/auth/verify`. That route is absent from the published contract
-(`GET varity.app/api/openapi.json`, version 2026-09-16, 34 paths, measured
-2026-09-19), so no client can depend on it. The gateway does answer the path
-(401 `invalid_token` without credentials), but a published-contract route is
-the only verifier this client may rely on. Hosted HTTP OAuth is therefore not
-end-to-end certified, and `mcp.varity.so` is retired (its `/health` returns
-404).
-
-Protocol authentication does not establish downstream owner equality. Option B
-therefore excludes every owner-scoped tool from hosted HTTP. The stdio-only
-`public-api.ts` and `varitykit` adapters read the local MCP host environment
-or `~/.varitykit/config.json`; the OAuth bearer is never propagated to either
-adapter or any subprocess. Hosted HTTP must not be described as per-user
-deployment authorization. Adding an owner-scoped HTTP tool requires a separate
-design and exact OAuth-principal/downstream-owner equality proof.
-
-Every filesystem, process, deployment, customer-data, and mutation tool is
-stdio-only. Stdio acts on the local MCP host under the invoking user credentials.
-Hosted HTTP cannot reach those adapters through MCP registration. Expanding the
-HTTP allowlist is a high-risk security and interface change.
-
-### Telemetry
-
-Telemetry is opt-in. The OTLP adapters read standard `OTEL_EXPORTER_OTLP_*`
-configuration; error capture reads `BETTERSTACK_MCP_DSN`. Missing or invalid
-telemetry configuration must not change MCP transport, auth, tool, resource, or
-prompt behavior. Export diagnostics remain on stderr.
-
-`src/telemetry.ts` wraps the MCP handler-registration seam once, before tools,
-resources, and prompts register. It records the OpenTelemetry MCP development
-convention's low-cardinality method, transport, successful tool/prompt name,
-duration, and error class. W3C `traceparent`/`tracestate` received in MCP
-`params._meta` establish the server-span parent. Baggage, JSON-RPC request IDs,
-session IDs, IP addresses, authorization headers, arguments, prompt variables,
-resource URIs, results, and arbitrary paths are never telemetry dimensions or
-log bodies. Unknown or failed target names remain absent to prevent an
-attacker-controlled cardinality channel.
-
-The logger uses an explicit safe-attribute allowlist. Failure logs separate the
-observed operation (`mcp.method.name` or a bounded runtime-operation field) from
-canonical `action`, which is a bounded remediation instruction. They include a
-diagnostic code and one of four observed lifecycle stages (`mcp_handler`,
-`http_request`, `runtime_start`, or `runtime_shutdown`), plus explicit
-`unobserved` values for owner, retryability, cause, and domain when downstream
-ownership cannot be proven. The optional error adapter structurally rebuilds
-events from an allowlist: free-form
-exception values, request/user/extra/breadcrumb data, raw paths, functions, and
-source context are discarded; only a fixed exception value, safe type/frame
-shape, canonical tags, and valid OpenTelemetry trace/span identifiers remain.
-Each configured signal is independent: error-only and log-only configurations
-still wrap the MCP handler-registration seam even without an OTLP tracer. Error
-capture is strictly observational: an adapter exception emits only a fixed
-secret-free diagnostic and cannot replace an MCP result or handler exception.
+Telemetry is opt-in. Standard `OTEL_EXPORTER_OTLP_*` configuration controls
+OTLP export and `BETTERSTACK_MCP_DSN` controls optional error capture. Telemetry
+failure cannot replace a tool result or change transport behavior. Request
+arguments, credentials, arbitrary paths, results, and unbounded identifiers are
+excluded from telemetry attributes and error events.
 
 ## State and data
 
-The MCP owns no durable deployment or billing state.
+The MCP owns no durable deployment, release, pricing, or billing state.
 
-| State | Location | Durability / scaling property |
+| State | Location | Custody |
 |---|---|---|
-| Deploy key/config | environment or MCP host `~/.varitykit/config.json` | host-local secret; never return or log |
-| HTTP MCP sessions | `src/index.ts` in-memory map | lost on restart; not shared across replicas |
-| HTTP rate-limit counters | `src/index.ts` in-memory map | lost on restart; per process/IP |
-| OAuth client lookup | `src/auth/provider.ts` in-memory map | process-local; current code does not provide a durable client registry |
+| Deploy key/config | environment or `~/.varitykit/config.json` | host-local secret; never return or log |
+| GitHub credential | process environment or GitHub CLI | read for one operation; never place in MCP input, Git argv, or `.git/config` |
+| Docs sections | process memory | expires after five minutes; refresh failure returns no stale authority |
 | Local dev-server registry | `~/.varitykit/dev-servers.json` | host-local helper state, not platform truth |
-| Telemetry batches and metric aggregation | process memory in the official OpenTelemetry SDKs | bounded queues/cardinality; stdio readiness is emitted only after signal shutdown custody is installed; batches flush on stdio close, SIGTERM, SIGINT, HTTP shutdown, or fatal startup; transport-close failure cannot skip telemetry custody or report success |
-| Deployment/release/log/billing truth | downstream Varity control plane | never cached as durable authority here |
+| Telemetry buffers | process memory in OpenTelemetry SDKs | flushed on stdio close, signals, or fatal startup |
+| Deployment/release/log/billing truth | downstream Varity control plane | read or mutated only through the two adapters above |
 
-Tool results and logs must not include deploy keys, OAuth tokens, registry
-passwords, GitHub tokens, private environment values, or downstream internal
-credentials.
-
-Release acceptance creates one random, masked bearer inside the Actions runner.
-The bearer is passed only through process environments to the ephemeral verifier
-fixture and hosted function gate; it is never placed in a container environment,
-image layer, command argument, artifact, or diagnostic. The fixture returns one
-fixed read-only principal, has no durable state, and is not included in the
-runtime container. The retained artifact is self-contained: exact digest/version
-and health receipts, structured `tools/list` and real `tools/call` receipts,
-gate stdout/stderr, fixture diagnostics, container diagnostics, and the final
-`ACCEPTANCE PASS` receipt. Every regular evidence entry is scanned for the
-bearer before upload; a missing, malformed, unreadable, or non-regular entry
-fails closed.
+The compatibility resource contains only live-owner routes. It must not regain
+copied prices, quotas, supported-stack lists, topology, availability promises,
+or release state.
 
 ## Failure semantics
 
-- The CLI adapter never throws a command failure to callers; it returns stdout,
-  stderr, and a normalized non-zero exit code. Tool modules translate that into
-  the MCP error response.
-- Lifecycle mutation tools extract only the CLI's durable run reference. They
-  report accepted work as in progress and never infer terminal redeploy,
-  deletion, or billing-stop completion from process exit alone.
-- CLI commands have explicit bounded timeouts; deploy has a longer bounded
-  window than ordinary operations. Output is capped and terminal color is
-  disabled before parsing.
-- The public-interface adapter aborts after 60 seconds so deploy-key-authenticated gateway
-  reconciliation can finish, and preserves structured
-  downstream code/message/action fields. Transport failures become
+- CLI command failures return normalized stdout, stderr, and an exit code;
+  tools convert that result into the shared MCP error shape.
+- Deployment-family success means command acceptance. Tools project only a
+  valid durable run reference and an explicitly reported public URL; they never
+  manufacture deployment IDs, terminal status, or liveness.
+- Migration is preview-only for URL input. Its `finally` cleanup removes the
+  exact temporary clone on every completion/failure path; apply/deploy requests
+  fail closed with the user-controlled-checkout workflow.
+- The public-interface adapter aborts bounded reads and preserves downstream
+  code/message/action fields. Transport failures become
   `VARITY_API_UNREACHABLE`.
-- Public URL liveness checks abort after 8 seconds. A failed probe affects the
-  current response only; it does not mutate canonical deployment state.
-- HTTP sessions, rate limits, and OAuth client lookup are process-local. Loss of
-  process state must fail closed or require session reinitialization, never
-  manufacture a successful operation.
-- A healthy hosted process is not authorization proof. The exact deployed MCP,
-  auth-service, and gateway releases must pass registration, authorization,
-  exchange, verification, authenticated MCP request, revocation, and cleanup. A
-  separately proven OAuth-principal/downstream-owner equality and an owner-bound
-  operation are required before any per-user hosted operation is registered.
-- A release alias is not artifact identity. The tag workflow holds one global
-  non-cancelling release lock, accepts the candidate by digest, verifies exact
-  health and the authenticated Option B function, attests that digest, and then
-  revalidates both immutable aliases immediately before promotion. Only an
-  explicit registry `manifest unknown` or `no such manifest` diagnostic proves
-  absence; missing Docker/buildx/credential helpers, authentication, outage,
-  timeout, empty, or malformed results fail closed. An intervening alias aborts
-  promotion, and all promoted aliases must resolve back to the accepted digest.
-- Tool input validation happens before adapter calls. User-controlled values
-  must remain argv entries or encoded URL segments, never shell fragments.
-- Telemetry initialization/export failure degrades to a bounded stderr
-  diagnostic and never changes the MCP result. Export credentials remain only
-  in exporter headers. Shutdown waits for buffered telemetry before exit.
-- MCP error results and thrown handlers are observability failures, not proof
-  that Varity or a supplier owns the underlying defect; their failure domain is
-  `unobserved` until an owning adapter supplies evidence.
+- Public URL liveness probes are observations for the current status response;
+  they do not mutate canonical deployment state.
+- User-controlled values remain argv entries or encoded URL components, never
+  shell fragments.
+- Repository pushes are normal fast-forward-safe pushes. Divergence is an error
+  for the user to inspect; the MCP never overwrites remote history.
+- Telemetry failure emits a bounded stderr diagnostic and cannot change the MCP
+  result. Shutdown retains telemetry custody even when transport close fails.
 
 ## Verification
 
-Required repository checks:
+Required checks:
 
 ```bash
 npm run check:architecture
 npm run build
 npm test
+git diff --check
 ```
 
-Automated coverage includes CLI child-environment normalization, stderr-only
-diagnostic logging and safe attributes, public URL liveness classification,
-log completeness/freshness passthrough, lifecycle acceptance semantics,
-public-interface endpoint/timeout policy, in-memory MCP span/log/metric
-correlation, protected-input exclusion, error-only capture, structural Sentry
-allowlisting, real synthetic OTLP HTTP construction, stdio shutdown flushing,
-failed-close telemetry custody, package startup at the exact Node 22.11 LTS minimum and on Node 24, actual Node 22
-container health, stable-principal verification, cross-principal session
-rejection, exact hosted tool registration, a deterministic real-package public-
-documentation tool call, the fail-closed credential-opaque release verifier
-fixture, fail-closed registry absence classification, promotion-time TOCTOU
-revalidation, complete credential-opaque release evidence, the digest-first
-release ordering, and the separately runnable live hosted function gate.
-High-value missing contract tests are
-the complete stdio registration surface, public-interface auth/error
-normalization, structured response shape, live production OAuth verification, and
-cross-replica HTTP session behavior.
-These are test gaps, not permission to create a second implementation.
+CI runs the full build/test job on Node 22.11 and executes the built stdio
+entrypoint on Node 22.11 and Node 24. The runtime test verifies the MCP
+initialize response reports the exact package version and that retired network
+transport arguments fail closed.
 
-## Release change evidence across the seven required metrics
-
-- **maximum speed:** one image build feeds acceptance, attestation, and all
-  aliases; the workflow does not rebuild after smoke.
-- **scalability:** one repository-wide release lock and digest identity prevent
-  competing tag runs without adding runtime state or a request-path dependency.
-- **flexibility:** acceptance reuses the existing hosted function gate and
-  production verifier interface; registry classification and evidence checking
-  are separate deep modules with executable interfaces.
-- **reliability:** ambiguous registry results and promotion races fail closed;
-  health, version, anonymous rejection, authenticated session, exact Option B
-  allowlist, and real `tools/call` must pass before promotion.
-- **durability:** the accepted OCI digest is the release identity, with max
-  provenance, an SBOM, GitHub attestation, and a self-contained artifact holding
-  exact digest/version, health, gate, diagnostic, and PASS receipts.
-- **security:** semver aliases require confirmed absence twice; the production
-  verifier implementation is exercised; no filesystem, process, customer-data,
-  or mutation tool becomes reachable over HTTP.
-- **privacy:** the random bearer is masked and excluded from the image; every
-  gate output, receipt, and diagnostic is scanned before upload, while missing,
-  malformed, unreadable, or non-regular evidence fails closed.
+High-value coverage includes CLI environment normalization, stderr-only logging,
+public URL liveness classification, log completeness/freshness, lifecycle
+acceptance semantics, public-interface timeout policy, telemetry correlation and
+protected-input exclusion, real synthetic OTLP construction, shutdown flushing,
+and tool annotation discovery. Missing behavior should be added behind the two
+existing adapters rather than through a second implementation.
 
 ## Change navigation
 
-- Tool name/schema/response change: update the owning `src/tools/*` module,
-  tests, public MCP documentation, and this map if the interface semantics
-  changed.
-- CLI command/timeout/output change: update `cli-bridge.ts` and adapter tests;
-  keep command policy out of individual callers where possible.
-- Public route/auth/error change: update `public-api.ts`, its contract tests,
-  and the public API/docs surfaces together.
-- Transport/session/OAuth change: update `index.ts`, `auth/provider.ts`,
-  topology/security sections here, and add an ADR when the choice is
-  load-bearing.
-- Telemetry signal/attribute/export change: update `telemetry.ts`, the logger,
-  correlation/transport tests, and the telemetry/security sections here. Live
-  ingest configuration remains outside this repository.
-- New durable state, provider logic, pricing policy, or orchestration logic:
-  stop. That belongs behind the Varity control plane, not in this repository.
+- Tool schema/response change: update the owning `src/tools/*` module, public
+  README surface, regression tests, and this map if semantics changed.
+- CLI command/timeout/output change: update `src/utils/cli-bridge.ts` and adapter
+  tests; keep command policy out of individual callers.
+- Public route/auth/error change: update `src/utils/public-api.ts` and its
+  contract tests with the owning public API/docs surfaces.
+- Resource/prompt change: preserve stable MCP names while routing mutable facts
+  to live owners.
+- Transport, credential custody, telemetry, durable state, pricing policy, or
+  orchestration change: update this map and route cross-repository impact through
+  the control repository before implementation.

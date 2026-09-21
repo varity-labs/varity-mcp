@@ -25,19 +25,23 @@ test("lifecycle tracking extracts only a valid durable run reference", () => {
 });
 
 test("lifecycle tools preserve acceptance and never manufacture completion", async () => {
-  const [redeploy, setEnv, deletion] = await Promise.all([
+  const [redeploy, deletion, deploy, templates] = await Promise.all([
     readFile(new URL("../src/tools/redeploy.ts", import.meta.url), "utf8"),
-    readFile(new URL("../src/tools/set-env.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/tools/delete-deployment.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/tools/deploy.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/tools/agent.ts", import.meta.url), "utf8"),
   ]);
 
-  for (const source of [redeploy, setEnv, deletion]) {
+  for (const source of [redeploy, deletion, deploy, templates]) {
     assert.match(source, /lifecycleTracking/);
     assert.match(source, /outcome_unconfirmed/);
     assert.doesNotMatch(source, /goes live in about a minute/i);
+    assert.doesNotMatch(source, /status:\s*["']deployed["']/i);
   }
   assert.match(deletion, /deleted: false/);
   assert.doesNotMatch(deletion, /billing has stopped/i);
+  assert.doesNotMatch(deploy, /deploymentId\s*=\s*["']unknown["']/);
+  assert.doesNotMatch(templates, /deployed:\s*true/);
 });
 
 test("redeploy is never described as a verified restart", async () => {

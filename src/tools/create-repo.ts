@@ -7,8 +7,8 @@
  */
 
 import { z } from "zod";
-import { execFileSync, execSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
@@ -59,9 +59,7 @@ const DEFAULT_IGNORES = [
   "node_modules/",
   "__pycache__/",
   "*.pyc",
-  ".env",
-  ".env.local",
-  ".env.*.local",
+  ".env*",
   "dist/",
   "build/",
   ".venv/",
@@ -92,49 +90,181 @@ function ensureGitignore(projectPath: string): void {
   writeFileSync(gitignorePath, existing + separator + header + missing.join("\n") + "\n");
 }
 
+const PREFLIGHT_SKIP_DIRECTORIES = new Set([
+  ".git",
+]);
+
+function findEnvPaths(projectPath: string, directory = projectPath): string[] {
+  const matches: string[] = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const absolutePath = path.join(directory, entry.name);
+    const relativePath = path.relative(projectPath, absolutePath).split(path.sep).join("/");
+    if (entry.name.startsWith(".env")) {
+      matches.push(relativePath);
+      continue;
+    }
+    if (entry.isDirectory() && !PREFLIGHT_SKIP_DIRECTORIES.has(entry.name)) {
+      matches.push(...findEnvPaths(projectPath, absolutePath));
+    }
+  }
+  return matches;
+}
+
+function refuseEnvPaths(paths: string[]): void {
+  if (paths.length === 0) return;
+  throw new Error(
+    `Refusing to commit or push secret-bearing .env* paths: ${paths.sort().join(", ")}. ` +
+    "Remove them from the project and Git index, and store only reviewed, non-secret examples under a different name."
+  );
+}
+
+function trackedEnvPaths(projectPath: string, env: NodeJS.ProcessEnv): string[] {
+  try {
+    return execFileSync("git", ["ls-files", "-z"], {
+      cwd: projectPath,
+      env,
+      encoding: "utf8",
+      stdio: "pipe",
+    }).split("\0").filter((file) => path.posix.basename(file).startsWith(".env"));
+  } catch {
+    return [];
+  }
+}
+
+function refuseRepositoryHooks(projectPath: string, env: NodeJS.ProcessEnv): void {
+  try {
+    const configuredHooksPath = execFileSync("git", ["config", "--path", "--get", "core.hooksPath"], {
+      cwd: projectPath,
+      env,
+      encoding: "utf8",
+      stdio: "pipe",
+    }).trim();
+    if (configuredHooksPath) {
+      throw new Error(`configured hooks path ${configuredHooksPath}`);
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("configured hooks path ")) throw error;
+  }
+
+  try {
+    const hooksDirectory = execFileSync("git", ["rev-parse", "--git-path", "hooks"], {
+      cwd: projectPath,
+      env,
+      encoding: "utf8",
+      stdio: "pipe",
+    }).trim();
+    const absoluteHooksDirectory = path.resolve(projectPath, hooksDirectory);
+    if (!existsSync(absoluteHooksDirectory)) return;
+    const activeHooks = readdirSync(absoluteHooksDirectory).filter((name) => {
+      if (name.endsWith(".sample")) return false;
+      return (statSync(path.join(absoluteHooksDirectory, name)).mode & 0o111) !== 0;
+    });
+    if (activeHooks.length > 0) throw new Error(`active hooks: ${activeHooks.sort().join(", ")}`);
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("active hooks: ")) throw error;
+  }
+}
+
 /**
  * Push local project directory to GitHub repo.
  * Handles: git init, remote setup, initial commit, push.
  */
-function pushLocalProject(projectPath: string, cloneUrl: string, token: string): void {
-  // Embed token in URL for authentication (HTTPS push)
-  const authUrl = cloneUrl.replace("https://", `https://${token}@`);
-  const opts = { cwd: projectPath, stdio: "pipe" as const };
+export function pushLocalProject(projectPath: string, cloneUrl: string, token: string): void {
+  const childEnv = { ...process.env };
+  for (const name of Object.keys(childEnv)) {
+    if (
+      name.startsWith("GIT_TRACE") ||
+      name === "GIT_TEMPLATE_DIR" ||
+      name === "GITHUB_TOKEN" ||
+      name === "GH_TOKEN"
+    ) {
+      delete childEnv[name];
+    }
+  }
+
+  // Preflight before git init, config, remote, ignore, or index mutation. The
+  // filesystem scan covers ignored/untracked files; the index scan independently
+  // proves that already-tracked .env* paths cannot pass.
+  refuseEnvPaths([...new Set([...findEnvPaths(projectPath), ...trackedEnvPaths(projectPath, childEnv)])]);
+
+  // Arbitrary repository hooks run as the MCP host user. Refuse a credentialed
+  // push when hooks are configured instead of leaking the push credential or
+  // bypassing hooks with --no-verify.
+  try {
+    refuseRepositoryHooks(projectPath, childEnv);
+  } catch (error) {
+    throw new Error(`Refusing credentialed push while Git hooks are configured: ${error instanceof Error ? error.message : String(error)}.`);
+  }
+
+  // Local Git commands must not inherit ambient API credentials. The normal
+  // hook-free push receives an ephemeral HTTP header instead: the secret never
+  // enters a command argument or the stored remote URL.
+  const basicCredential = Buffer.from(`x-access-token:${token}`).toString("base64");
+  const localOpts = {
+    cwd: projectPath,
+    stdio: "pipe" as const,
+    env: childEnv,
+  };
+  const pushOpts = {
+    ...localOpts,
+    env: {
+      ...localOpts.env,
+      GIT_TERMINAL_PROMPT: "0",
+      // GIT_CONFIG_PARAMETERS is supported by the repository's Git 2.25 host;
+      // the newer GIT_CONFIG_COUNT/KEY/VALUE protocol is not.
+      GIT_CONFIG_PARAMETERS:
+        `'http.https://github.com/.extraheader=AUTHORIZATION: basic ${basicCredential}' ` +
+        `'credential.helper='`,
+    },
+  };
 
   // Init git if not already
-  try { execFileSync("git", ["init"], opts); } catch { /* already init */ }
+  try { execFileSync("git", ["init", "--template="], localOpts); } catch { /* already init */ }
 
   // Set git user config for automated environment (needed if no global config)
-  try { execFileSync("git", ["config", "user.email", "varity-mcp@varity.so"], opts); } catch { /* ok */ }
-  try { execFileSync("git", ["config", "user.name", "Varity MCP"], opts); } catch { /* ok */ }
+  try { execFileSync("git", ["config", "user.email", "varity-mcp@varity.so"], localOpts); } catch { /* ok */ }
+  try { execFileSync("git", ["config", "user.name", "Varity MCP"], localOpts); } catch { /* ok */ }
 
-  // Set or update remote origin, authUrl passed as array arg, never shell-interpolated
+  // Store only the credential-free clone URL.
   try {
-    execFileSync("git", ["remote", "add", "origin", authUrl], opts);
+    execFileSync("git", ["remote", "add", "origin", cloneUrl], localOpts);
   } catch {
-    execFileSync("git", ["remote", "set-url", "origin", authUrl], opts);
+    execFileSync("git", ["remote", "set-url", "origin", cloneUrl], localOpts);
   }
 
   ensureGitignore(projectPath);
 
-  execFileSync("git", ["add", "-A"], opts);
+  execFileSync("git", ["add", "--", "."], localOpts);
 
-  // Commit (skip if nothing to commit)
+  // .gitignore does not protect files that were already tracked. Inspect the
+  // actual index after staging and refuse every .env* path before any commit
+  // or network operation. This intentionally fails closed for sample files as
+  // well: callers can rename reviewed examples before asking the tool to push.
+  const trackedPaths = execFileSync("git", ["ls-files", "-z"], {
+    ...localOpts,
+    encoding: "utf8",
+  }).split("\0").filter(Boolean);
+  const secretPaths = trackedPaths.filter((file) => path.posix.basename(file).startsWith(".env"));
+  refuseEnvPaths(secretPaths);
+
+  // Commit only when this invocation staged a change. Other commit failures
+  // remain failures rather than being misclassified as "nothing to commit".
   try {
-    execFileSync("git", ["commit", "-m", "Initial commit"], opts);
-  } catch {
-    // Nothing to commit or already committed, ok
+    execFileSync("git", ["diff", "--cached", "--quiet"], localOpts);
+  } catch (error) {
+    const status = (error as { status?: number }).status;
+    if (status !== 1) throw error;
+    execFileSync("git", ["commit", "-m", "Initial commit"], localOpts);
   }
 
-  // Push to main branch (rename if needed)
+  // A normal push fails closed on divergence; this tool never overwrites a
+  // remote branch or renames the user's current local branch.
   try {
-    execFileSync("git", ["branch", "-M", "main"], opts);
-  } catch { /* ok */ }
-
-  execFileSync("git", ["push", "-u", "origin", "main", "--force"], opts);
-
-  // Remove token from remote URL immediately after push, token must not persist in .git/config
-  execFileSync("git", ["remote", "set-url", "origin", cloneUrl], opts);
+    refuseRepositoryHooks(projectPath, childEnv);
+  } catch (error) {
+    throw new Error(`Refusing credentialed push while Git hooks are configured: ${error instanceof Error ? error.message : String(error)}.`);
+  }
+  execFileSync("git", ["push", "-u", "origin", "HEAD:main"], pushOpts);
 }
 
 /**
@@ -174,7 +304,7 @@ export function registerCreateRepoTool(server: McpServer): void {
         "Pass the 'path' parameter with the local project directory. This creates an empty repo " +
         "and pushes your actual code to GitHub. " +
         "The GitHub URL is required for dynamic deployments, so call this before varity_deploy when you have code locally but no repo yet. " +
-        "Requires a GitHub personal access token (classic) with repo scope from https://github.com/settings/tokens.",
+        "Requires GitHub CLI authentication or a GITHUB_TOKEN/GH_TOKEN environment variable with repository access.",
       inputSchema: {
         name: z
           .string()
@@ -191,30 +321,29 @@ export function registerCreateRepoTool(server: McpServer): void {
             "(e.g. '/home/user/my-app'). Pushes the actual project code. " +
             "Required for apps that will use varity_deploy with dynamic hosting."
           ),
-        visibility: z.enum(["public", "private"]).default("public").describe("Repository visibility"),
-        github_token: z
-          .string()
-          .optional()
-          .describe("GitHub personal access token (optional if GITHUB_TOKEN env var is set). Needs 'repo' scope."),
+        visibility: z.enum(["public", "private"]).default("private").describe("Repository visibility"),
       },
       annotations: {
         destructiveHint: true,
       },
     },
-    async ({ name, description, path: projectPath, visibility, github_token }) => {
-      // Resolve token
-      let token = github_token || process.env.GITHUB_TOKEN;
+    async ({ name, description, path: projectPath, visibility }) => {
+      // Credentials are read from the MCP host, never accepted in tool arguments.
+      let token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
       if (!token) {
         try {
-          const ghToken = execSync("gh auth token", { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
+          const ghToken = execFileSync("gh", ["auth", "token"], {
+            encoding: "utf-8",
+            stdio: ["pipe", "pipe", "pipe"],
+          }).trim();
           if (ghToken) token = ghToken;
         } catch { /* gh CLI not available */ }
       }
       if (!token) {
         return errorResponse(
           "MISSING_TOKEN",
-          "GitHub token required. Either pass github_token parameter or set GITHUB_TOKEN environment variable.",
-          "Get a token from https://github.com/settings/tokens (needs 'repo' scope). Tip: Install the GitHub CLI (gh) and run 'gh auth login' for automatic token detection."
+          "GitHub authentication is required, but no GitHub CLI session or GITHUB_TOKEN/GH_TOKEN environment variable was found.",
+          "Run `gh auth login`, or set GITHUB_TOKEN/GH_TOKEN in the MCP process environment. Do not pass credentials in chat or tool arguments."
         );
       }
 
@@ -267,11 +396,10 @@ export function registerCreateRepoTool(server: McpServer): void {
             return errorResponse(
               "PUSH_FAILED",
               `Repository ${isUpdate ? "exists" : "created"} at ${repo.html_url} but failed to push: ${pushMsg}`,
-              "Push manually: git init && git remote add origin " + repo.clone_url + " && git add -A && git commit -m 'Update' && git push -u origin main --force"
+              "Inspect the local Git status and remote history, confirm Git authentication is configured, then push without force after resolving any divergence: git push -u origin HEAD:main"
             );
           }
 
-          const gitpodUrl = `https://gitpod.io/#${repo.html_url}`;
           const nameNote = wasTaken
             ? `⚠️ '${name}' was already taken, repository created as '${usedName}'.`
             : undefined;

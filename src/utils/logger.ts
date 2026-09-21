@@ -1,8 +1,7 @@
 /**
  * Structured logging for the MCP server.
  *
- * Every line goes to STDERR, never stdout. In stdio transport — the default,
- * and the only transport certified for owner-scoped operations — stdout IS the
+ * Every line goes to STDERR, never stdout. In the stdio transport, stdout IS the
  * JSON-RPC channel, so a single stray byte written there corrupts the MCP
  * stream for the client. Centralising the stream choice here is the point of
  * this module: individual call sites must not have to remember it.
@@ -33,20 +32,13 @@ const SAFE_ATTRIBUTE_KEYS = new Set([
   "gen_ai.operation.name",
   "gen_ai.prompt.name",
   "gen_ai.tool.name",
-  "http.request.method",
-  "http.response.status_code",
   "mcp.method.name",
-  "network.protocol.name",
   "network.transport",
   "owner_id",
   "retryable",
   "lifecycle_stage",
   "so.varity.mcp.operation.name",
-  "url.path",
 ]);
-
-const SAFE_HTTP_METHODS = new Set(["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]);
-const SAFE_HTTP_PATHS = new Set(["/", "/health", "/mcp"]);
 
 function sanitizeText(value: string): string {
   return value
@@ -61,9 +53,7 @@ function safeAttributes(meta?: Record<string, unknown>): TelemetryAttributes {
   for (const [key, value] of Object.entries(meta)) {
     if (!SAFE_ATTRIBUTE_KEYS.has(key)) continue;
     if (typeof value === "string") {
-      if (key === "http.request.method") safe[key] = SAFE_HTTP_METHODS.has(value) ? value : "OTHER";
-      else if (key === "url.path") safe[key] = SAFE_HTTP_PATHS.has(value) ? value : "/_other";
-      else if ((key === "error.type" || key.startsWith("gen_ai.")) && !/^[A-Za-z0-9_.-]{1,80}$/.test(value)) {
+      if ((key === "error.type" || key.startsWith("gen_ai.")) && !/^[A-Za-z0-9_.-]{1,80}$/.test(value)) {
         safe[key] = "_OTHER";
       } else safe[key] = sanitizeText(value);
     }
@@ -96,20 +86,3 @@ export const logger = {
   warn: (message: string, meta?: Record<string, unknown>) => emit("warn", message, meta),
   error: (message: string, meta?: Record<string, unknown>) => emit("error", message, meta),
 };
-
-/**
- * Log an HTTP request served by the Streamable HTTP transport.
- */
-export function logHttpRequest(
-  method: string,
-  path: string,
-  statusCode: number,
-  duration: number
-): void {
-  emit("info", "HTTP request", {
-    "http.request.method": method,
-    "url.path": path,
-    "http.response.status_code": statusCode,
-    duration_ms: duration,
-  });
-}

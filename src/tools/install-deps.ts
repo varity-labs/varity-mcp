@@ -95,7 +95,7 @@ export function registerInstallDepsTool(server: McpServer): void {
         return errorResponse(
           "PIP_INSTALL_FAILED",
           `pip install failed:\n${((py.stdout || "") + "\n" + (py.stderr || "")).slice(-2000)}`,
-          "Ensure Python 3.10+ and pip are installed (run varity_doctor), then retry."
+          "Ensure the Python version required by this project and pip are installed, then retry."
         );
       }
 
@@ -197,7 +197,7 @@ export function registerInstallDepsTool(server: McpServer): void {
           return errorResponse(
             "MISSING_BINARIES",
             `npm install reported success but framework binaries are missing: ${exitZeroMissingBins.join(", ")}. The installation is incomplete.`,
-            "Call varity_install_deps again to retry. If the issue persists, ensure Node.js v18+ is installed."
+            "Call varity_install_deps again to retry. If the issue persists, verify the Node.js version required by this package."
           );
         }
 
@@ -303,7 +303,7 @@ export function registerInstallDepsTool(server: McpServer): void {
           return errorResponse(
             "MISSING_BINARIES",
             `npm install completed but framework binaries are missing: ${missingBins.join(", ")}. node_modules is in a broken state.`,
-            "Call varity_install_deps again to retry. If the issue persists, ensure Node.js v18+ is installed."
+            "Call varity_install_deps again to retry. If the issue persists, verify the Node.js version required by this package."
           );
         }
       } catch {
@@ -335,7 +335,7 @@ export function registerInstallDepsTool(server: McpServer): void {
               return errorResponse(
                 "MISSING_BINARIES",
                 `Cleaned and reinstalled, but framework binaries are still missing: ${retryMissing.join(", ")}.`,
-                "Call varity_install_deps again to retry. If the issue persists, ensure Node.js v18+ is installed."
+                "Call varity_install_deps again to retry. If the issue persists, verify the Node.js version required by this package."
               );
             }
             const addedMatch = retryOutput.match(/added (\d+) packages?/);
@@ -351,7 +351,7 @@ export function registerInstallDepsTool(server: McpServer): void {
         return errorResponse(
           "BROKEN_NODE_MODULES",
           "npm install failed because of a broken pre-installed node_modules directory.",
-          "Call varity_install_deps again to retry. If the issue persists, ensure Node.js v18+ is installed."
+          "Call varity_install_deps again to retry. If the issue persists, verify the Node.js version required by this package."
         );
       }
 

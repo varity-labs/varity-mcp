@@ -1,49 +1,22 @@
 import { z } from "zod";
-import { mkdtemp, rm, readFile, readdir } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { execCLI, execVaritykit, stripAnsi } from "../utils/cli-bridge.js";
-import { getDeploymentsDir } from "../utils/config.js";
 
 function isGitHubUrl(url: string): boolean {
   return /^https?:\/\/github\.com\/|^git@github\.com:/.test(url);
 }
 
-/** Extract the deployed URL from varitykit deploy output or the deployments dir. */
-async function extractDeployUrl(output: string): Promise<string> {
-  // Try reading the latest deployment record first (most reliable)
-  try {
-    const deploymentsDir = getDeploymentsDir();
-    const files = await readdir(deploymentsDir);
-    const jsonFiles = files.filter((f) => f.endsWith(".json")).sort().reverse();
-    if (jsonFiles.length > 0) {
-      const latest = JSON.parse(await readFile(join(deploymentsDir, jsonFiles[0]!), "utf-8"));
-      // Always surface the clean varity.app URL. Never an internal host.
-      if (latest.custom_domain?.url) return latest.custom_domain.url;
-      const slug = latest.custom_domain?.subdomain || latest.app_name || latest.project_name;
-      if (slug) return `https://varity.app/${slug}/`;
-      if (typeof latest.url === "string" && latest.url.startsWith("https://varity.app")) {
-        return latest.url;
-      }
-    }
-  } catch {
-    // fall through to regex
-  }
-  // Fallback: grep the output for a varity.app URL only.
-  const match = output.match(/https?:\/\/varity\.app\/[^\s)]+/i);
-  return match?.[0] ?? "";
-}
-
-/** Parse the `varitykit migrate apply` output into a structured summary. */
-function parseMigrateApplyOutput(raw: string): {
-  changes_applied: string[];
+function parseMigratePreview(raw: string): {
+  changes: string[];
   warnings: string[];
-  nothing_to_migrate: boolean;
+  nothingToMigrate: boolean;
 } {
   const text = stripAnsi(raw);
-  const changes_applied: string[] = [];
+  const changes: string[] = [];
   const warnings: string[] = [];
 
   if (
@@ -51,224 +24,118 @@ function parseMigrateApplyOutput(raw: string): {
     text.includes("Nothing to migrate") ||
     text.includes("(no changes)")
   ) {
-    return { changes_applied, warnings, nothing_to_migrate: true };
+    return { changes, warnings, nothingToMigrate: true };
   }
 
   for (const line of text.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-
-    if (/^~\s/.test(trimmed)) {
-      const path = trimmed.replace(/^~\s+(?:modified:\s*)?/, "").trim();
-      if (path) changes_applied.push("Modified: " + path);
-    } else if (/^-\s/.test(trimmed) && !trimmed.startsWith("->")) {
-      const path = trimmed.replace(/^-\s+(?:removed:\s*)?/, "").trim();
-      if (path) changes_applied.push("Removed: " + path);
-    } else if (/^\+\s/.test(trimmed)) {
-      const path = trimmed.replace(/^\+\s+(?:created:\s*)?/, "").trim();
-      if (path) changes_applied.push("Created: " + path);
-    } else if (/^removed\s+\S/.test(trimmed)) {
-      changes_applied.push(trimmed);
-    } else if (trimmed.startsWith("→") || trimmed.startsWith("->")) {
-      changes_applied.push(trimmed.replace(/^[-→>]+\s*/, "").trim());
-    } else if (/^[^:]+:\s+\S+\s*→/.test(trimmed)) {
-      changes_applied.push(trimmed);
+    if (/^[~+-]\s/.test(trimmed) || trimmed.startsWith("→") || trimmed.startsWith("->")) {
+      changes.push(trimmed);
     } else if (trimmed.startsWith("⚠") || trimmed.toLowerCase().startsWith("warning:")) {
       warnings.push(trimmed.replace(/^⚠\s*/, "").trim());
-    } else if (trimmed.startsWith("•")) {
-      warnings.push(trimmed.replace(/^•\s*/, "").trim());
     }
   }
-
-  return { changes_applied, warnings, nothing_to_migrate: false };
+  return { changes, warnings, nothingToMigrate: false };
 }
 
 export function registerMigrateTool(server: McpServer): void {
   server.registerTool(
     "varity_migrate",
     {
-      title: "Migrate from Vercel to Varity",
+      title: "Preview a Vercel Migration",
       description:
-        "Migrate a Vercel project to Varity in one step: clones the GitHub repository, " +
-        "removes Vercel-specific artifacts (vercel.json, @vercel/* packages, image optimizer config, " +
-        "env var renames), and deploys the transformed app to Varity infrastructure. " +
-        "Returns a live deployment URL and a migration report. " +
-        "Works with Next.js projects. Use this when a developer wants to move their Vercel app to Varity.",
+        "Clone a GitHub repository into a disposable directory and preview the transformations " +
+        "the current varitykit migration owner would apply. This tool does not mutate the source " +
+        "repository or deploy. Applying a migration requires a user-controlled local checkout so " +
+        "the transformed source can be reviewed, committed, and pushed before deployment.",
       inputSchema: {
         github_url: z
           .string()
-          .describe(
-            "GitHub repository URL to migrate (e.g. 'https://github.com/user/my-vercel-app'). " +
-            "The repository will be cloned to a temporary directory, transformed, and deployed."
-          ),
+          .describe("GitHub repository URL to inspect, for example https://github.com/user/app."),
         dry_run: z
           .boolean()
           .optional()
-          .default(false)
-          .describe(
-            "If true, show what would change without deploying. Useful for previewing migration impact."
-          ),
+          .default(true)
+          .describe("Must remain true. URL-based migration is preview-only until transformed-source custody is explicit."),
       },
-      annotations: {
-        destructiveHint: true,
-      },
+      annotations: { readOnlyHint: true },
     },
     async ({ github_url, dry_run }) => {
-      // Validate URL
       if (!isGitHubUrl(github_url)) {
         return errorResponse(
           "INVALID_URL",
           `Not a valid GitHub URL: ${github_url}`,
-          "Provide a URL like https://github.com/username/repo-name"
+          "Provide a URL like https://github.com/username/repository."
         );
       }
 
-      // Create temp directory for the clone
-      const cloneDir = await mkdtemp(join(tmpdir(), "varity-migrate-")).catch(() => null);
+      if (!dry_run) {
+        return errorResponse(
+          "MIGRATION_SOURCE_CUSTODY_REQUIRED",
+          "URL-based migration cannot safely apply or deploy changes because a transformed temporary clone is not the backend's repository source.",
+          "Clone the repository into a user-controlled checkout, run `varitykit migrate --path <checkout> --no-deploy`, review and commit the changes, push them, then call varity_deploy."
+        );
+      }
+
+      const cloneDir = await mkdtemp(join(tmpdir(), "varity-migrate-preview-")).catch(() => null);
       if (!cloneDir) {
         return errorResponse(
           "TMP_DIR_FAILED",
-          "Failed to create a temporary directory for cloning.",
-          "Check that the system has write access to the temp directory."
+          "Failed to create a temporary directory for the migration preview.",
+          "Check that the system temporary directory is writable."
         );
       }
 
-      // Clone the repository (shallow clone for speed)
-      const cloneResult = await execCLI(
-        "git",
-        ["clone", "--depth=1", github_url, cloneDir],
-        { timeout: 120_000 }
-      );
-
-      if (cloneResult.exitCode !== 0) {
-        await rm(cloneDir, { recursive: true, force: true }).catch(() => {});
-        const errText = cloneResult.stderr || cloneResult.stdout;
-        if (errText.includes("not found") || errText.includes("does not exist") || errText.includes("Repository not found")) {
+      try {
+        const cloneResult = await execCLI(
+          "git",
+          ["clone", "--depth=1", github_url, cloneDir],
+          { timeout: 120_000 }
+        );
+        if (cloneResult.exitCode !== 0) {
+          const detail = (cloneResult.stderr || cloneResult.stdout).slice(-1000);
           return errorResponse(
-            "REPO_NOT_FOUND",
-            `Repository not found or not accessible: ${github_url}`,
-            "Ensure the repository exists and is public. For private repos, ensure git credentials are configured."
+            "CLONE_FAILED",
+            `Could not clone the repository for preview: ${detail}`,
+            "Check the URL, repository visibility, and local Git authentication."
           );
         }
-        return errorResponse(
-          "CLONE_FAILED",
-          `Failed to clone ${github_url}: ${errText.slice(0, 500)}`,
-          "Check the URL and your network connection."
+
+        const previewResult = await execVaritykit(
+          "migrate",
+          ["apply", cloneDir, "--dry-run"],
+          { timeout: 120_000 }
         );
-      }
+        if (previewResult.exitCode !== 0) {
+          return errorResponse(
+            "MIGRATION_PREVIEW_FAILED",
+            `varitykit could not preview the migration: ${(previewResult.stderr || previewResult.stdout).slice(-1000)}`,
+            "Upgrade varitykit if needed, inspect the reported error, and retry."
+          );
+        }
 
-      // Step 2: Apply Vercel → Varity codemods
-      const applyArgs = dry_run
-        ? ["apply", cloneDir, "--dry-run"]
-        : ["apply", cloneDir];
-
-      const applyResult = await execVaritykit("migrate", applyArgs, { timeout: 60_000 });
-      const migrationSummary = parseMigrateApplyOutput(
-        applyResult.stdout + "\n" + applyResult.stderr
-      );
-
-      // For dry runs, return immediately without deploying
-      if (dry_run) {
-        await rm(cloneDir, { recursive: true, force: true }).catch(() => {});
+        const preview = parseMigratePreview(`${previewResult.stdout}\n${previewResult.stderr}`);
         return successResponse(
           {
             dry_run: true,
             github_url,
-            nothing_to_migrate: migrationSummary.nothing_to_migrate,
-            changes_that_would_apply: migrationSummary.changes_applied,
-            warnings: migrationSummary.warnings,
-            ...(migrationSummary.nothing_to_migrate
-              ? {
-                  note: "Scanned the cloned repository and found no Vercel-specific artifacts " +
-                    "(no vercel.json, no @vercel/* dependencies, no Vercel environment variables). " +
-                    "This repository root is already compatible with Varity. " +
-                    "If your app lives in a subdirectory, provide the full GitHub URL to that path.",
-                }
-              : {}),
+            nothing_to_migrate: preview.nothingToMigrate,
+            changes_that_would_apply: preview.changes,
+            warnings: preview.warnings,
+            source_mutated: false,
+            deployed: false,
+            next_step: preview.nothingToMigrate
+              ? "No migration changes were identified. Inspect the project normally before deployment."
+              : "Clone into a user-controlled checkout, run `varitykit migrate --path <checkout> --no-deploy`, review and commit the changes, push them, then call varity_deploy.",
           },
-          migrationSummary.nothing_to_migrate
-            ? "No Vercel-specific artifacts found, this app is already Varity-compatible."
-            : `Dry run complete. ${migrationSummary.changes_applied.length} change(s) would be applied. Run with dry_run=false to migrate and deploy.`
+          preview.nothingToMigrate
+            ? "Migration preview found no Vercel-specific changes. No source was mutated and nothing was deployed."
+            : `Migration preview found ${preview.changes.length} change(s). No source was mutated and nothing was deployed.`
         );
-      }
-
-      // Step 3: Install dependencies after codemods removed @vercel/* packages
-      await execCLI("npm", ["install", "--legacy-peer-deps"], { cwd: cloneDir, timeout: 120_000 });
-
-      // Step 3.5: Verify the transformed app builds before deploying
-      try {
-        const pkgJson = JSON.parse(await readFile(join(cloneDir, "package.json"), "utf-8"));
-        if (pkgJson?.scripts?.build) {
-          const buildResult = await execCLI("npm", ["run", "build"], {
-            cwd: cloneDir,
-            timeout: 300_000,
-            env: { NODE_OPTIONS: "--max-old-space-size=4096" },
-          });
-          if (buildResult.exitCode !== 0) {
-            await rm(cloneDir, { recursive: true, force: true }).catch(() => {});
-            const buildOutput = (buildResult.stdout + "\n" + buildResult.stderr).slice(-2000);
-            return errorResponse(
-              "BUILD_FAILED",
-              `Migration codemods applied, but the app failed to build:\n${buildOutput}`,
-              "Common causes: TypeScript errors or missing peer dependencies after removing @vercel/* packages. Fix the errors in your source repo and try migrating again."
-            );
-          }
-        }
-      } catch {
-        // package.json unreadable, proceed to deploy anyway
-      }
-
-      // Step 4: Deploy via varitykit app deploy
-      const deployResult = await execVaritykit(
-        "app",
-        [
-          "deploy",
-          "--mode", "auto",
-          "--hosting", "dynamic",
-          "--path", cloneDir,
-          "--repo-url", github_url,
-        ],
-        { timeout: 300_000 }
-      );
-
-      const deployOutput = deployResult.stdout + "\n" + deployResult.stderr;
-
-      if (deployResult.exitCode !== 0) {
-        // Cleanup on deploy failure
+      } finally {
         await rm(cloneDir, { recursive: true, force: true }).catch(() => {});
-        return errorResponse(
-          "DEPLOY_FAILED",
-          `Migration codemods applied but deployment failed: ${deployOutput.slice(-500)}`,
-          "Codemods were applied to the cloned repo but the deploy step failed. " +
-          "Fix the error above and try varity_migrate again."
-        );
       }
-
-      const deployUrl = await extractDeployUrl(deployOutput);
-
-      // Cleanup temp directory on success
-      await rm(cloneDir, { recursive: true, force: true }).catch(() => {});
-
-      return successResponse(
-        {
-          github_url,
-          deployment_url: deployUrl || "Check varity_deploy_status for the live URL",
-          nothing_to_migrate: migrationSummary.nothing_to_migrate,
-          changes_applied: migrationSummary.changes_applied,
-          warnings: migrationSummary.warnings,
-          tmp_clone_cleaned: true,
-          infrastructure: {
-            hosting: "Dynamic cloud hosting, auto-configured",
-          },
-          next_steps: [
-            ...(deployUrl ? [`App live at: ${deployUrl}`] : []),
-            "Review the warnings above and manually fix anything flagged.",
-          ],
-        },
-        deployUrl
-          ? `Migration complete! ${migrationSummary.changes_applied.length} Vercel artifact(s) transformed. Live at: ${deployUrl}`
-          : `Migration complete! ${migrationSummary.changes_applied.length} Vercel artifact(s) transformed. Run varity_deploy_status for the URL.`
-      );
     }
   );
 }

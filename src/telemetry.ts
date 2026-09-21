@@ -34,7 +34,6 @@ import {
 } from "@opentelemetry/sdk-trace-base";
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { TransportMode } from "./server.js";
 
 const SERVICE_NAME = "varity-mcp";
 const INSTRUMENTATION_NAME = "@varity-labs/mcp";
@@ -91,7 +90,6 @@ export interface ErrorTelemetrySink {
 
 export interface TelemetryOptions {
   version: string;
-  transport: TransportMode;
   exporters?: TelemetryExporters;
   errorSink?: ErrorTelemetrySink;
 }
@@ -176,11 +174,10 @@ function requestParent(request: McpRequest): { parent: Context; links: Array<{ c
   return { parent: extracted, links };
 }
 
-function mcpAttributes(method: string, transport: TransportMode): Attributes {
+function mcpAttributes(method: string): Attributes {
   return {
     "mcp.method.name": method,
-    "network.transport": transport === "stdio" ? "pipe" : "tcp",
-    ...(transport === "http" ? { "network.protocol.name": "http" } : {}),
+    "network.transport": "pipe",
     ...(method === "tools/call" ? { "gen_ai.operation.name": "execute_tool" } : {}),
   };
 }
@@ -351,16 +348,16 @@ export function startTelemetry(options: TelemetryOptions): boolean {
     if (tracer) {
       tracer.startActiveSpan("service.startup", {
         kind: SpanKind.INTERNAL,
-        attributes: { "network.transport": options.transport === "stdio" ? "pipe" : "tcp" },
+        attributes: { "network.transport": "pipe" },
       }, (span) => {
         telemetryLog("info", "MCP telemetry initialized", {
-          "network.transport": options.transport === "stdio" ? "pipe" : "tcp",
+          "network.transport": "pipe",
         });
         span.end();
       });
     } else {
       telemetryLog("info", "MCP telemetry initialized", {
-        "network.transport": options.transport === "stdio" ? "pipe" : "tcp",
+        "network.transport": "pipe",
       });
     }
     return true;
@@ -376,7 +373,7 @@ export function startTelemetry(options: TelemetryOptions): boolean {
   }
 }
 
-export function instrumentMcpServer(server: McpServer, transport: TransportMode): void {
+export function instrumentMcpServer(server: McpServer): void {
   if (!active) return;
   const protocol = server.server as typeof server.server & { setRequestHandler: SetRequestHandler };
   const original = protocol.setRequestHandler.bind(protocol) as SetRequestHandler;
@@ -393,7 +390,7 @@ export function instrumentMcpServer(server: McpServer, transport: TransportMode)
       const method = request.method;
       const startedAt = process.hrtime.bigint();
       const parent = requestParent(request);
-      const baseAttributes = mcpAttributes(method, transport);
+      const baseAttributes = mcpAttributes(method);
       return tracer.startActiveSpan(method, {
         kind: SpanKind.SERVER,
         attributes: baseAttributes,
@@ -424,7 +421,7 @@ export function instrumentMcpServer(server: McpServer, transport: TransportMode)
             captureTelemetryException(new Error("MCP operation returned an error result"), {
               ...failure,
               "mcp.method.name": method,
-              "network.transport": transport === "stdio" ? "pipe" : "tcp",
+              "network.transport": "pipe",
               "error.type": "_OTHER",
             });
           } else {
@@ -448,7 +445,7 @@ export function instrumentMcpServer(server: McpServer, transport: TransportMode)
           captureTelemetryException(error, {
             ...failure,
             "mcp.method.name": method,
-            "network.transport": transport === "stdio" ? "pipe" : "tcp",
+            "network.transport": "pipe",
             "error.type": errorType,
           });
           throw error;
@@ -464,7 +461,7 @@ export function instrumentMcpServer(server: McpServer, transport: TransportMode)
 export function failureAttributes(
   remediationAction: string,
   diagnosticCode: string,
-  lifecycleStage: "mcp_handler" | "http_request" | "runtime_start" | "runtime_shutdown"
+  lifecycleStage: "mcp_handler" | "runtime_start" | "runtime_shutdown"
 ): TelemetryAttributes {
   return {
     action: remediationAction,

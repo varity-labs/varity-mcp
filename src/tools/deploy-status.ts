@@ -87,7 +87,7 @@ export function registerDeployStatusTool(server: McpServer): void {
       title: "Deployment Status",
       description:
         "List deployments or get status of a specific deployment. " +
-        "Shows URL, status, framework, size, and creation time. " +
+        "Shows the owner-scoped fields returned by the Varity public interface, including URL, status, runtime when available, and creation time. " +
         "Use this when a developer asks about their deployments, wants to check status, " +
         "or needs to find a deployment URL.",
       inputSchema: {

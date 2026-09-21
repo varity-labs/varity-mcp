@@ -13,8 +13,8 @@ export function registerRedeployTool(server: McpServer): void {
         "Reapply the saved configuration for an app that is ALREADY deployed. Use this when a developer " +
         "explicitly asks to reapply or redeploy that saved configuration. The app keeps the same deployment and URL. " +
         "An unchanged configuration may be a no-op, so this tool must not " +
-        "be presented as a verified restart for a stuck app. To change environment variables at the same time, " +
-        "use varity_set_env. To create a NEW deployment instead, use varity_deploy.",
+        "be presented as a verified restart for a stuck app. Configure secrets through an approved secret-safe interface. " +
+        "To create a NEW deployment instead, use varity_deploy.",
       inputSchema: {
         name: z
           .string()
