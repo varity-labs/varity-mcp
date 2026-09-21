@@ -11,8 +11,9 @@ Cross-repository authority lives in the `varity-engineering` control
 repository, checked out at `/home/macoding/varity-v2/varity-engineering/`
 on this host. Read its `CLAUDE.md` for current scope and retirement rules:
 
-1. `varity-engineering/CURRENT-STATE.md` for dated shipped, unfinished and
-   blocker status, and `varity-engineering/repos.yaml` for repository topology.
+1. Control `architecture/CHANGE-IMPACT.md` for concept ownership,
+   `.opencode-plan.md` for the sole current finish board, and `repos.yaml` for
+   repository topology. `CURRENT-STATE.md` is dated evidence only.
 2. [ARCHITECTURE.md](ARCHITECTURE.md) for this repository's transports, adapter
    seams, state, auth, failure semantics, and test surface.
 3. `varity-engineering/POSITIONING.md` before editing tool descriptions or
@@ -20,8 +21,8 @@ on this host. Read its `CLAUDE.md` for current scope and retirement rules:
 4. `varity-engineering/PRICING.md` before editing cost behavior.
 
 Do not copy live backend versions, release history, gate status, or pricing into
-this repository. `varity-engineering/CURRENT-STATE.md` and live probes own
-operational truth.
+this repository. Executable owners, current remote defaults, exact deployed
+refs, CI receipts, and fresh live evidence own those facts.
 
 ## Actual runtime shape
 

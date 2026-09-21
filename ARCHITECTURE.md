@@ -8,7 +8,8 @@ This document is the repository-level layer of Varity's progressive
 architecture disclosure. `varity-engineering/architecture/likec4/` owns the
 cross-repository system view (this repository is the `varity.mcp` element);
 source and tests remain the detailed executable truth. Live versions and shipped
-capability belong in `varity-engineering/CURRENT-STATE.md`, not here.
+capability come from exact deployed refs and fresh evidence;
+`varity-engineering/CURRENT-STATE.md` is a dated observation log, not an owner.
 
 ## Ownership
 
