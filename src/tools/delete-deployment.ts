@@ -1,20 +1,29 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
-import { execVaritykit } from "../utils/cli-bridge.js";
+import { deleteDeployment, VarityPublicApiError } from "../utils/public-api.js";
 import { lifecycleAcceptance } from "../utils/lifecycle-acceptance.js";
+import { INFRASTRUCTURE } from "../utils/config.js";
 
-export function deleteAccepted(name: string, stdout: string) {
-  const acceptance = lifecycleAcceptance(stdout, "deleting");
+/**
+ * `varity_delete_deployment` → `DELETE /api/deployments/:deployment` through
+ * the one public-API client. The gateway resolves an id or an app name,
+ * including a failed deploy that never got a route (varity-gateway
+ * services/deploy-ops-public.ts `resolveOwnedDeployment`).
+ */
+export async function deleteAccepted(
+  deployment: string,
+  accepted: Awaited<ReturnType<typeof deleteDeployment>>
+) {
+  const acceptance = await lifecycleAcceptance(accepted);
+  const deleted = accepted.deleted === true || acceptance.public_status === "deleted";
   return successResponse(
-    {
-      name,
-      ...acceptance,
-      deleted: false,
-    },
-    acceptance.status_command
-      ? `Delete accepted for "${name}". Route removal, reserved hardware release, and billing stop are not complete until the run reaches a terminal success. Track it with: ${acceptance.status_command}`
-      : `The delete command returned success for "${name}" without a durable tracking reference. Deletion and billing stop are not proven; upgrade varitykit and inspect varity_deploy_status before retrying.`
+    { deployment, ...acceptance, deleted },
+    deleted
+      ? `"${deployment}" is deleted.`
+      : acceptance.run_id
+        ? `Delete accepted for "${deployment}" (run ${acceptance.run_id}, status ${acceptance.public_status ?? "unobserved"}). Route removal, reserved hardware release, and billing stop are complete only when varity_deploy_status shows it deleted.`
+        : `The delete request for "${deployment}" returned no run. Deletion and billing stop are not proven; check varity_deploy_status before retrying.`
   );
 }
 
@@ -25,59 +34,37 @@ export function registerDeleteDeploymentTool(server: McpServer): void {
       annotations: { destructiveHint: true },
       title: "Delete a Deployment and Stop Its Billing",
       description:
-        "Request deletion of an existing Varity deployment by name and track it until billing stop is proven. " +
+        "Request deletion of an existing Varity deployment by id or app name and track it until billing stop is proven. " +
         "Use this when a developer says 'stop my <name>', 'shut down my deployment', 'I'm done with <name>', " +
         "'delete <name>', or when they no longer need a running app or agent. " +
         "The durable operation independently reconciles route removal, reserved hardware release, and billing stop. " +
-        "Use varity_deploy_status or list deployments at https://varity.app/dashboard to confirm the name first if the developer is unsure.",
+        `Use varity_deploy_status or list deployments at ${INFRASTRUCTURE.DASHBOARD} to confirm the deployment first if the developer is unsure.`,
       inputSchema: {
-        name: z
+        deployment: z
           .string()
+          .regex(/^[a-zA-Z0-9_-]+$/, "Invalid deployment id or app name")
           .describe(
-            "The subdomain / app name of the deployment to delete. This is the slug in https://varity.app/<name>/. " +
-              "Example: 'worker-bot' or 'mvp-static-test'."
+            "The deployment id or app name (the slug in https://varity.app/<name>/), " +
+              "including a deployment that failed before it got a URL. Example: 'worker-bot'."
           ),
       },
     },
-    async ({ name }) => {
-      if (!name || !name.trim()) {
-        return errorResponse(
-          "MISSING_NAME",
-          "Deployment name is required.",
-          `Tell the user to provide the app name they want to delete, it's the slug in their varity.app URL.`
-        );
+    async ({ deployment }) => {
+      try {
+        return await deleteAccepted(deployment, await deleteDeployment(deployment));
+      } catch (err) {
+        if (err instanceof VarityPublicApiError && err.status === 404) {
+          return errorResponse(
+            "DEPLOYMENT_NOT_FOUND",
+            `No deployment found for "${deployment}".`,
+            `Check the id or name with varity_deploy_status or at ${INFRASTRUCTURE.DASHBOARD}.`
+          );
+        }
+        if (err instanceof VarityPublicApiError) {
+          return errorResponse(err.code, err.message, err.action ?? `Check ${INFRASTRUCTURE.DASHBOARD}.`);
+        }
+        return errorResponse("DELETE_FAILED", `Could not delete "${deployment}".`, "Retry the request.");
       }
-
-      if (name.startsWith("-")) {
-        return errorResponse("INVALID_NAME", `Invalid app name: "${name}".`, "App names can't start with '-'.");
-      }
-
-      // `--` stops the CLI's flag parsing so the app name is never read as a flag.
-      // redeploy.ts and set-env.ts already guard this way; delete was the only
-      // lifecycle mutation missing it, and it is the destructive one.
-      const result = await execVaritykit("app", ["delete", "--yes", "--", name], { timeout: 120_000 });
-
-      if (result.exitCode === 0) {
-        return deleteAccepted(name, result.stdout);
-      }
-
-      const errorOutput = (result.stderr || result.stdout || "").trim();
-
-      // Common case: deployment doesn't exist (typo or already deleted)
-      if (errorOutput.toLowerCase().includes("not found") || errorOutput.toLowerCase().includes("404")) {
-        return errorResponse(
-          "DEPLOYMENT_NOT_FOUND",
-          `No deployment found with name "${name}".`,
-          `Check the exact name at https://varity.app/dashboard, or run "varitykit app list" in a terminal to see active deployments.`
-        );
-      }
-
-      return errorResponse(
-        "DELETE_FAILED",
-        `Failed to delete deployment "${name}": ${errorOutput || "unknown error"}`,
-        `Verify you are logged in (varity_login) and the deployment name is correct. ` +
-          `If the error persists, check https://varity.app/dashboard.`
-      );
     }
   );
 }

@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import {
   getDeployment,
+  getRun,
   listDeployments,
   VarityPublicApiError,
   type PublicDeployment,
@@ -17,6 +18,11 @@ interface DeploymentRecord {
   appName: string;
   runtime: string;
   billing?: Record<string, unknown> | null;
+  /** The latest durable run and its sealed outcome, as served (D9). */
+  run_id: string | null;
+  outcome: unknown;
+  /** That run's `public_status`; single-deployment reads only, `null` = unobserved. */
+  run_status?: string | null;
   http_probe?: HttpProbe;
 }
 
@@ -56,7 +62,10 @@ export async function applyLiveness(deployments: DeploymentRecord[]): Promise<vo
   }
 }
 
-function normalizeDeployment(item: PublicDeployment): DeploymentRecord {
+/** Served row fields `PublicDeployment` does not type (gateway `PUBLIC_DEPLOYMENT_KEYS`). */
+type ServedDeployment = PublicDeployment & { run_id?: string | null; outcome?: unknown };
+
+function normalizeDeployment(item: ServedDeployment): DeploymentRecord {
   const name = item.subdomain ?? item.app_name ?? item.appName ?? item.id;
   return {
     id: item.id ?? name,
@@ -67,7 +76,20 @@ function normalizeDeployment(item: PublicDeployment): DeploymentRecord {
     status: item.status ?? "unknown",
     timestamp: item.createdAt ?? item.created_at ?? "unknown",
     billing: item.billing ?? null,
+    run_id: item.run_id ?? null,
+    outcome: item.outcome ?? null,
   };
+}
+
+/** Read the run's `public_status` so a failed deploy shows why, not only `failed`. */
+async function readRunStatus(runId: string | null): Promise<string | null> {
+  if (!runId) return null;
+  try {
+    const run = await getRun(runId);
+    return typeof run.public_status === "string" ? run.public_status : null;
+  } catch {
+    return null;
+  }
 }
 
 async function readDeployments(): Promise<DeploymentRecord[]> {
@@ -128,6 +150,7 @@ export function registerDeployStatusTool(server: McpServer): void {
       try {
         if (deployment_id) {
           const deployment = normalizeDeployment(await getDeployment(deployment_id));
+          deployment.run_status = await readRunStatus(deployment.run_id);
           await applyLiveness([deployment]);
 
           return successResponse(

@@ -68,3 +68,19 @@ test("older gateway omitting the fields yields undefined, not a throw", async ()
     restore();
   }
 });
+
+test("varity_deploy_logs never turns an unreported window into complete (D8)", async () => {
+  const { registerDeployLogsTool } = await import("../dist/tools/deploy-logs.js");
+  let handler;
+  registerDeployLogsTool({ registerTool: (_name, _config, fn) => { handler = fn; } });
+  for (const [served, expected] of [[undefined, false], [false, false], [true, true]]) {
+    const restore = mockFetch({ lines: [{ message: "hello" }], count: 1, complete: served });
+    try {
+      const result = JSON.parse((await handler({ deployment: "my-app", limit: 10 })).content[0].text);
+      assert.equal(result.data.complete, expected);
+      assert.equal(result.data.deployment, "my-app");
+    } finally {
+      restore();
+    }
+  }
+});

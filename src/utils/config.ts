@@ -4,7 +4,6 @@ import { homedir } from "node:os";
 
 const VARITYKIT_CONFIG_DIR = join(homedir(), ".varitykit");
 const VARITYKIT_CONFIG_FILE = join(VARITYKIT_CONFIG_DIR, "config.json");
-const DEPLOYMENTS_DIR = join(VARITYKIT_CONFIG_DIR, "deployments");
 
 /**
  * Get the API key (deploy key) from config file or environment variable.
@@ -36,17 +35,12 @@ export async function isAuthenticated(): Promise<boolean> {
 }
 
 /**
- * Get path to deployments directory.
- */
-export function getDeploymentsDir(): string {
-  return DEPLOYMENTS_DIR;
-}
-
-/**
  * Infrastructure endpoints (all LIVE).
  */
 export const INFRASTRUCTURE = {
   GATEWAY: process.env["VARITY_GATEWAY_URL"] ?? "https://varity.app",
   DOCS: "https://docs.varity.so",
   DEVELOPER_PORTAL: "https://developer.store.varity.so",
+  /** Where a user lists and manages deployments. `varity.app/dashboard` is a 404 (evidence p2-cli-mcp D7). */
+  DASHBOARD: "https://developer.store.varity.so/dashboard",
 } as const;

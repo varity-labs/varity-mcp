@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
-import { execVaritykit, isOutdatedVaritykit, VARITYKIT_UPGRADE_HINT } from "../utils/cli-bridge.js";
+import { execVaritykit, isOutdatedVaritykit, lifecycleTracking, VARITYKIT_UPGRADE_HINT } from "../utils/cli-bridge.js";
 import { lifecycleAcceptance } from "../utils/lifecycle-acceptance.js";
 
 /** The installed varitykit predates the `app templates` command. */
@@ -38,8 +38,8 @@ export interface TemplateMeta {
   certification?: { state?: string; reason?: string };
 }
 
-export function templateDeployAccepted(template: TemplateMeta, name: string | undefined, stdout: string) {
-  const acceptance = lifecycleAcceptance(stdout, "deploying");
+export async function templateDeployAccepted(template: TemplateMeta, name: string | undefined, stdout: string) {
+  const acceptance = await lifecycleAcceptance({ run_id: lifecycleTracking(stdout).runId ?? undefined });
   return successResponse(
     {
       template: template.id,
@@ -47,8 +47,8 @@ export function templateDeployAccepted(template: TemplateMeta, name: string | un
       accepted: true,
       ...acceptance,
     },
-    acceptance.status_command
-      ? `Template deploy accepted for ${template.name ?? template.id}. Track its terminal outcome with: ${acceptance.status_command}`
+    acceptance.run_id
+      ? `Template deploy accepted for ${template.name ?? template.id} (run ${acceptance.run_id}, status ${acceptance.public_status ?? "unobserved"}). Track its terminal outcome with varity_deploy_status.`
       : `The template deploy command returned success for ${template.name ?? template.id} without a durable tracking reference. The terminal outcome is not proven; inspect varity_deploy_status before reporting completion.`
   );
 }

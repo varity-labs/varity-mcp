@@ -15,45 +15,16 @@ async function dirExists(dir: string): Promise<boolean> {
   }
 }
 
-/** Return true if the project is a Next.js static export (output: 'export'). */
-async function isStaticExport(cwd: string): Promise<boolean> {
-  try {
-    const cfg = await readFile(resolve(cwd, "next.config.js"), "utf-8");
-    return cfg.includes("output: 'export'") || cfg.includes('output: "export"');
-  } catch {
-    try {
-      const cfg = await readFile(resolve(cwd, "next.config.ts"), "utf-8");
-      return cfg.includes("output: 'export'") || cfg.includes('output: "export"');
-    } catch {
-      return false;
-    }
-  }
-}
-
 /**
- * Detect the deployable output directory based on framework and config.
- * For Next.js static exports, `out/` is the deployable artifact.
- * `.next/` is an intermediate build cache, not the deployable output.
+ * Report where the local build wrote its output. `out/` is listed first
+ * because only a static export writes it. WHY no `output: 'export'` check
+ * here: whether a project is static is decided once, by the deploy-api
+ * detector at deploy time; this was a fourth copy of that substring match
+ * (evidence p2-build-detection C14) and only shaped a local message.
  */
-async function detectOutputDir(cwd: string): Promise<{ dir: string; isDeployable: boolean } | null> {
-  // For Next.js static export: deployable output is `out/`, not `.next/`
-  const staticExport = await isStaticExport(cwd);
-  if (staticExport) {
-    if (await dirExists(resolve(cwd, "out"))) {
-      return { dir: "out", isDeployable: true };
-    }
-    // Build ran but out/ not yet created, check .next/ as fallback
-    if (await dirExists(resolve(cwd, ".next"))) {
-      return { dir: ".next", isDeployable: false };
-    }
-  }
-
-  // Non-static-export: check common output dirs
-  const candidates = [".next", "dist", "build", "out"];
-  for (const dir of candidates) {
-    if (await dirExists(resolve(cwd, dir))) {
-      return { dir, isDeployable: true };
-    }
+async function detectOutputDir(cwd: string): Promise<string | null> {
+  for (const dir of ["out", "dist", "build", ".next"]) {
+    if (await dirExists(resolve(cwd, dir))) return dir;
   }
   return null;
 }
@@ -243,7 +214,7 @@ export function registerBuildTool(server: McpServer): void {
       const errors = parseBuildErrors(output);
 
       if (result.exitCode === 0) {
-        const outputInfo = await detectOutputDir(cwd);
+        const outputDir = await detectOutputDir(cwd);
 
         // Parse build metrics from Next.js output
         const buildTimeSeconds = parseBuildTime(output);
@@ -258,12 +229,8 @@ export function registerBuildTool(server: McpServer): void {
 
         // Determine the right message based on output type
         let successMsg: string;
-        if (outputInfo?.dir === "out") {
-          successMsg = `Build succeeded! Deployable output in out/. Run varity_deploy to deploy.`;
-        } else if (outputInfo?.dir === ".next" && !outputInfo.isDeployable) {
-          successMsg = `TypeScript compilation succeeded (.next/ created). Static export (out/) was not produced, this may indicate an issue with output: 'export' configuration. Run varity_deploy to attempt a full deploy.`;
-        } else if (outputInfo) {
-          successMsg = `Build succeeded! Output in ${outputInfo.dir}/. Run varity_deploy to deploy.`;
+        if (outputDir) {
+          successMsg = `Build succeeded! Output in ${outputDir}/. Run varity_deploy to deploy.`;
         } else {
           successMsg = `Build compilation succeeded. Run varity_deploy to deploy.`;
         }
@@ -279,8 +246,8 @@ export function registerBuildTool(server: McpServer): void {
         return successResponse(
           {
             success: true,
-            output_dir: outputInfo?.dir ?? null,
-            deployable_output: outputInfo?.isDeployable ?? false,
+            output_dir: outputDir,
+            deployable_output: outputDir !== null,
             ...(buildTimeSeconds !== null && { build_time_seconds: buildTimeSeconds }),
             ...(buildSize !== null && { build_size: buildSize }),
             errors: [],
