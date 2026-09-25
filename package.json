@@ -1,6 +1,6 @@
 {
   "name": "@varity-labs/mcp",
-  "version": "2.3.20",
+  "version": "2.3.21",
   "description": "Varity's stdio MCP server for supported local AI coding clients.",
   "type": "module",
   "bin": {
