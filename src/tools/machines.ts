@@ -23,7 +23,9 @@ import { INFRASTRUCTURE } from "../utils/config.js";
  *   machine created without the caller's key is unreachable to them.
  * - delete = `DELETE /api/machines/:id`, then polls `GET /api/machines/:id`
  *   until `billing.state` is `stopped` (CANON §2d: an accepted DELETE is not a
- *   stopped bill). An unread billing state stays `null` (unobserved).
+ *   stopped bill), bounded by the delete operation's own
+ *   `execution_deadline_at` from the 202 (no copied budget here). An unread
+ *   billing state stays `null` (unobserved); an unread deadline means one read.
  *
  * GPU machines are out of MCP scope; `execution_class` is always
  * `cpu_virtual_machine`.
@@ -31,7 +33,6 @@ import { INFRASTRUCTURE } from "../utils/config.js";
 
 const EXECUTION_CLASS = "cpu_virtual_machine";
 const PRIVATE_KEY_MARKER = /PRIVATE KEY|BEGIN OPENSSH|BEGIN RSA|BEGIN EC/i;
-export const DELETE_CONFIRM_DEADLINE_MS = 600_000;
 const DELETE_POLL_INTERVAL_MS = 10_000;
 
 function apiError(err: unknown, fallbackCode: string, fallbackMessage: string) {
@@ -84,15 +85,23 @@ export async function quoteAndCreateMachine(input: MachineCreateInput) {
 }
 
 type Sleep = (ms: number) => Promise<void>;
+
+/** The accepted operation's `execution_deadline_at` in ms, or null when unread. */
+function operationDeadlineMs(operation: unknown): number | null {
+  if (operation === null || typeof operation !== "object") return null;
+  const raw = (operation as Record<string, unknown>).execution_deadline_at;
+  const deadline = typeof raw === "string" ? Date.parse(raw) : NaN;
+  return Number.isFinite(deadline) ? deadline : null;
+}
 const realSleep: Sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function deleteAndConfirmMachine(
   machineId: string,
   idempotencyKey?: string,
-  { deadlineMs = DELETE_CONFIRM_DEADLINE_MS, intervalMs = DELETE_POLL_INTERVAL_MS, sleep = realSleep } = {}
+  { intervalMs = DELETE_POLL_INTERVAL_MS, sleep = realSleep, now = Date.now } = {}
 ) {
   const accepted = await deleteMachine(machineId, idempotencyKey);
-  const started = Date.now();
+  const deadline = operationDeadlineMs(accepted.operation);
   let billingState: string | null = null;
   for (;;) {
     billingState = null;
@@ -105,7 +114,7 @@ export async function deleteAndConfirmMachine(
       // 404 after delete: the record is gone, so billing stays unobserved.
       if (err instanceof VarityPublicApiError && err.status === 404) break;
     }
-    if (billingState === "stopped" || Date.now() - started >= deadlineMs) break;
+    if (billingState === "stopped" || deadline === null || now() >= deadline) break;
     await sleep(intervalMs);
   }
   const stopped = billingState === "stopped";
