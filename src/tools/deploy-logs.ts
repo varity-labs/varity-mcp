@@ -14,10 +14,10 @@ export function registerDeployLogsTool(server: McpServer): void {
         "Use this when a developer asks for logs from a live app. " +
         "For local build errors before deployment, use varity_build.",
       inputSchema: {
-        deployment_id: z
+        deployment: z
           .string()
-          .regex(/^[a-zA-Z0-9_-]+$/, "Invalid deployment ID format")
-          .describe("The deployment ID to get logs for"),
+          .regex(/^[a-zA-Z0-9_-]+$/, "Invalid deployment id or app name")
+          .describe("The deployment id or app name to get logs for"),
         limit: z
           .coerce.number()
           .optional()
@@ -28,30 +28,31 @@ export function registerDeployLogsTool(server: McpServer): void {
         readOnlyHint: true,
       },
     },
-    async ({ deployment_id, limit }) => {
+    async ({ deployment, limit }) => {
       try {
-        const data = await getDeploymentLogs(deployment_id, limit ?? 100);
+        const data = await getDeploymentLogs(deployment, limit ?? 100);
         const logLines = (data.lines ?? []).map((line) => {
           const text = typeof line.message === "string" ? line.message : JSON.stringify(line);
           return stripAnsi(text);
         });
 
-        // Honestly surface partial/stale reads. The public API sets
-        // `complete: false` when the returned window may be missing recent
-        // lines (e.g. the live runtime source was momentarily unavailable), so
-        // the agent does not treat a partial window as the whole log.
-        const partial = data.complete === false;
+        // Only an explicit `complete: true` from the public API is complete.
+        // `false` (the window may be missing recent lines) and absent (an
+        // older gateway did not report it) are both not-complete: unobserved
+        // is never success (evidence p2-cli-mcp D8).
+        const complete = data.complete === true;
+        const partial = !complete;
         const summary = partial
-          ? `Showing ${logLines.length} log line(s) for deployment ${deployment_id}. `
+          ? `Showing ${logLines.length} log line(s) for deployment ${deployment}. `
             + "These logs may be delayed or partial — retry shortly for a complete window."
-          : `Showing ${logLines.length} log line(s) for deployment ${deployment_id}`;
+          : `Showing ${logLines.length} log line(s) for deployment ${deployment}`;
 
         return successResponse(
           {
-            deployment_id,
+            deployment,
             log_lines: logLines,
             total_lines: data.count ?? logLines.length,
-            complete: data.complete ?? true,
+            complete,
             observed_at: data.observed_at ?? null,
             source: "varity_public_api:/api/deployments/{id}/logs",
           },

@@ -28,10 +28,11 @@ refs, CI receipts, and fresh live evidence own those facts.
 
 - The published package serves MCP clients over stdio only. Hosted MCP, its
   OAuth adapter, and its container release lane are retired and absent here.
-- Deployment mutations, template operations, login, and migration use the
-  `varitykit` CLI adapter in `src/utils/cli-bridge.ts`.
-- Deployment/status/log and pricing reads use the owner-scoped public Varity
-  interface through `src/utils/public-api.ts`.
+- Deployment and machine reads and mutations (deploy, delete, redeploy, logs,
+  status, runs, machines) and pricing reads use the one owner-scoped public
+  Varity client in `src/utils/public-api.ts`.
+- Template operations, login, and migration use the `varitykit` CLI adapter in
+  `src/utils/cli-bridge.ts`.
 - Several developer tools operate directly on the MCP host's filesystem or
   processes; in stdio mode this is the invoking user's machine.
 - The MCP never calls provider, static-storage, db-proxy, credential-proxy, or

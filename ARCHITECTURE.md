@@ -47,8 +47,9 @@ flowchart LR
   SERVER --> TELEMETRY[Secret-safe telemetry] --> OTLP[Configured OTLP/error endpoints]
 ```
 
-Deployment-lifecycle mutations reach the downstream control plane through
-`varitykit`. Local build, dependency, browser, development-server, and
+Deployment-lifecycle mutations (deploy, delete, redeploy) reach the downstream
+control plane through the public-interface client; template, login and
+migration commands still go through `varitykit`. Local build, dependency, browser, development-server, and
 repository helpers remain local adapters, as the routing table below records.
 MCP output is a projection of downstream truth: process exit can prove command
 acceptance, but only a durable run or owner-scoped status read can prove later
@@ -63,7 +64,7 @@ lifecycle state.
 | Tools | Zod-validated input and shared structured responses; no provider or orchestration policy | `src/tools/` | per-adapter and regression tests under `test/` |
 | Compatibility resource | `varity://deploy/reference` remains stable but routes mutable facts to live docs/tools | `src/resources/index.ts` | cleanup contract and architecture checks |
 | CLI bridge | argv arrays, bounded timeouts/output, normalized environment, durable run-reference extraction | `src/utils/cli-bridge.ts` | `test/cli-bridge-env.mjs`, `test/lifecycle-outcomes.mjs` |
-| Public-interface client | deploy-key auth, bounded GETs, normalized errors; no copied pricing or lifecycle state | `src/utils/public-api.ts` | `test/public-api-budget.mjs`, status/log tests |
+| Public-interface client | the one HTTP client for every Cloud read and lifecycle mutation (deploy, delete, redeploy, env, run status, machines); `VARITY_API_KEY ?? VARITY_DEPLOY_KEY` auth, `source: "mcp"` on create, bounded timeout, normalized errors; no copied pricing or lifecycle state | `src/utils/public-api.ts` | `test/public-api-client.mjs`, `test/public-api-budget.mjs`, `test/lifecycle-outcomes.mjs`, status/log tests |
 | Local GitHub helper | credentials come from process environment or `gh`; clean remote URL; normal non-force push | `src/tools/create-repo.ts` | cleanup contract plus Git behavior review |
 | Runtime telemetry | opt-in spans/logs/metrics/errors; protected inputs and stdout excluded | `src/telemetry.ts`, `src/runtime-shutdown.ts`, `src/utils/logger.ts` | telemetry, logger, and shutdown tests |
 
@@ -76,8 +77,8 @@ logic into individual tools.
 
 | Behavior | Current path | Qualification |
 |---|---|---|
-| Deploy source/public image | MCP tool → CLI bridge → `varitykit app deploy` | Requires a working `varitykit`; its package owns interpreter requirements, while CLI/control plane own build and hosting policy |
-| Delete and reapply | MCP tool → CLI bridge → `varitykit app ...` | A successful command is accepted/in progress only when a durable run is returned; otherwise outcome is unconfirmed |
+| Deploy source/public image | MCP tool → public-interface client → `POST /api/deployments` | The source is a repo URL (explicit or the project's `origin` remote) or an image; the control plane owns build and hosting policy |
+| Delete and reapply | MCP tool → public-interface client → `DELETE`/`POST .../redeploy` | Status is the run's `public_status` from `GET /api/deployments/runs/:id`; no run or an unreadable run is `null` (unobserved) |
 | Template list/detail/deploy | MCP tool → CLI bridge → `varitykit` | Catalog, certification, hardware, and price fields are downstream-owned |
 | Migration preview | temporary clone → `varitykit migrate apply --dry-run` → exact cleanup | URL-based apply/deploy fails closed until transformed-source custody is explicit |
 | Deployment list/status/logs | MCP tool → public-interface adapter | Owner-scoped response is authoritative for this client |

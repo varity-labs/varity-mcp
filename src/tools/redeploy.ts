@@ -1,20 +1,21 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
-import { execVaritykit } from "../utils/cli-bridge.js";
+import { redeploy, VarityPublicApiError } from "../utils/public-api.js";
 import { lifecycleAcceptance } from "../utils/lifecycle-acceptance.js";
+import { INFRASTRUCTURE } from "../utils/config.js";
 
-export function redeployAccepted(name: string, stdout: string) {
-  const acceptance = lifecycleAcceptance(stdout, "redeploying");
+/** `varity_redeploy` → `POST /api/deployments/:name/redeploy` through the one public-API client. */
+export async function redeployAccepted(
+  name: string,
+  accepted: Awaited<ReturnType<typeof redeploy>>
+) {
+  const acceptance = await lifecycleAcceptance(accepted);
   return successResponse(
-    {
-      name,
-      action: "redeploy",
-      ...acceptance,
-    },
-    acceptance.status_command
-      ? `Reapply accepted for "${name}" on the same app URL. Track its terminal outcome with: ${acceptance.status_command}`
-      : `The reapply command returned success for "${name}" without a durable tracking reference. The terminal outcome is not proven; upgrade varitykit and inspect varity_deploy_status before retrying.`
+    { name, action: "redeploy", ...acceptance },
+    acceptance.run_id
+      ? `Reapply accepted for "${name}" on the same app URL (run ${acceptance.run_id}, status ${acceptance.public_status ?? "unobserved"}). Track its terminal outcome with varity_deploy_status.`
+      : `The reapply request for "${name}" returned no run. The terminal outcome is not proven; inspect varity_deploy_status before retrying.`
   );
 }
 
@@ -33,43 +34,28 @@ export function registerRedeployTool(server: McpServer): void {
       inputSchema: {
         name: z
           .string()
+          .regex(/^[a-zA-Z0-9_-]+$/, "Invalid app name")
           .describe(
             "The subdomain / app name of the existing deployment to redeploy, the slug in https://varity.app/<name>/. Example: 'my-api'."
           ),
       },
     },
     async ({ name }) => {
-      if (!name || !name.trim()) {
-        return errorResponse(
-          "MISSING_NAME",
-          "Deployment name is required.",
-          "Ask the user for the app name they want to redeploy. It is the slug in their varity.app URL."
-        );
+      try {
+        return await redeployAccepted(name, await redeploy(name));
+      } catch (err) {
+        if (err instanceof VarityPublicApiError && err.status === 404) {
+          return errorResponse(
+            "DEPLOYMENT_NOT_FOUND",
+            `No deployment found with name "${name}".`,
+            `Check the exact name with varity_deploy_status or at ${INFRASTRUCTURE.DASHBOARD}.`
+          );
+        }
+        if (err instanceof VarityPublicApiError) {
+          return errorResponse(err.code, err.message, err.action ?? "Retry the redeploy request later.");
+        }
+        return errorResponse("REDEPLOY_FAILED", `Could not redeploy "${name}".`, "Retry the redeploy request later.");
       }
-      if (name.startsWith("-")) {
-        return errorResponse("INVALID_NAME", `Invalid app name: "${name}".`, "App names can't start with '-'.");
-      }
-
-      // `--` stops the CLI's flag parsing so the app name is never read as a flag.
-      const result = await execVaritykit("app", ["redeploy", "--", name], { timeout: 120_000 });
-
-      if (result.exitCode === 0) {
-        return redeployAccepted(name, result.stdout);
-      }
-
-      const errorOutput = (result.stderr || result.stdout || "").trim();
-      if (errorOutput.toLowerCase().includes("not found") || errorOutput.toLowerCase().includes("404")) {
-        return errorResponse(
-          "DEPLOYMENT_NOT_FOUND",
-          `No deployment found with name "${name}".`,
-          'Check the exact name at https://varity.app/dashboard, or run "varitykit app list" to see active deployments.'
-        );
-      }
-      return errorResponse(
-        "REDEPLOY_FAILED",
-        `Could not redeploy "${name}".`,
-        errorOutput || "Try again in a moment, or confirm the app is a dynamic deployment that supports in-place redeploy."
-      );
     }
   );
 }

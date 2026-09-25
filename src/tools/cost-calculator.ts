@@ -19,7 +19,7 @@ export type OwnerPricingProjection =
   | { unit: "hour"; hourly_cost_usd: number };
 
 export function projectOwnerPricing(data: Record<string, unknown>): OwnerPricingProjection | null {
-  const monthly = data.fixed_monthly_cost_usd ?? data.varityMonthly;
+  const monthly = data.fixed_monthly_cost_usd;
   if (typeof monthly === "number" && Number.isFinite(monthly)) {
     return { unit: "month", fixed_monthly_cost_usd: monthly };
   }
@@ -66,13 +66,11 @@ export function registerCostCalculatorTool(server: McpServer): void {
         if (subdomain) {
           const deployment = await getDeployment(subdomain);
           const billing = deployment.billing ?? {};
+          // Canonical served keys only: the served `billing` block has no
+          // `profile` (D12) and its money aliases are being deleted (GW1b).
           data = {
-            profile: billing.profile,
             currency: billing.currency,
-            fixed_monthly_cost_usd:
-              billing.fixed_monthly_cost_usd ??
-              billing.fixed_monthly_usd ??
-              billing.monthlyUsd,
+            fixed_monthly_cost_usd: billing.fixed_monthly_cost_usd,
             hourly_cost_usd: billing.hourly_cost_usd,
             billing_model: billing.billing_model,
             deployment,
