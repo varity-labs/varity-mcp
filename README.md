@@ -118,6 +118,9 @@ The MCP exposes Varity's deploy surface so your AI tool can take action — not 
 | `varity_delete_deployment` | Stop a deployment and end its billing |
 | `varity_set_env` | Preserve the public tool route while refusing secret values and directing configuration to a secret-safe interface |
 | `varity_redeploy` | Reapply an existing deployment's saved configuration; unchanged input may be a no-op |
+| `varity_machines_list` | List your CPU virtual machines (optionally the CPU VM profile catalog) |
+| `varity_machines_create` | Quote and create a CPU virtual machine with your SSH public key |
+| `varity_machines_delete` | Delete a CPU virtual machine and confirm its billing stopped |
 | `varity_list_templates` | List certified gateway-owned Varity templates |
 | `varity_template_info` | Show full details for one certified template |
 | `varity_deploy_template` | Deploy a public certified template with no required secrets; refuse private or secret-bearing templates |
