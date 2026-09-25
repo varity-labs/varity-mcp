@@ -81,9 +81,9 @@ test("create input schema refuses a private key before any request", () => {
   assert.equal(key.safeParse("ssh-ed25519 AAAA user@host").success, true);
 });
 
-test("delete polls the machine read until billing.state is stopped", async () => {
+test("delete polls the machine read until billing.state is stopped, within the operation deadline", async () => {
   const stub = stubSequence([
-    [202, { replayed: false, machine_id: MACHINE_ID, operation: {} }],
+    [202, { replayed: false, machine_id: MACHINE_ID, operation: { execution_deadline_at: "2999-01-01T00:00:00Z" } }],
     [200, { machine_id: MACHINE_ID, billing: { state: "active" } }],
     [200, { machine_id: MACHINE_ID, billing: { state: "stopped" } }],
   ]);
@@ -106,10 +106,28 @@ test("delete never claims billing stopped when the read is unavailable", async (
     [503, { code: "machine_read_unavailable" }],
   ]);
   try {
-    const out = payload(await deleteAndConfirmMachine(MACHINE_ID, undefined, { deadlineMs: 0, sleep: noSleep }));
+    const out = payload(await deleteAndConfirmMachine(MACHINE_ID, undefined, { sleep: noSleep }));
     assert.equal(out.data.billing_state, null);
     assert.equal(out.data.billing_stopped, false);
     assert.match(out.message, /not confirmed.*unobserved/);
+  } finally {
+    stub.restore();
+  }
+});
+
+test("delete stops polling at the operation's execution_deadline_at and reports unconfirmed", async () => {
+  const stub = stubSequence([
+    [202, { replayed: false, machine_id: MACHINE_ID, operation: { execution_deadline_at: "2026-09-25T15:10:00Z" } }],
+    [200, { machine_id: MACHINE_ID, billing: { state: "active" } }],
+  ]);
+  let clock = Date.parse("2026-09-25T15:09:50Z");
+  const sleep = async (ms) => { clock += ms; };
+  try {
+    const out = payload(await deleteAndConfirmMachine(MACHINE_ID, undefined, { sleep, now: () => clock }));
+    assert.equal(stub.calls.length, 3); // DELETE, read at 15:09:50, read at 15:10:00 (deadline)
+    assert.equal(out.data.billing_state, "active");
+    assert.equal(out.data.billing_stopped, false);
+    assert.match(out.message, /not confirmed/);
   } finally {
     stub.restore();
   }
