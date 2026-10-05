@@ -9,10 +9,10 @@ billing policy, or a second embedded-consumption path.
 
 Cross-repository authority lives in the `varity-engineering` control
 repository, checked out at `/home/macoding/varity-v2/varity-engineering/`
-on this host. Read its `CLAUDE.md` for current scope and retirement rules:
+on this host. Read its `AGENTS.md` for current scope and retirement rules:
 
 1. Control `architecture/CHANGE-IMPACT.md` for concept ownership and
-   `repos.yaml` for repository topology. `CURRENT-STATE.md` is dated evidence only.
+   `repos.yaml` for repository topology. Open work lives in GitHub issues.
 2. [ARCHITECTURE.md](ARCHITECTURE.md) for this repository's transports, adapter
    seams, state, auth, failure semantics, and test surface.
 3. `varity-engineering/POSITIONING.md` before editing tool descriptions or

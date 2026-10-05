@@ -8,5 +8,6 @@ for issue operations, wayfinder sub-issues, dependencies, claims and resolution.
 
 **PRs as a request surface: no.**
 
-`engineering:FIX-QUEUE.tsv` remains the cross-repository coordination queue.
+Cross-repository work uses one `varity-engineering` issue that links the
+repository issues (`engineering:docs/agents/issue-tracker.md`).
 Use existing task/gate evidence and issue links; do not create a parallel local tracker.
