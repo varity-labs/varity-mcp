@@ -91,6 +91,7 @@ const BILLING_CODES = [
   "wallet_frozen",
   "payment_method_shared",
   "quote_expired",
+  "spending_limit_reached",
 ];
 
 test("each closed 402 code becomes a clear user-facing error with an action", async () => {
@@ -105,6 +106,12 @@ test("each closed 402 code becomes a clear user-facing error with an action", as
     messages.add(err.message);
   }
   assert.equal(messages.size, BILLING_CODES.length, "each code has its own message");
+});
+
+test("spending_limit_reached says the monthly spending limit was reached", async () => {
+  const err = await rejection(402, { code: "spending_limit_reached" });
+  assert.equal(err.code, "spending_limit_reached");
+  assert.match(err.message, /monthly spending limit/i);
 });
 
 test("the frozen `{error: code}` body shape is recognised", async () => {

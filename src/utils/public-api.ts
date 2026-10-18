@@ -53,6 +53,10 @@ const BILLING_ERRORS: Readonly<Record<string, { message: string; action: string 
     message: "This payment method is already used by another Varity account, so the free allowance does not apply.",
     action: `Add a different payment method or buy credits at ${BILLING_URL}.`,
   },
+  spending_limit_reached: {
+    message: "Your monthly spending limit on Varity has been reached.",
+    action: `Raise the limit at ${BILLING_URL}, or wait for the next month.`,
+  },
   quote_expired: {
     message: "The price quote expired before the request was confirmed.",
     action: "Retry the request to get a fresh quote.",

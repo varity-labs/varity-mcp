@@ -144,7 +144,8 @@ or release state.
 - The public-interface adapter aborts bounded reads and preserves downstream
   code/message/action fields, except the closed billing codes
   (`insufficient_credits`, `daily_free_limit_reached`, `subscription_required`,
-  `wallet_frozen`, `payment_method_shared`, `quote_expired`, 503
+  `wallet_frozen`, `payment_method_shared`, `quote_expired`,
+  `spending_limit_reached`, 503
   `billing_unavailable`; legacy `insufficient_gateway_balance` answers as
   `insufficient_credits`), which keep their code and get one fixed user-facing
   message and action. Transport failures become `VARITY_API_UNREACHABLE`.
