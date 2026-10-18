@@ -24,6 +24,55 @@ export class VarityPublicApiError extends Error {
   }
 }
 
+const BILLING_URL = `${INFRASTRUCTURE.DASHBOARD}/billing`;
+
+/**
+ * The closed billing refusal codes every Varity service answers (402, plus
+ * 503 `billing_unavailable`), mapped to the message and action the user sees.
+ * Frozen in varity-engineering#225. Legacy `insufficient_gateway_balance`
+ * answers as `insufficient_credits` during its deprecation.
+ */
+const BILLING_ERRORS: Readonly<Record<string, { message: string; action: string }>> = {
+  insufficient_credits: {
+    message: "Your Varity credit balance is too low for this request.",
+    action: `Add credits at ${BILLING_URL}, then retry.`,
+  },
+  daily_free_limit_reached: {
+    message: "You have used today's free allowance.",
+    action: `Wait for the daily reset, or add credits at ${BILLING_URL} to continue now.`,
+  },
+  subscription_required: {
+    message: "This request needs an active Varity plan.",
+    action: `Choose a plan at ${BILLING_URL}, then retry.`,
+  },
+  wallet_frozen: {
+    message: "Billing on this Varity account is frozen, so new charges are refused.",
+    action: "Contact Varity support to restore billing on the account.",
+  },
+  payment_method_shared: {
+    message: "This payment method is already used by another Varity account, so the free allowance does not apply.",
+    action: `Add a different payment method or buy credits at ${BILLING_URL}.`,
+  },
+  quote_expired: {
+    message: "The price quote expired before the request was confirmed.",
+    action: "Retry the request to get a fresh quote.",
+  },
+  billing_unavailable: {
+    message: "Varity billing is temporarily unavailable, so the request could not be checked.",
+    action: "Retry in a few minutes.",
+  },
+};
+const LEGACY_BILLING_CODES: Readonly<Record<string, string>> = {
+  insufficient_gateway_balance: "insufficient_credits",
+};
+
+function billingError(raw: unknown): { code: string; message: string; action: string } | null {
+  if (typeof raw !== "string") return null;
+  const code = LEGACY_BILLING_CODES[raw] ?? raw;
+  const known = Object.hasOwn(BILLING_ERRORS, code) ? BILLING_ERRORS[code] : undefined;
+  return known ? { code, ...known } : null;
+}
+
 export interface PublicDeployment {
   id: string;
   app_name?: string;
@@ -90,7 +139,11 @@ export async function publicApiRequest<T>(
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const body = data as { code?: string; message?: string; action?: string };
+      const body = data as { code?: string; error?: unknown; message?: string; action?: string };
+      const billing = billingError(body.code ?? body.error);
+      if (billing) {
+        throw new VarityPublicApiError(billing.message, billing.code, res.status, billing.action);
+      }
       throw new VarityPublicApiError(
         body.message ?? `Varity API returned ${res.status}.`,
         body.code ?? "VARITY_API_ERROR",
