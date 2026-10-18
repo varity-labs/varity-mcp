@@ -83,7 +83,7 @@ logic into individual tools.
 | Template list/detail/deploy | MCP tool → CLI bridge → `varitykit` | Catalog, certification, hardware, and price fields are downstream-owned |
 | Migration preview | temporary clone → `varitykit migrate apply --dry-run` → exact cleanup | URL-based apply/deploy fails closed until transformed-source custody is explicit |
 | Deployment list/status/logs | MCP tool → public-interface adapter | Owner-scoped response is authoritative for this client |
-| Cost estimate | MCP tool → public pricing/deployment interface | Profile keys, currency, billing model, and values are returned by the live owner; the tool adds the exact credit equivalent (100 credits = $1) |
+| Cost estimate | MCP tool → public pricing/deployment interface | Profile keys, currency, billing model, and values are returned by the live owner; the tool adds the credit equivalent at the served `credit_policy.creditsPerUsd`, or `null` (credits unavailable) when the policy cannot be read |
 | Docs search | MCP tool → public `llms-full.txt`/`llms.txt` | Five-minute process cache; stale entries are not served after expiry if refresh fails |
 | Build, install, browser, dev server, repository creation | local process/filesystem adapters | Operate on the invoking user's machine and credentials |
 
@@ -142,13 +142,10 @@ or release state.
   exact temporary clone on every completion/failure path; apply/deploy requests
   fail closed with the user-controlled-checkout workflow.
 - The public-interface adapter aborts bounded reads and preserves downstream
-  code/message/action fields, except the closed billing codes
-  (`insufficient_credits`, `daily_free_limit_reached`, `subscription_required`,
-  `wallet_frozen`, `payment_method_shared`, `quote_expired`,
-  `spending_limit_reached`, 503
-  `billing_unavailable`; legacy `insufficient_gateway_balance` answers as
-  `insufficient_credits`), which keep their code and get one fixed user-facing
-  message and action. Transport failures become `VARITY_API_UNREACHABLE`.
+  code/message/action fields, except a 402/503 whose code is one of the closed
+  billing codes served in `credit_policy.errorCodes` (`GET /api/pricing`),
+  which keeps its code and gets MCP copy; an unreadable policy leaves the
+  error unchanged. Transport failures become `VARITY_API_UNREACHABLE`.
 - Public URL liveness probes are observations for the current status response;
   they do not mutate canonical deployment state.
 - User-controlled values remain argv entries or encoded URL components, never

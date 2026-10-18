@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
-import { getDeployment, publicApiGet, VarityPublicApiError } from "../utils/public-api.js";
+import { getCreditPolicy, getDeployment, publicApiGet, VarityPublicApiError } from "../utils/public-api.js";
 
 /**
  * varity_cost_calculator, THIN CLIENT.
@@ -11,8 +11,9 @@ import { getDeployment, publicApiGet, VarityPublicApiError } from "../utils/publ
  * owner-scoped deployment; it owns no profile catalog or billing defaults.
  *
  * The tool reports the monthly or hourly estimate field returned by the owner,
- * with its credit equivalent. It never converts between time units or invents
- * a monthly projection.
+ * with its credit equivalent at the served `credit_policy.creditsPerUsd`
+ * (`null` when the policy is unavailable). It never converts between time
+ * units or invents a monthly projection.
  */
 
 export type OwnerPricingProjection =
@@ -29,24 +30,6 @@ export function projectOwnerPricing(data: Record<string, unknown>): OwnerPricing
     return { unit: "hour", hourly_cost_usd: hourly };
   }
   return null;
-}
-
-/**
- * The credit equivalent of a USD amount (100 credits = $1), rounded half-up to
- * a hundredth of a credit. Computed on the amount's decimal digits as integers
- * so 0.29 USD is exactly 29 credits, not 28.999999999999996.
- */
-export function usdToCredits(usd: number): number {
-  const [digits, exponent] = Math.abs(usd).toExponential().split("e");
-  const [whole, fraction = ""] = digits.split(".");
-  // value = mantissa * 10^scale; credit hundredths = value * 10^4.
-  const mantissa = BigInt(whole + fraction);
-  const shift = Number(exponent) - fraction.length + 4;
-  const hundredths = shift >= 0
-    ? mantissa * 10n ** BigInt(shift)
-    : (mantissa * 10n / 10n ** BigInt(-shift) + 5n) / 10n;
-  const credits = Number(hundredths) / 100;
-  return usd < 0 ? -credits : credits;
 }
 
 export function registerCostCalculatorTool(server: McpServer): void {
@@ -79,6 +62,7 @@ export function registerCostCalculatorTool(server: McpServer): void {
       annotations: { readOnlyHint: true },
     },
     async ({ app_profile, subdomain }) => {
+      const policyRead = getCreditPolicy();
       let data: Record<string, unknown>;
       let source: string;
       try {
@@ -123,14 +107,17 @@ export function registerCostCalculatorTool(server: McpServer): void {
           "For a live deployment, confirm the app slug with varity_deploy_status."
         );
       }
-      const fmt = (n: number) => `$${Number(n).toLocaleString("en-US", { maximumFractionDigits: 6 })}`;
+      const fmt = (n: number) => `$${Number(n).toLocaleString("en-US")}`;
       const estimateName = subdomain ?? data.profile ?? app_profile ?? "current default profile";
       const amount = projection.unit === "month"
         ? projection.fixed_monthly_cost_usd
         : projection.hourly_cost_usd;
-      const credits = usdToCredits(amount);
-      const creditText = `${credits.toLocaleString("en-US", { maximumFractionDigits: 2 })} credits`;
-      const summary = `${String(estimateName)}: ${fmt(amount)}/${projection.unit === "month" ? "mo" : "hour"} (${creditText}) estimate returned by the current Varity pricing interface. 100 credits = $1.`;
+      const policy = await policyRead;
+      const credits = policy ? Math.round(amount * policy.creditsPerUsd * 100) / 100 : null;
+      const creditText = credits === null
+        ? "credits unavailable"
+        : `${credits.toLocaleString("en-US", { maximumFractionDigits: 2 })} credits`;
+      const summary = `${String(estimateName)}: ${fmt(amount)}/${projection.unit === "month" ? "mo" : "hour"} (${creditText}) estimate returned by the current Varity pricing interface.`;
 
       return successResponse(
         {

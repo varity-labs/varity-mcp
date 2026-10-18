@@ -1,10 +1,12 @@
 /**
- * Unified credit billing (varity-engineering#225, varity-mcp#79):
- * - every USD estimate carries its exact credit equivalent (100 credits = $1),
- *   computed from the decimal amount with integer math, never float scaling;
- * - the closed 402 codes and 503 `billing_unavailable` reach the user as clear
- *   messages through the one public-API client, so deploy and machine tools
- *   both surface them; legacy `insufficient_gateway_balance` still maps.
+ * Unified credit billing (varity-engineering#225, varity-mcp#79). The owner
+ * (billing-meter `CREDIT_POLICY`) serves `credit_policy` in `GET /api/pricing`;
+ * the MCP reads the credit rate and the billing error-code list from it and
+ * restates neither:
+ * - every USD estimate carries its credit equivalent at the served rate, or
+ *   says credits are unavailable when the policy cannot be read;
+ * - a 402/503 whose code the policy lists gets MCP copy; every other code,
+ *   including one the policy does not list, passes through unchanged.
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -12,28 +14,46 @@ import { test } from "node:test";
 process.env["VARITY_GATEWAY_URL"] = "https://gw.test";
 process.env["VARITY_API_KEY"] = "api-key";
 
+/** The frozen `credit_policy` block, verbatim from varity-engineering#225 (2026-10-18). */
+const CREDIT_POLICY = {
+  version: "2026-10-18",
+  creditsPerUsd: 100,
+  plans: [{ id: "free", priceUsd: 0, monthlyCredits: 500 },
+          { id: "core", priceUsd: 20, monthlyCredits: 2000 },
+          { id: "pro", priceUsd: 100, monthlyCredits: 10000 },
+          { id: "business", priceUsd: 500, monthlyCredits: 50000 }],
+  free: { monthlyCredits: 500, dailyAiCredits: 50, promoCategories: ["ai_chat", "ai_build", "static"] },
+  rollover: { subscriptionCycles: 1 },
+  topUp: { minimumUsd: 20, presetsUsd: [20, 100, 500], expiresAfterMonths: null },
+  spendCategories: ["ai_chat", "ai_build", "ai_api", "static", "app", "cpu", "gpu"],
+  errorCodes: ["insufficient_credits", "daily_free_limit_reached", "spending_limit_reached", "subscription_required", "wallet_frozen", "payment_method_shared", "quote_expired", "billing_unavailable"],
+};
+
 const api = await import("../dist/utils/public-api.js");
-const { usdToCredits, registerCostCalculatorTool } = await import("../dist/tools/cost-calculator.js");
+const { registerCostCalculatorTool } = await import("../dist/tools/cost-calculator.js");
 const { registerMachinesTools } = await import("../dist/tools/machines.js");
 
-function stubSequence(responses) {
+/** Routes `GET /api/pricing` to `pricing` ([status, body]) and every other call to `other`. */
+function stubGateway(pricing, other) {
   const calls = [];
   const original = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
     calls.push({ url, init });
-    const [status, payload] = responses[Math.min(calls.length - 1, responses.length - 1)];
+    const [status, payload] = new URL(url).pathname === "/api/pricing" ? pricing : other;
     return { ok: status >= 200 && status < 300, status, json: async () => payload };
   };
   return { calls, restore: () => { globalThis.fetch = original; } };
 }
 
+const SERVED = [200, { credit_policy: CREDIT_POLICY }];
 const payload = (response) => JSON.parse(response.content[0].text);
 
-async function rejection(status, body) {
-  const stub = stubSequence([[status, body]]);
+async function rejection(pricing, status, body) {
+  const stub = stubGateway(pricing, [status, body]);
   try {
     await api.publicApiRequest("POST", "/api/deployments", { body: {} });
   } catch (err) {
+    assert.ok(err instanceof api.VarityPublicApiError);
     return err;
   } finally {
     stub.restore();
@@ -41,125 +61,120 @@ async function rejection(status, body) {
   assert.fail("expected the request to reject");
 }
 
-async function costTool(args) {
+async function costTool(pricing, other, args) {
   let handler;
   registerCostCalculatorTool({ registerTool: (_name, _config, fn) => { handler = fn; } });
-  return payload(await handler(args));
+  const stub = stubGateway(pricing, other);
+  try {
+    return payload(await handler(args));
+  } finally {
+    stub.restore();
+  }
 }
 
-test("usdToCredits is exact decimal math at 100 credits per dollar", () => {
-  assert.equal(usdToCredits(25), 2500);
-  assert.equal(usdToCredits(0.07), 7); // 0.07 * 100 = 7.000000000000001 in floats
-  assert.equal(usdToCredits(0.29), 29); // 0.29 * 100 = 28.999999999999996 in floats
-  assert.equal(usdToCredits(0.0137), 1.37);
-  assert.equal(usdToCredits(1234.5678), 123456.78);
-  assert.equal(usdToCredits(0.00005), 0.01); // half-up at the hundredth of a credit
-  assert.equal(usdToCredits(0.000049), 0);
-  assert.equal(usdToCredits(1e-7), 0);
-  assert.equal(usdToCredits(0), 0);
-});
-
-test("pre-deploy estimate shows credits next to USD in text and data", async () => {
-  const stub = stubSequence([[200, { profile: "starter", currency: "USD", fixed_monthly_cost_usd: 12.29 }]]);
-  try {
-    const out = await costTool({});
-    assert.equal(out.success, true);
-    assert.equal(out.data.fixed_monthly_cost_usd, 12.29);
-    assert.equal(out.data.fixed_monthly_cost_credits, 1229);
-    assert.match(out.message, /\$12\.29\/mo \(1,229 credits\)/);
-  } finally {
-    stub.restore();
-  }
-});
-
-test("hourly deployment billing shows fractional credits next to USD", async () => {
-  const stub = stubSequence([[200, { deployment: { id: "d-1", billing: { currency: "USD", hourly_cost_usd: 0.0137 } } }]]);
-  try {
-    const out = await costTool({ subdomain: "my-app" });
-    assert.equal(out.data.hourly_cost_usd, 0.0137);
-    assert.equal(out.data.hourly_cost_credits, 1.37);
-    assert.match(out.message, /\$0\.0137\/hour \(1\.37 credits\)/);
-  } finally {
-    stub.restore();
-  }
-});
-
-const BILLING_CODES = [
-  "insufficient_credits",
-  "daily_free_limit_reached",
-  "subscription_required",
-  "wallet_frozen",
-  "payment_method_shared",
-  "quote_expired",
-  "spending_limit_reached",
-];
-
-test("each closed 402 code becomes a clear user-facing error with an action", async () => {
+test("each served billing code becomes a clear user-facing error with an action", async () => {
   const messages = new Set();
-  for (const code of BILLING_CODES) {
-    const err = await rejection(402, { code, message: "raw server text", retryable: false });
-    assert.ok(err instanceof api.VarityPublicApiError);
+  for (const code of CREDIT_POLICY.errorCodes) {
+    const status = code === "billing_unavailable" ? 503 : 402;
+    const err = await rejection(SERVED, status, { code, message: "raw server text" });
     assert.equal(err.code, code);
-    assert.equal(err.status, 402);
-    assert.notEqual(err.message, "raw server text");
-    assert.ok(err.action && err.action.length > 0, `${code} has an action`);
+    assert.equal(err.status, status);
+    assert.notEqual(err.message, "raw server text", `${code} has MCP copy`);
+    assert.ok(err.action, `${code} has an action`);
     messages.add(err.message);
   }
-  assert.equal(messages.size, BILLING_CODES.length, "each code has its own message");
+  assert.equal(messages.size, CREDIT_POLICY.errorCodes.length, "each served code has its own message");
 });
 
 test("spending_limit_reached says the monthly spending limit was reached", async () => {
-  const err = await rejection(402, { code: "spending_limit_reached" });
-  assert.equal(err.code, "spending_limit_reached");
+  const err = await rejection(SERVED, 402, { code: "spending_limit_reached" });
   assert.match(err.message, /monthly spending limit/i);
 });
 
-test("the frozen `{error: code}` body shape is recognised", async () => {
-  const err = await rejection(402, { error: "daily_free_limit_reached" });
-  assert.equal(err.code, "daily_free_limit_reached");
-});
-
-test("503 billing_unavailable is reported as unavailable, never as a balance problem", async () => {
-  const err = await rejection(503, { error: "billing_unavailable" });
+test("503 billing_unavailable in the `{error: code}` shape reads as unavailable, not a balance problem", async () => {
+  const err = await rejection(SERVED, 503, { error: "billing_unavailable" });
   assert.equal(err.code, "billing_unavailable");
-  assert.equal(err.status, 503);
   assert.match(err.message, /temporarily unavailable/i);
   assert.doesNotMatch(err.message, /balance|insufficient/i);
 });
 
-test("legacy insufficient_gateway_balance maps to insufficient_credits", async () => {
-  const legacy = await rejection(402, { code: "insufficient_gateway_balance", message: "x" });
-  const current = await rejection(402, { code: "insufficient_credits" });
-  assert.equal(legacy.code, "insufficient_credits");
-  assert.equal(legacy.message, current.message);
-  assert.equal(legacy.action, current.action);
+test("the served list decides: an unlisted code passes through, a listed code without copy gets the generic billing copy", async () => {
+  const narrowed = [200, { credit_policy: { ...CREDIT_POLICY, errorCodes: ["insufficient_credits", "new_billing_code"] } }];
+  const unlisted = await rejection(narrowed, 402, { code: "quote_expired", message: "server text", action: "server action" });
+  assert.equal(unlisted.message, "server text");
+  assert.equal(unlisted.action, "server action");
+  const uncopied = await rejection(narrowed, 402, { code: "new_billing_code", message: "server text" });
+  assert.equal(uncopied.code, "new_billing_code");
+  assert.match(uncopied.message, /billing/i);
+  assert.notEqual(uncopied.message, "server text");
 });
 
-test("unrelated error codes pass through unchanged", async () => {
-  const err = await rejection(402, { code: "billing_or_credit_required", message: "server text", action: "server action" });
-  assert.equal(err.code, "billing_or_credit_required");
-  assert.equal(err.message, "server text");
-  assert.equal(err.action, "server action");
-  const human = await rejection(400, { error: "valid ownerId is required" });
-  assert.equal(human.code, "VARITY_API_ERROR");
+test("legacy and non-billing codes pass through unchanged; producers own the legacy rename", async () => {
+  const legacy = await rejection(SERVED, 402, { code: "insufficient_gateway_balance", message: "server text" });
+  assert.equal(legacy.code, "insufficient_gateway_balance");
+  assert.equal(legacy.message, "server text");
+  const prose = await rejection(SERVED, 400, { error: "valid ownerId is required" });
+  assert.equal(prose.code, "VARITY_API_ERROR");
 });
 
-test("machine create surfaces a 402 billing code to the user", async () => {
-  const stub = stubSequence([
-    [200, { quote_token: "aq1.token-abcdefgh", hourly_usd: 0.05 }],
-    [402, { code: "quote_expired" }],
-  ]);
+test("an unreadable policy leaves billing errors as the server sent them", async () => {
+  for (const pricing of [[503, {}], [200, {}], [200, { credit_policy: { ...CREDIT_POLICY, creditsPerUsd: "100" } }]]) {
+    const err = await rejection(pricing, 402, { code: "insufficient_credits", message: "server text" });
+    assert.equal(err.code, "insufficient_credits");
+    assert.equal(err.message, "server text");
+  }
+});
+
+test("estimate shows credits at the served rate next to USD, in text and data alike", async () => {
+  const out = await costTool(SERVED, [200, { profile: "starter", fixed_monthly_cost_usd: 12.29 }], {});
+  assert.equal(out.data.fixed_monthly_cost_usd, 12.29);
+  assert.equal(out.data.fixed_monthly_cost_credits, 1229);
+  assert.match(out.message, /\$12\.29\/mo \(1,229 credits\)/);
+
+  const half = [200, { credit_policy: { ...CREDIT_POLICY, creditsPerUsd: 50 } }];
+  const halfRate = await costTool(half, [200, { fixed_monthly_cost_usd: 12.29 }], {});
+  assert.equal(halfRate.data.fixed_monthly_cost_credits, 614.5);
+});
+
+test("hourly deployment billing shows fractional credits without float drift", async () => {
+  const deployment = [200, { deployment: { id: "d-1", billing: { hourly_cost_usd: 0.29 } } }];
+  const out = await costTool(SERVED, deployment, { subdomain: "my-app" });
+  assert.equal(out.data.hourly_cost_credits, 29);
+  const fractional = await costTool(SERVED, [200, { deployment: { id: "d-1", billing: { hourly_cost_usd: 0.0137 } } }], { subdomain: "my-app" });
+  assert.equal(fractional.data.hourly_cost_credits, 1.37);
+  assert.match(fractional.message, /\(1\.37 credits\)/);
+});
+
+test("an unreadable policy keeps the USD estimate and says credits are unavailable", async () => {
+  const out = await costTool([503, {}], [200, { fixed_monthly_cost_usd: 12.29 }], {});
+  assert.equal(out.success, true);
+  assert.equal(out.data.fixed_monthly_cost_usd, 12.29);
+  assert.equal(out.data.fixed_monthly_cost_credits, null);
+  assert.match(out.message, /\$12\.29\/mo \(credits unavailable\)/);
+});
+
+test("machine create surfaces a served billing code to the user", async () => {
+  const handlers = {};
+  registerMachinesTools({ registerTool: (name, _config, fn) => { handlers[name] = fn; } });
+  const calls = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    calls.push(url);
+    const path = new URL(url).pathname;
+    const [status, body] = path === "/api/pricing" ? SERVED
+      : path === "/api/pricing/machine-quote" ? [200, { quote_token: "aq1.token-abcdefgh" }]
+      : [402, { code: "quote_expired" }];
+    return { ok: status >= 200 && status < 300, status, json: async () => body };
+  };
   try {
-    const handlers = {};
-    registerMachinesTools({ registerTool: (name, _config, fn) => { handlers[name] = fn; } });
     const out = payload(await handlers.varity_machines_create({
       name: "dev-box", profile_id: "mp-0123456789abcdef01234567", os_image: "os-ubuntu-24-04-0123456789ab",
       ssh_public_key: "ssh-ed25519 AAAA user@host",
     }));
     assert.equal(out.success, false);
     assert.equal(out.error.code, "quote_expired");
-    assert.match(out.error.suggestion, /retry/i);
+    assert.match(out.error.suggestion, /fresh quote/i);
   } finally {
-    stub.restore();
+    globalThis.fetch = original;
   }
 });
