@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
-import { getDeployment, publicApiGet, VarityPublicApiError } from "../utils/public-api.js";
+import { getCreditPolicy, getDeployment, publicApiGet, VarityPublicApiError } from "../utils/public-api.js";
 
 /**
  * varity_cost_calculator, THIN CLIENT.
@@ -10,8 +10,10 @@ import { getDeployment, publicApiGet, VarityPublicApiError } from "../utils/publ
  * forwards estimate inputs or projects the billing fields returned for an
  * owner-scoped deployment; it owns no profile catalog or billing defaults.
  *
- * The tool reports the monthly or hourly estimate field returned by the owner.
- * It never converts between units or invents a monthly projection.
+ * The tool reports the monthly or hourly estimate field returned by the owner,
+ * with its credit equivalent at the served `credit_policy.creditsPerUsd`
+ * (`null` when the policy is unavailable). It never converts between time
+ * units or invents a monthly projection.
  */
 
 export type OwnerPricingProjection =
@@ -60,6 +62,7 @@ export function registerCostCalculatorTool(server: McpServer): void {
       annotations: { readOnlyHint: true },
     },
     async ({ app_profile, subdomain }) => {
+      const policyRead = getCreditPolicy();
       let data: Record<string, unknown>;
       let source: string;
       try {
@@ -109,7 +112,12 @@ export function registerCostCalculatorTool(server: McpServer): void {
       const amount = projection.unit === "month"
         ? projection.fixed_monthly_cost_usd
         : projection.hourly_cost_usd;
-      const summary = `${String(estimateName)}: ${fmt(amount)}/${projection.unit === "month" ? "mo" : "hour"} estimate returned by the current Varity pricing interface.`;
+      const policy = await policyRead;
+      const credits = policy ? Math.round(amount * policy.creditsPerUsd * 100) / 100 : null;
+      const creditText = credits === null
+        ? "credits unavailable"
+        : `${credits.toLocaleString("en-US", { maximumFractionDigits: 2 })} credits`;
+      const summary = `${String(estimateName)}: ${fmt(amount)}/${projection.unit === "month" ? "mo" : "hour"} (${creditText}) estimate returned by the current Varity pricing interface.`;
 
       return successResponse(
         {
@@ -120,8 +128,8 @@ export function registerCostCalculatorTool(server: McpServer): void {
           profile: data.profile,
           currency: data.currency,
           ...(projection.unit === "month"
-            ? { fixed_monthly_cost_usd: projection.fixed_monthly_cost_usd }
-            : { hourly_cost_usd: projection.hourly_cost_usd }),
+            ? { fixed_monthly_cost_usd: projection.fixed_monthly_cost_usd, fixed_monthly_cost_credits: credits }
+            : { hourly_cost_usd: projection.hourly_cost_usd, hourly_cost_credits: credits }),
           billing_model: data.billing_model,
           mode: data.mode,
           verified: data.verified,

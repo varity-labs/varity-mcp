@@ -64,7 +64,7 @@ lifecycle state.
 | Tools | Zod-validated input and shared structured responses; no provider or orchestration policy | `src/tools/` | per-adapter and regression tests under `test/` |
 | Compatibility resource | `varity://deploy/reference` remains stable but routes mutable facts to live docs/tools | `src/resources/index.ts` | cleanup contract and architecture checks |
 | CLI bridge | argv arrays, bounded timeouts/output, normalized environment, durable run-reference extraction | `src/utils/cli-bridge.ts` | `test/cli-bridge-env.mjs`, `test/lifecycle-outcomes.mjs` |
-| Public-interface client | the one HTTP client for every Cloud read and lifecycle mutation (deploy, delete, redeploy, env, run status, machines); `VARITY_API_KEY ?? VARITY_DEPLOY_KEY` auth, `source: "mcp"` on create, bounded timeout, normalized errors; no copied pricing or lifecycle state | `src/utils/public-api.ts` | `test/public-api-client.mjs`, `test/public-api-budget.mjs`, `test/lifecycle-outcomes.mjs`, status/log tests |
+| Public-interface client | the one HTTP client for every Cloud read and lifecycle mutation (deploy, delete, redeploy, env, run status, machines); `VARITY_API_KEY ?? VARITY_DEPLOY_KEY` auth, `source: "mcp"` on create, bounded timeout, normalized errors; no copied pricing or lifecycle state | `src/utils/public-api.ts` | `test/public-api-client.mjs`, `test/public-api-budget.mjs`, `test/lifecycle-outcomes.mjs`, `test/credits-billing.mjs`, status/log tests |
 | Local GitHub helper | credentials come from process environment or `gh`; clean remote URL; normal non-force push | `src/tools/create-repo.ts` | cleanup contract plus Git behavior review |
 | Runtime telemetry | opt-in spans/logs/metrics/errors; protected inputs and stdout excluded | `src/telemetry.ts`, `src/runtime-shutdown.ts`, `src/utils/logger.ts` | telemetry, logger, and shutdown tests |
 
@@ -83,7 +83,7 @@ logic into individual tools.
 | Template list/detail/deploy | MCP tool → CLI bridge → `varitykit` | Catalog, certification, hardware, and price fields are downstream-owned |
 | Migration preview | temporary clone → `varitykit migrate apply --dry-run` → exact cleanup | URL-based apply/deploy fails closed until transformed-source custody is explicit |
 | Deployment list/status/logs | MCP tool → public-interface adapter | Owner-scoped response is authoritative for this client |
-| Cost estimate | MCP tool → public pricing/deployment interface | Profile keys, currency, billing model, and values are returned by the live owner |
+| Cost estimate | MCP tool → public pricing/deployment interface | Profile keys, currency, billing model, and values are returned by the live owner; the tool adds the credit equivalent at the served `credit_policy.creditsPerUsd`, or `null` (credits unavailable) when the policy cannot be read |
 | Docs search | MCP tool → public `llms-full.txt`/`llms.txt` | Five-minute process cache; stale entries are not served after expiry if refresh fails |
 | Build, install, browser, dev server, repository creation | local process/filesystem adapters | Operate on the invoking user's machine and credentials |
 
@@ -142,8 +142,10 @@ or release state.
   exact temporary clone on every completion/failure path; apply/deploy requests
   fail closed with the user-controlled-checkout workflow.
 - The public-interface adapter aborts bounded reads and preserves downstream
-  code/message/action fields. Transport failures become
-  `VARITY_API_UNREACHABLE`.
+  code/message/action fields, except a 402/503 whose code is one of the closed
+  billing codes served in `credit_policy.errorCodes` (`GET /api/pricing`),
+  which keeps its code and gets MCP copy; an unreadable policy leaves the
+  error unchanged. Transport failures become `VARITY_API_UNREACHABLE`.
 - Public URL liveness probes are observations for the current status response;
   they do not mutate canonical deployment state.
 - User-controlled values remain argv entries or encoded URL components, never
