@@ -14,17 +14,19 @@ import { test } from "node:test";
 process.env["VARITY_GATEWAY_URL"] = "https://gw.test";
 process.env["VARITY_API_KEY"] = "api-key";
 
-/** The frozen `credit_policy` block, verbatim from varity-engineering#225 (2026-10-18). */
+/** The served `credit_policy` block, verbatim from varity-engineering#225 (2026-10-18, incl. the enterprise and static amendments). */
 const CREDIT_POLICY = {
   version: "2026-10-18",
   creditsPerUsd: 100,
   plans: [{ id: "free", priceUsd: 0, monthlyCredits: 500 },
           { id: "core", priceUsd: 20, monthlyCredits: 2000 },
           { id: "pro", priceUsd: 100, monthlyCredits: 10000 },
-          { id: "business", priceUsd: 500, monthlyCredits: 50000 }],
+          { id: "business", priceUsd: 500, monthlyCredits: 50000 },
+          { id: "enterprise", priceUsd: null, monthlyCredits: null, contactSales: true, minimumMonthlySpendUsd: 5000 }],
   free: { monthlyCredits: 500, dailyAiCredits: 50, promoCategories: ["ai_chat", "ai_build", "static"] },
   rollover: { subscriptionCycles: 1 },
   topUp: { minimumUsd: 20, presetsUsd: [20, 100, 500], expiresAfterMonths: null },
+  static: { freeSites: 3, extraSiteMonthlyCredits: 100 },
   spendCategories: ["ai_chat", "ai_build", "ai_api", "static", "app", "cpu", "gpu"],
   errorCodes: ["insufficient_credits", "daily_free_limit_reached", "spending_limit_reached", "subscription_required", "wallet_frozen", "payment_method_shared", "quote_expired", "billing_unavailable"],
 };
