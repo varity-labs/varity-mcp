@@ -1,12 +1,10 @@
 /**
- * Unified credit billing (varity-engineering#225, varity-mcp#79). The owner
- * (billing-meter `CREDIT_POLICY`) serves `credit_policy` in `GET /api/pricing`;
- * the MCP reads the credit rate and the billing error-code list from it and
- * restates neither:
- * - every USD estimate carries its credit equivalent at the served rate, or
- *   says credits are unavailable when the policy cannot be read;
- * - a 402/503 whose code the policy lists gets MCP copy; every other code,
- *   including one the policy does not list, passes through unchanged.
+ * Billing refusals and USD estimates. The owner (billing-meter) serves the
+ * closed refusal codes in `GET /api/pricing` (`credit_policy.errorCodes`); the
+ * MCP reads only that list and restates nothing:
+ * - a 402/503 whose code the list names gets MCP copy in USD wording; every
+ *   other code, including one the list does not name, passes through unchanged;
+ * - estimates are USD only (founder ruling 2026-10-19: credits are removed).
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -120,39 +118,26 @@ test("legacy and non-billing codes pass through unchanged; producers own the leg
 });
 
 test("an unreadable policy leaves billing errors as the server sent them", async () => {
-  for (const pricing of [[503, {}], [200, {}], [200, { credit_policy: { ...CREDIT_POLICY, creditsPerUsd: "100" } }]]) {
+  for (const pricing of [[503, {}], [200, {}], [200, { credit_policy: { ...CREDIT_POLICY, errorCodes: "insufficient_credits" } }]]) {
     const err = await rejection(pricing, 402, { code: "insufficient_credits", message: "server text" });
     assert.equal(err.code, "insufficient_credits");
     assert.equal(err.message, "server text");
   }
 });
 
-test("estimate shows credits at the served rate next to USD, in text and data alike", async () => {
-  const out = await costTool(SERVED, [200, { profile: "starter", fixed_monthly_cost_usd: 12.29 }], {});
-  assert.equal(out.data.fixed_monthly_cost_usd, 12.29);
-  assert.equal(out.data.fixed_monthly_cost_credits, 1229);
-  assert.match(out.message, /\$12\.29\/mo \(1,229 credits\)/);
-
-  const half = [200, { credit_policy: { ...CREDIT_POLICY, creditsPerUsd: 50 } }];
-  const halfRate = await costTool(half, [200, { fixed_monthly_cost_usd: 12.29 }], {});
-  assert.equal(halfRate.data.fixed_monthly_cost_credits, 614.5);
+test("a profile estimate is USD only, in text and data alike", async () => {
+  const out = await costTool([200, { profile: "web-app", monthly_max_usd: 12.29, credit_policy: CREDIT_POLICY }], [500, {}], {});
+  assert.equal(out.data.monthly_max_usd, 12.29);
+  assert.match(out.message, /up to \$12\.29\/mo \(USD\)/);
+  assert.doesNotMatch(JSON.stringify(out), /credit/i);
 });
 
-test("hourly deployment billing shows fractional credits without float drift", async () => {
+test("hourly deployment billing is reported in USD without conversion", async () => {
   const deployment = [200, { deployment: { id: "d-1", billing: { hourly_cost_usd: 0.29 } } }];
   const out = await costTool(SERVED, deployment, { subdomain: "my-app" });
-  assert.equal(out.data.hourly_cost_credits, 29);
-  const fractional = await costTool(SERVED, [200, { deployment: { id: "d-1", billing: { hourly_cost_usd: 0.0137 } } }], { subdomain: "my-app" });
-  assert.equal(fractional.data.hourly_cost_credits, 1.37);
-  assert.match(fractional.message, /\(1\.37 credits\)/);
-});
-
-test("an unreadable policy keeps the USD estimate and says credits are unavailable", async () => {
-  const out = await costTool([503, {}], [200, { fixed_monthly_cost_usd: 12.29 }], {});
-  assert.equal(out.success, true);
-  assert.equal(out.data.fixed_monthly_cost_usd, 12.29);
-  assert.equal(out.data.fixed_monthly_cost_credits, null);
-  assert.match(out.message, /\$12\.29\/mo \(credits unavailable\)/);
+  assert.equal(out.data.hourly_cost_usd, 0.29);
+  assert.match(out.message, /\$0\.29\/hour \(USD\)/);
+  assert.doesNotMatch(JSON.stringify(out), /credit/i);
 });
 
 test("machine create surfaces a served billing code to the user", async () => {

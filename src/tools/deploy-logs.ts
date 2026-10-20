@@ -63,7 +63,9 @@ export function registerDeployLogsTool(server: McpServer): void {
           return errorResponse(
             err.code,
             err.message,
-            err.action ?? "Use varity_deploy_status to confirm the deployment id or app slug."
+            err.action ?? (err.code === "runtime_not_started"
+              ? "Call varity_deploy_status with this deployment for its build and publish outcome."
+              : "Use varity_deploy_status to confirm the deployment id or app slug.")
           );
         }
         return errorResponse(

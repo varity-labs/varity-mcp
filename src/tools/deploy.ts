@@ -59,7 +59,7 @@ export async function deployAccepted(accepted: Awaited<ReturnType<typeof createD
       ...acceptance,
     },
     acceptance.run_id
-      ? `Deploy accepted (run ${acceptance.run_id}, status ${acceptance.public_status ?? "unobserved"}). Track its terminal outcome with varity_deploy_status.`
+      ? `Deploy accepted (id ${accepted.id ?? "unassigned"}, run ${acceptance.run_id}, status ${acceptance.public_status ?? "unobserved"}). Track its terminal outcome with varity_deploy_status using this id; status returns the same id.`
       : "The deploy request returned no run. A live deployment is not yet proven; inspect varity_deploy_status before reporting completion."
   );
 }

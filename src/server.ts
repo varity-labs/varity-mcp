@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z, type ZodRawShape } from "zod";
 import { createRequire } from "node:module";
 import { registerResources } from "./resources/index.js";
 import { registerPrompts } from "./prompts/index.js";
@@ -32,6 +33,25 @@ if (typeof packageMetadata.version !== "string" || packageMetadata.version.lengt
 export const VERSION = packageMetadata.version;
 
 /**
+ * Every tool's raw input shape becomes a strict object, so an undeclared
+ * argument is refused with the accepted names instead of silently dropped
+ * (the advertised JSON schema already says `additionalProperties: false`).
+ * One seam for all tools; a tool keeps writing a plain shape.
+ */
+export function strictToolInputs(server: McpServer): void {
+  const register = server.registerTool.bind(server) as (...args: unknown[]) => unknown;
+  (server as { registerTool: unknown }).registerTool = (name: string, config: { inputSchema?: unknown }, cb: unknown) => {
+    const shape = config.inputSchema;
+    if (!shape || typeof shape !== "object" || shape instanceof z.ZodType) return register(name, config, cb);
+    const accepted = Object.keys(shape);
+    const message = accepted.length === 0
+      ? `${name} takes no arguments; call it with {}.`
+      : `Unknown argument. ${name} accepts only: ${accepted.join(", ")}.`;
+    return register(name, { ...config, inputSchema: z.object(shape as ZodRawShape).strict(message) }, cb);
+  };
+}
+
+/**
  * Create and configure the Varity MCP Server.
  *
  * This package is the published Varity MCP server. It exposes Varity's supported
@@ -57,6 +77,7 @@ export function createVarityServer(): McpServer {
   // Instrument the registration seam once so every resource, prompt, and tool
   // runs inside the same secret-safe MCP server span implementation.
   instrumentMcpServer(server);
+  strictToolInputs(server);
 
   // ── Resources (stable routes to live owners) ──
   registerResources(server);
