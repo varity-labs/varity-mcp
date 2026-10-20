@@ -5,6 +5,7 @@ import { registerResources } from "./resources/index.js";
 import { registerPrompts } from "./prompts/index.js";
 import { registerSearchDocsTool } from "./tools/search-docs.js";
 import { registerCostCalculatorTool } from "./tools/cost-calculator.js";
+import { registerBalanceTool } from "./tools/balance.js";
 import { registerCreateRepoTool } from "./tools/create-repo.js";
 import { registerDeployTool } from "./tools/deploy.js";
 import { registerDeployStatusTool } from "./tools/deploy-status.js";
@@ -88,6 +89,7 @@ export function createVarityServer(): McpServer {
   // ── Local discovery tools ──
   registerSearchDocsTool(server);
   registerCostCalculatorTool(server);
+  registerBalanceTool(server);
   registerDoctorTool(server);
 
   // ── Development tools (stdio owns the caller's local filesystem) ──

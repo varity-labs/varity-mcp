@@ -53,7 +53,7 @@ async function call(routes, name, args = {}) {
 // ── 1. USD only ─────────────────────────────────────────────────────────────
 
 /** Owner API identifiers that contain the word; they are codes, not copy. */
-const API_IDENTIFIERS = /credit_policy|insufficient_credits|credit-billing|useCreditAccount/g;
+const API_IDENTIFIERS = /credit_policy|insufficient_credits|credit-billing|useCreditAccount|\/api\/credits\/balance/g;
 
 test("USD only: no customer-visible string in the source says credit", () => {
   const offenders = [];
