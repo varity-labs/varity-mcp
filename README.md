@@ -104,7 +104,8 @@ The MCP exposes Varity's deploy surface so your AI tool can take action — not 
 | Tool | What it does |
 |---|---|
 | `varity_search_docs` | Search the Varity documentation |
-| `varity_cost_calculator` | Project the live owner's monthly or hourly estimate without converting units |
+| `varity_cost_calculator` | Project the live owner's monthly or hourly USD estimate without converting units; pre-deploy estimates need no sign-in |
+| `varity_balance` | Read the account balance and reserved amount in USD |
 | `varity_doctor` | Check that your environment is ready to deploy |
 | `varity_login` | Check authentication and route login through the trusted `varitykit auth login` terminal flow |
 | `varity_install_deps` | Install project dependencies |
@@ -115,7 +116,7 @@ The MCP exposes Varity's deploy surface so your AI tool can take action — not 
 | `varity_deploy` | Deploy the current project to production |
 | `varity_deploy_status` | Check the status of a deployment |
 | `varity_deploy_logs` | Read build and runtime logs |
-| `varity_delete_deployment` | Stop a deployment and end its billing |
+| `varity_delete_deployment` | Request deletion; poll `varity_deploy_status` until it is deleted and billing is stopped |
 | `varity_set_env` | Preserve the public tool route while refusing secret values and directing configuration to a secret-safe interface |
 | `varity_redeploy` | Reapply an existing deployment's saved configuration; unchanged input may be a no-op |
 | `varity_machines_list` | List your CPU virtual machines (optionally the CPU VM profile catalog) |

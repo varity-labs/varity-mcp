@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z, type ZodRawShape } from "zod";
 import { createRequire } from "node:module";
 import { registerResources } from "./resources/index.js";
 import { registerPrompts } from "./prompts/index.js";
@@ -20,6 +21,7 @@ import { registerDeleteDeploymentTool } from "./tools/delete-deployment.js";
 import { registerSetEnvTool } from "./tools/set-env.js";
 import { registerRedeployTool } from "./tools/redeploy.js";
 import { registerMachinesTools } from "./tools/machines.js";
+import { registerBalanceTool } from "./tools/balance.js";
 import { instrumentMcpServer } from "./telemetry.js";
 
 const require = createRequire(import.meta.url);
@@ -32,6 +34,25 @@ if (typeof packageMetadata.version !== "string" || packageMetadata.version.lengt
 export const VERSION = packageMetadata.version;
 
 /**
+ * Every tool's raw input shape becomes a strict object, so an undeclared
+ * argument is refused with the accepted names instead of silently dropped
+ * (the advertised JSON schema already says `additionalProperties: false`).
+ * One seam for all tools; a tool keeps writing a plain shape.
+ */
+export function strictToolInputs(server: McpServer): void {
+  const register = server.registerTool.bind(server) as (...args: unknown[]) => unknown;
+  (server as { registerTool: unknown }).registerTool = (name: string, config: { inputSchema?: unknown }, cb: unknown) => {
+    const shape = config.inputSchema;
+    if (!shape || typeof shape !== "object" || shape instanceof z.ZodType) return register(name, config, cb);
+    const accepted = Object.keys(shape);
+    const message = accepted.length === 0
+      ? `${name} takes no arguments; call it with {}.`
+      : `Unknown argument. ${name} accepts only: ${accepted.join(", ")}.`;
+    return register(name, { ...config, inputSchema: z.object(shape as ZodRawShape).strict(message) }, cb);
+  };
+}
+
+/**
  * Create and configure the Varity MCP Server.
  *
  * This package is the published Varity MCP server. It exposes Varity's supported
@@ -39,7 +60,7 @@ export const VERSION = packageMetadata.version;
  * so they can scaffold, build, ship, and manage apps for the user.
  *
  * Tool surface:
- *   - Discovery: search-docs, cost-calculator, doctor
+ *   - Discovery: search-docs, cost-calculator, balance, doctor
  *   - Setup: install-deps, build, login
  *   - Deploy own code: deploy, deploy-status, deploy-logs, delete-deployment
  *   - Operate: secret-safe set-env compatibility route; redeploy (trackable configuration reapply; not verified restart)
@@ -57,6 +78,7 @@ export function createVarityServer(): McpServer {
   // Instrument the registration seam once so every resource, prompt, and tool
   // runs inside the same secret-safe MCP server span implementation.
   instrumentMcpServer(server);
+  strictToolInputs(server);
 
   // ── Resources (stable routes to live owners) ──
   registerResources(server);
@@ -67,6 +89,7 @@ export function createVarityServer(): McpServer {
   // ── Local discovery tools ──
   registerSearchDocsTool(server);
   registerCostCalculatorTool(server);
+  registerBalanceTool(server);
   registerDoctorTool(server);
 
   // ── Development tools (stdio owns the caller's local filesystem) ──

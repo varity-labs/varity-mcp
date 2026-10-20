@@ -17,7 +17,9 @@ export class VarityPublicApiError extends Error {
     message: string,
     public readonly code: string,
     public readonly status?: number,
-    public readonly action?: string
+    public readonly action?: string,
+    /** Extra served fields of a refusal (e.g. `profiles` on `profile_unknown`). */
+    public readonly served?: Record<string, unknown>
   ) {
     super(message);
     this.name = "VarityPublicApiError";
@@ -25,20 +27,28 @@ export class VarityPublicApiError extends Error {
 }
 
 const BILLING_URL = `${INFRASTRUCTURE.DASHBOARD}/billing`;
+/** Where the portal's "Create deploy key" button lives; the portal calls these keys "deploy keys". */
+export const DEPLOY_KEY_URL = `${INFRASTRUCTURE.DASHBOARD}/settings?tab=api-keys`;
+const DEPLOY_KEY_ACTION =
+  `Create a new deploy key at ${DEPLOY_KEY_URL}, set it as VARITY_API_KEY in the MCP server environment ` +
+  "(or run `varitykit auth login` in a trusted terminal), then call varity_doctor.";
 
 /**
- * MCP copy for billing refusals, keyed by the codes the owner serves in
- * `credit_policy.errorCodes`. The served list decides which codes are billing
- * refusals; a served code without copy here gets `BILLING_FALLBACK`.
+ * MCP copy for billing refusals, keyed by the closed codes the owner serves in
+ * `GET /api/pricing` (`credit_policy.errorCodes`). The served list decides which
+ * codes are billing refusals; a served code without copy here gets
+ * `BILLING_FALLBACK`. Codes are the owner's API identifiers and pass through
+ * unchanged; the copy speaks USD only (founder ruling 2026-10-19: credits are
+ * removed) and states no amount.
  */
 const BILLING_COPY: Readonly<Record<string, { message: string; action: string }>> = {
   insufficient_credits: {
-    message: "Your Varity credit balance is too low for this request.",
-    action: `Add credits at ${BILLING_URL}, then retry.`,
+    message: "Your Varity balance is too low for this request.",
+    action: `Add funds at ${BILLING_URL}, then retry. Call varity_balance to see the balance.`,
   },
   daily_free_limit_reached: {
     message: "You have used today's free allowance.",
-    action: `Wait for the daily reset, or add credits at ${BILLING_URL} to continue now.`,
+    action: `Wait for the daily reset, or add funds at ${BILLING_URL} to continue now.`,
   },
   spending_limit_reached: {
     message: "Your monthly spending limit on Varity has been reached.",
@@ -54,7 +64,7 @@ const BILLING_COPY: Readonly<Record<string, { message: string; action: string }>
   },
   payment_method_shared: {
     message: "This payment method is already used by another Varity account, so the free allowance does not apply.",
-    action: `Add a different payment method or buy credits at ${BILLING_URL}.`,
+    action: `Add a different payment method or add funds at ${BILLING_URL}.`,
   },
   quote_expired: {
     message: "The price quote expired before the request was confirmed.",
@@ -67,35 +77,23 @@ const BILLING_COPY: Readonly<Record<string, { message: string; action: string }>
 };
 const BILLING_FALLBACK = {
   message: "Varity billing refused this request.",
-  action: `Check your plan and credits at ${BILLING_URL}.`,
+  action: `Check your plan and balance at ${BILLING_URL}.`,
 };
 
-/** The `credit_policy` fields the MCP reads (owner: billing-meter `CREDIT_POLICY`). */
-export interface CreditPolicy {
-  version: string;
-  creditsPerUsd: number;
-  errorCodes: readonly string[];
-}
-
-function decodeCreditPolicy(raw: unknown): CreditPolicy | null {
-  if (raw === null || typeof raw !== "object") return null;
-  const { version, creditsPerUsd, errorCodes } = raw as Record<string, unknown>;
-  if (typeof version !== "string" || version.length === 0) return null;
-  if (typeof creditsPerUsd !== "number" || !Number.isInteger(creditsPerUsd) || creditsPerUsd <= 0) return null;
-  if (!Array.isArray(errorCodes) || !errorCodes.every((code) => typeof code === "string")) return null;
-  return { version, creditsPerUsd, errorCodes };
-}
-
 /**
- * `credit_policy` from `GET /api/pricing`, read per use (estimates and billing
- * refusals are rare, and an uncached read can never serve a stale policy).
- * `null` means unavailable: callers show that state and never substitute a
- * local rate or code list.
+ * The closed billing refusal codes served in `GET /api/pricing`
+ * (`credit_policy.errorCodes`, owner: billing-meter), read per use: refusals
+ * are rare and an uncached read never serves a stale list. `null` means
+ * unavailable; callers then leave the error unchanged and never substitute a
+ * local list. Nothing else is read from that block.
  */
-export async function getCreditPolicy(): Promise<CreditPolicy | null> {
+export async function getBillingErrorCodes(): Promise<readonly string[] | null> {
   try {
-    const data = await sendRequest<{ credit_policy?: unknown }>("GET", "/api/pricing");
-    return decodeCreditPolicy(data.credit_policy);
+    const data = await sendRequest<{ credit_policy?: { errorCodes?: unknown } | null }>(
+      "GET", "/api/pricing", { anonymous: true }
+    );
+    const codes = data.credit_policy?.errorCodes;
+    return Array.isArray(codes) && codes.every((code) => typeof code === "string") ? codes : null;
   } catch {
     return null;
   }
@@ -104,14 +102,28 @@ export async function getCreditPolicy(): Promise<CreditPolicy | null> {
 /** A 402/503 whose code the owner lists as a billing refusal gets MCP copy; anything else is unchanged. */
 async function withBillingCopy(err: VarityPublicApiError): Promise<VarityPublicApiError> {
   if (err.status !== 402 && err.status !== 503) return err;
-  const policy = await getCreditPolicy();
-  if (!policy?.errorCodes.includes(err.code)) return err;
+  const codes = await getBillingErrorCodes();
+  if (!codes?.includes(err.code)) return err;
   const copy = Object.hasOwn(BILLING_COPY, err.code) ? BILLING_COPY[err.code] : BILLING_FALLBACK;
   return new VarityPublicApiError(copy.message, err.code, err.status, copy.action);
 }
 
+/**
+ * A served action that names a raw HTTP route (`GET /api/...`) is an
+ * instruction an MCP agent cannot follow: the agent calls tools, not routes.
+ * Such an action is dropped so the calling tool's own tool-naming action is
+ * used instead (journey D 2026-10-20, step 7/M3).
+ */
+const RAW_ROUTE = /\b(?:GET|POST|PATCH|PUT|DELETE)\s+\/api\//;
+function agentAction(action: string | undefined): string | undefined {
+  return action && RAW_ROUTE.test(action) ? undefined : action;
+}
+
 export interface PublicDeployment {
+  /** The served row id: the operation id until the app is live, then its registry id. */
   id: string;
+  /** The durable operation id, stable for the deployment's whole life (null on legacy rows). */
+  operation_deployment_id?: string | null;
   app_name?: string;
   appName?: string;
   subdomain?: string;
@@ -142,7 +154,7 @@ async function authHeaders(): Promise<Record<string, string>> {
       "Not authenticated with Varity.",
       "NOT_AUTHENTICATED",
       401,
-      "Run varity_login, then complete `varitykit auth login` in a trusted terminal."
+      `Run varity_login, or create a deploy key at ${DEPLOY_KEY_URL} and set it as VARITY_API_KEY in the MCP server environment.`
     );
   }
   return {
@@ -155,6 +167,8 @@ export interface PublicApiRequestOptions {
   body?: unknown;
   /** Sent as `Idempotency-Key`; machine mutations require one. */
   idempotencyKey?: string;
+  /** A public read (no auth): sent without a key, so it works before sign-in. */
+  anonymous?: boolean;
 }
 
 /** One HTTP exchange; every failure is a `VarityPublicApiError` carrying the served code. */
@@ -163,7 +177,9 @@ async function sendRequest<T>(
   path: string,
   options: PublicApiRequestOptions = {}
 ): Promise<T> {
-  const headers = await authHeaders();
+  const headers: Record<string, string> = options.anonymous
+    ? { Accept: "application/json" }
+    : await authHeaders();
   if (options.body !== undefined) headers["Content-Type"] = "application/json";
   if (options.idempotencyKey) headers["Idempotency-Key"] = options.idempotencyKey;
   const controller = new AbortController();
@@ -180,11 +196,17 @@ async function sendRequest<T>(
       const body = data as { code?: string; error?: unknown; message?: string; action?: string };
       // Some services answer `{error: "<code>"}`; a snake_case token is a code, prose is not.
       const errorCode = typeof body.error === "string" && /^[a-z][a-z0-9_]*$/.test(body.error) ? body.error : undefined;
+      const code = body.code ?? errorCode ?? "VARITY_API_ERROR";
+      // The served key wording ("API key", no URL) is not the portal's term.
+      const badKey = code === "invalid_api_key";
+      const action = badKey ? DEPLOY_KEY_ACTION : agentAction(body.action);
+      const prose = typeof body.error === "string" && !errorCode ? body.error : undefined;
       throw new VarityPublicApiError(
-        body.message ?? `Varity API returned ${res.status}.`,
-        body.code ?? errorCode ?? "VARITY_API_ERROR",
+        badKey ? "The deploy key is invalid or revoked." : body.message ?? prose ?? `Varity API returned ${res.status}.`,
+        code,
         res.status,
-        body.action
+        action,
+        data as Record<string, unknown>
       );
     }
     return data as T;
@@ -352,4 +374,20 @@ export async function deleteMachine(
     `/api/machines/${encodeURIComponent(machineId)}`,
     { idempotencyKey }
   );
+}
+
+/**
+ * `GET /api/billing/account`: the one prepaid account the portal Billing page
+ * reads (portal `useCreditAccount`; gateway `routes/credit-billing.ts`). The
+ * raw body is returned; `varity_balance` projects the USD-e8 strings and
+ * computes nothing.
+ */
+export async function getBillingAccount(): Promise<Record<string, unknown>> {
+  return publicApiGet<Record<string, unknown>>("/api/billing/account");
+}
+
+/** Public `GET /api/pricing?profile=` (no auth): the pre-deploy estimate the portal deploy page shows. */
+export async function getPublicProfilePricing(profile: string | undefined): Promise<Record<string, unknown>> {
+  const qs = profile ? `?profile=${encodeURIComponent(profile)}` : "";
+  return sendRequest<Record<string, unknown>>("GET", `/api/pricing${qs}`, { anonymous: true });
 }

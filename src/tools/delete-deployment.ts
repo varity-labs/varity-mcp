@@ -22,7 +22,7 @@ export async function deleteAccepted(
     deleted
       ? `"${deployment}" is deleted.`
       : acceptance.run_id
-        ? `Delete accepted for "${deployment}" (run ${acceptance.run_id}, status ${acceptance.public_status ?? "unobserved"}). Route removal, reserved hardware release, and billing stop are complete only when varity_deploy_status shows it deleted.`
+        ? `Delete accepted for "${deployment}" (run ${acceptance.run_id}, status ${acceptance.public_status ?? "unobserved"}). Poll varity_deploy_status with "${deployment}" until status is deleted and billing.state is stopped; billing stop is not proven before then.`
         : `The delete request for "${deployment}" returned no run. Deletion and billing stop are not proven; check varity_deploy_status before retrying.`
   );
 }
@@ -32,9 +32,11 @@ export function registerDeleteDeploymentTool(server: McpServer): void {
     "varity_delete_deployment",
     {
       annotations: { destructiveHint: true },
-      title: "Delete a Deployment and Stop Its Billing",
+      title: "Request Deletion of a Deployment",
       description:
-        "Request deletion of an existing Varity deployment by id or app name and track it until billing stop is proven. " +
+        "Request deletion of an existing Varity deployment by id or app name. Returns as soon as the delete is accepted, " +
+        "usually with status deleting; it does not wait. Billing stop is proven only when varity_deploy_status shows " +
+        "status deleted and billing.state stopped, so poll that tool before telling the developer billing has stopped. " +
         "Use this when a developer says 'stop my <name>', 'shut down my deployment', 'I'm done with <name>', " +
         "'delete <name>', or when they no longer need a running app or agent. " +
         "The durable operation independently reconciles route removal, reserved hardware release, and billing stop. " +

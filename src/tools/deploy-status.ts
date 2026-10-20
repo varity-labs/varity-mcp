@@ -10,13 +10,15 @@ import {
 } from "../utils/public-api.js";
 
 interface DeploymentRecord {
+  /** The canonical id: the durable operation id `varity_deploy` returned, stable for the whole life. */
   id: string;
-  url: string;
+  /** Absent until the owner assigns one; never a placeholder string. */
+  url?: string;
   status: string;
   timestamp: string;
   name: string;
   appName: string;
-  runtime: string;
+  runtime?: string;
   billing?: Record<string, unknown> | null;
   /** The latest durable run and its sealed outcome, as served (D9). */
   run_id: string | null;
@@ -33,9 +35,9 @@ export interface HttpProbe {
 }
 
 export async function checkLiveness(
-  url: string
+  url: string | undefined
 ): Promise<HttpProbe> {
-  if (!url || url === "unknown" || !url.startsWith("http")) {
+  if (!url || !url.startsWith("http")) {
     return { outcome: "not_applicable" };
   }
   try {
@@ -65,17 +67,36 @@ export async function applyLiveness(deployments: DeploymentRecord[]): Promise<vo
 /** Served row fields `PublicDeployment` does not type (gateway `PUBLIC_DEPLOYMENT_KEYS`). */
 type ServedDeployment = PublicDeployment & { run_id?: string | null; outcome?: unknown };
 
-function normalizeDeployment(item: ServedDeployment): DeploymentRecord {
+/** Said wherever a URL would be, while the owner has not assigned one. */
+export const URL_PENDING = "URL not assigned yet";
+
+/**
+ * The served `billing` block with no false zero: `accrued_this_month_usd` is
+ * trusted only while `billing.state` is observed. With `state: null` the owner
+ * has not measured the interval (an hourly machine, a fresh or legacy row) and
+ * serves a placeholder 0, so the MCP says `"unavailable"` instead
+ * (journey D F1: a CPU VM read $0 while the portal showed $0.52).
+ */
+export function truthfulBilling(billing: Record<string, unknown> | null | undefined): Record<string, unknown> | null {
+  if (!billing) return null;
+  if (billing.state != null || !("accrued_this_month_usd" in billing)) return billing;
+  return { ...billing, accrued_this_month_usd: "unavailable" };
+}
+
+export function normalizeDeployment(item: ServedDeployment): DeploymentRecord {
   const name = item.subdomain ?? item.app_name ?? item.appName ?? item.id;
+  const url = item.url ?? item.public_url;
   return {
-    id: item.id ?? name,
+    // `varity_deploy` returns the operation id; the row id switches from it to
+    // a registry id at go-live (journey D F6). Both resolve as input.
+    id: item.operation_deployment_id ?? item.id ?? name,
     name,
     appName: item.appName ?? item.app_name ?? name,
-    runtime: item.runtime ?? "unknown",
-    url: item.url ?? item.public_url ?? "unknown",
+    ...(item.runtime ? { runtime: item.runtime } : {}),
+    ...(url ? { url } : {}),
     status: item.status ?? "unknown",
     timestamp: item.createdAt ?? item.created_at ?? "unknown",
-    billing: item.billing ?? null,
+    billing: truthfulBilling(item.billing),
     run_id: item.run_id ?? null,
     outcome: item.outcome ?? null,
   };
@@ -155,7 +176,7 @@ export function registerDeployStatusTool(server: McpServer): void {
 
           return successResponse(
             { deployment, source: "varity_public_api:/api/deployments" },
-            `Deployment ${deployment.id}: ${deployment.status} at ${deployment.url}`
+            `Deployment ${deployment.id}: ${deployment.status}${deployment.url ? ` at ${deployment.url}` : ` (${URL_PENDING})`}`
           );
         }
 
@@ -186,7 +207,7 @@ export function registerDeployStatusTool(server: McpServer): void {
               ? { pagination_note: `Showing ${limited.length} of ${deployments.length}. Increase "limit" to see more.` }
               : {}),
           },
-          `Found ${deployments.length} deployment(s). Most recent: ${limited[0]!.url}`
+          `Found ${deployments.length} deployment(s). Most recent: ${limited[0]!.name} (${limited[0]!.url ?? URL_PENDING})`
         );
       } catch (err) {
         return apiFailure(err, "Run varity_login, then retry varity_deploy_status.");
