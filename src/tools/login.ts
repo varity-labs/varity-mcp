@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse } from "../utils/responses.js";
 import { execCLI } from "../utils/cli-bridge.js";
-import { INFRASTRUCTURE, isAuthenticated } from "../utils/config.js";
+import { isAuthenticated } from "../utils/config.js";
 import { DEPLOY_KEY_URL } from "../utils/public-api.js";
 
 export function configuredCredentialResponse() {
