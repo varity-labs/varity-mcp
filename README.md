@@ -105,7 +105,6 @@ The MCP exposes Varity's deploy surface so your AI tool can take action — not 
 |---|---|
 | `varity_search_docs` | Search the Varity documentation |
 | `varity_cost_calculator` | Project the live owner's monthly or hourly USD estimate without converting units; pre-deploy estimates need no sign-in |
-| `varity_balance` | Read the account balance and reserved amount in USD |
 | `varity_doctor` | Check that your environment is ready to deploy |
 | `varity_login` | Check authentication and route login through the trusted `varitykit auth login` terminal flow |
 | `varity_install_deps` | Install project dependencies |

@@ -21,7 +21,6 @@ import { registerDeleteDeploymentTool } from "./tools/delete-deployment.js";
 import { registerSetEnvTool } from "./tools/set-env.js";
 import { registerRedeployTool } from "./tools/redeploy.js";
 import { registerMachinesTools } from "./tools/machines.js";
-import { registerBalanceTool } from "./tools/balance.js";
 import { instrumentMcpServer } from "./telemetry.js";
 
 const require = createRequire(import.meta.url);
@@ -60,7 +59,7 @@ export function strictToolInputs(server: McpServer): void {
  * so they can scaffold, build, ship, and manage apps for the user.
  *
  * Tool surface:
- *   - Discovery: search-docs, cost-calculator, balance, doctor
+ *   - Discovery: search-docs, cost-calculator, doctor
  *   - Setup: install-deps, build, login
  *   - Deploy own code: deploy, deploy-status, deploy-logs, delete-deployment
  *   - Operate: secret-safe set-env compatibility route; redeploy (trackable configuration reapply; not verified restart)
@@ -89,7 +88,6 @@ export function createVarityServer(): McpServer {
   // ── Local discovery tools ──
   registerSearchDocsTool(server);
   registerCostCalculatorTool(server);
-  registerBalanceTool(server);
   registerDoctorTool(server);
 
   // ── Development tools (stdio owns the caller's local filesystem) ──

@@ -44,7 +44,7 @@ const DEPLOY_KEY_ACTION =
 const BILLING_COPY: Readonly<Record<string, { message: string; action: string }>> = {
   insufficient_credits: {
     message: "Your Varity balance is too low for this request.",
-    action: `Add funds at ${BILLING_URL}, then retry. Call varity_balance to see the balance.`,
+    action: `Add funds at ${BILLING_URL}, then retry.`,
   },
   daily_free_limit_reached: {
     message: "You have used today's free allowance.",
@@ -374,16 +374,6 @@ export async function deleteMachine(
     `/api/machines/${encodeURIComponent(machineId)}`,
     { idempotencyKey }
   );
-}
-
-/**
- * `GET /api/billing/account`: the one prepaid account the portal Billing page
- * reads (portal `useCreditAccount`; gateway `routes/credit-billing.ts`). The
- * raw body is returned; `varity_balance` projects the USD-e8 strings and
- * computes nothing.
- */
-export async function getBillingAccount(): Promise<Record<string, unknown>> {
-  return publicApiGet<Record<string, unknown>>("/api/billing/account");
 }
 
 /** Public `GET /api/pricing?profile=` (no auth): the pre-deploy estimate the portal deploy page shows. */

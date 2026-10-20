@@ -100,38 +100,6 @@ test("USD only: every billing refusal speaks USD, not credits", async () => {
   }
 });
 
-// ── 2. Balance ──────────────────────────────────────────────────────────────
-
-const ACCOUNT = {
-  observedAt: "2026-10-20T03:00:00.000Z",
-  plan: { id: "core", status: "active" },
-  credits: { availableE8: "1234560000", available: 1234.56, reservedE8: "8606000000", reserved: 8606, debtE8: "0", debt: 0 },
-  access: "active",
-};
-
-test("varity_balance reads the portal's account and reports USD from the exact e8 strings", async () => {
-  const { out, calls } = await call({ "/api/billing/account": [200, ACCOUNT] }, "varity_balance");
-  assert.equal(out.success, true);
-  assert.deepEqual(calls.map((c) => c.path), ["/api/billing/account"]);
-  assert.equal(out.data.available_usd, 12.3456);
-  assert.equal(out.data.reserved_usd, 86.06);
-  assert.equal(out.data.debt_usd, 0);
-  assert.equal(out.data.currency, "USD");
-  assert.match(out.message, /Available \$12\.35, reserved \$86\.06/);
-  assert.doesNotMatch(JSON.stringify(out), /credit/i);
-});
-
-test("varity_balance never turns a missing amount or a refused read into $0", async () => {
-  const partial = await call({ "/api/billing/account": [200, { ...ACCOUNT, credits: { available: 0 } }] }, "varity_balance");
-  assert.equal(partial.out.data.available_usd, "unavailable");
-  assert.equal(partial.out.data.reserved_usd, "unavailable");
-
-  const refused = await call({ "/api/billing/account": [401, { error: "Invalid or expired token" }] }, "varity_balance");
-  assert.equal(refused.out.success, false);
-  assert.equal(refused.out.error.code, "balance_unavailable");
-  assert.match(refused.out.error.suggestion, /developer\.store\.varity\.so\/dashboard\/billing/);
-});
-
 // ── 3. One canonical id ─────────────────────────────────────────────────────
 
 /** `varity_deploy_status` for one served row (the tool path an agent uses). */
@@ -248,4 +216,20 @@ test("a rejected key says 'deploy key' and where to create one", async () => {
   assert.equal(out.error.code, "invalid_api_key");
   assert.match(out.error.suggestion, /deploy key at https:\/\/developer\.store\.varity\.so\/dashboard\/settings\?tab=api-keys/);
   assert.doesNotMatch(`${out.error.message} ${out.error.suggestion}`, /API key/);
+});
+
+test("varity_login links the portal's Deploy keys tab, like every other key message", async () => {
+  // A child process with an empty HOME, so the host's own varitykit login cannot answer first.
+  const { execFileSync } = await import("node:child_process");
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const home = mkdtempSync(join(tmpdir(), "varity-login-"));
+  const script = `
+    const { registerLoginTool } = await import(${JSON.stringify(new URL("../dist/tools/login.js", import.meta.url).href)});
+    let handler; registerLoginTool({ registerTool: (_n, _c, fn) => { handler = fn; } });
+    process.stdout.write((await handler({})).content[0].text);`;
+  const text = execFileSync(process.execPath, ["--input-type=module", "-e", script], {
+    env: { PATH: process.env.PATH, HOME: home, CI: "true" },
+  }).toString();
+  assert.equal(JSON.parse(text).data.settings_url, "https://developer.store.varity.so/dashboard/settings?tab=api-keys");
 });

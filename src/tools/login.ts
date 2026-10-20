@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse } from "../utils/responses.js";
 import { execCLI } from "../utils/cli-bridge.js";
 import { INFRASTRUCTURE, isAuthenticated } from "../utils/config.js";
+import { DEPLOY_KEY_URL } from "../utils/public-api.js";
 
 export function configuredCredentialResponse() {
   return successResponse(
@@ -30,7 +31,7 @@ export function registerLoginTool(server: McpServer): void {
         return configuredCredentialResponse();
       }
 
-      const settingsUrl = `${INFRASTRUCTURE.DEVELOPER_PORTAL}/dashboard/settings`;
+      const settingsUrl = DEPLOY_KEY_URL;
       const isHeadless =
         process.env.CI === "true" ||
         process.env.HEADLESS === "true" ||

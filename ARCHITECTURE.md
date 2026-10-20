@@ -83,7 +83,6 @@ logic into individual tools.
 | Template list/detail/deploy | MCP tool → CLI bridge → `varitykit` | Catalog, certification, hardware, and price fields are downstream-owned |
 | Migration preview | temporary clone → `varitykit migrate apply --dry-run` → exact cleanup | URL-based apply/deploy fails closed until transformed-source custody is explicit |
 | Deployment list/status/logs | MCP tool → public-interface adapter | Owner-scoped response is authoritative for this client; the returned `id` is the served `operation_deployment_id` (the id `varity_deploy` returned) when present, else the row id; a URL the owner has not assigned is omitted, and month-to-date accrual under an unobserved `billing.state` is `"unavailable"`, never 0 |
-| Balance | `varity_balance` → `GET /api/billing/account` (the account the portal Billing page reads) | USD from the served exact USD-e8 strings; a missing amount or refused read is `"unavailable"`, never 0 |
 | Cost estimate | MCP tool → public `GET /api/pricing?profile=` (no auth) or the owner-scoped deployment billing block | Profile keys, currency, billing model, and values are returned by the live owner under their served field names; USD only, no other unit |
 | Docs search | MCP tool → public `llms-full.txt`/`llms.txt` | Five-minute process cache; stale entries are not served after expiry if refresh fails |
 | Build, install, browser, dev server, repository creation | local process/filesystem adapters | Operate on the invoking user's machine and credentials |
