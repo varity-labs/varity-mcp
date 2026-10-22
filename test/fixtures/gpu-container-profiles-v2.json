@@ -1,0 +1,578 @@
+{
+  "schema_version": "gpu-container-profiles-v2",
+  "workload": "gpu",
+  "execution_class": "container",
+  "profiles": [
+    {
+      "id": "gpo-0248e14b246513d0f8a2762f",
+      "label": "RTX 4090 24 GB",
+      "execution_class": "container",
+      "accelerator": {
+        "profile_id": "gpo-0248e14b246513d0f8a2762f",
+        "count": 1,
+        "alternatives": [
+          {
+            "vendor": "nvidia",
+            "model": "rtx4090",
+            "vram_mb": 24576,
+            "interface": "pcie"
+          }
+        ]
+      },
+      "hardware": {
+        "vendor": "NVIDIA",
+        "model": "rtx4090",
+        "vram_mb": 24576,
+        "interface": "pcie",
+        "count": 1
+      },
+      "resources": {
+        "cpu_units": 6,
+        "memory_mb": 15258,
+        "storage_mb": 57220
+      },
+      "locations": [
+        "US"
+      ],
+      "runtime": {
+        "label": "Ubuntu SSH 24.04",
+        "ports": [
+          "22/tcp"
+        ],
+        "startup_command": null,
+        "provider_default": true
+      },
+      "access": {
+        "mode": "ssh",
+        "requires_public_key": true
+      },
+      "customer_price": {
+        "hourly_usd": 1.431,
+        "currency": "USD",
+        "billing_period": "hour",
+        "price_basis": "exact",
+        "pricing_policy_version": "gpu-hourly-v2-2026-07-28"
+      },
+      "availability": {
+        "status": "available",
+        "matching_capacity_count": null,
+        "aggregate_available_units": null,
+        "source_age_seconds": 6
+      }
+    },
+    {
+      "id": "gpo-09a59ec5f846377eec26f44d",
+      "label": "H200 141 GB",
+      "execution_class": "container",
+      "accelerator": {
+        "profile_id": "gpo-09a59ec5f846377eec26f44d",
+        "count": 1,
+        "alternatives": [
+          {
+            "vendor": "nvidia",
+            "model": "h200",
+            "vram_mb": 144384,
+            "interface": "sxm"
+          }
+        ]
+      },
+      "hardware": {
+        "vendor": "NVIDIA",
+        "model": "h200",
+        "vram_mb": 144384,
+        "interface": "sxm",
+        "count": 1
+      },
+      "resources": {
+        "cpu_units": 16,
+        "memory_mb": 122070,
+        "storage_mb": 114440
+      },
+      "locations": [
+        "US"
+      ],
+      "runtime": {
+        "label": "Ubuntu SSH 24.04",
+        "ports": [
+          "22/tcp"
+        ],
+        "startup_command": null,
+        "provider_default": true
+      },
+      "access": {
+        "mode": "ssh",
+        "requires_public_key": true
+      },
+      "customer_price": {
+        "hourly_usd": 4.6305,
+        "currency": "USD",
+        "billing_period": "hour",
+        "price_basis": "exact",
+        "pricing_policy_version": "gpu-hourly-v2-2026-07-28"
+      },
+      "availability": {
+        "status": "available",
+        "matching_capacity_count": null,
+        "aggregate_available_units": null,
+        "source_age_seconds": 6
+      }
+    },
+    {
+      "id": "gpo-12b0254210f9216b2256ce08",
+      "label": "A100 80 GB",
+      "execution_class": "container",
+      "accelerator": {
+        "profile_id": "gpo-12b0254210f9216b2256ce08",
+        "count": 1,
+        "alternatives": [
+          {
+            "vendor": "nvidia",
+            "model": "a100",
+            "vram_mb": 81920,
+            "interface": "sxm"
+          }
+        ]
+      },
+      "hardware": {
+        "vendor": "NVIDIA",
+        "model": "a100",
+        "vram_mb": 81920,
+        "interface": "sxm",
+        "count": 1
+      },
+      "resources": {
+        "cpu_units": 8,
+        "memory_mb": 61035,
+        "storage_mb": 57220
+      },
+      "locations": [
+        "US"
+      ],
+      "runtime": {
+        "label": "Ubuntu SSH 24.04",
+        "ports": [
+          "22/tcp"
+        ],
+        "startup_command": null,
+        "provider_default": true
+      },
+      "access": {
+        "mode": "ssh",
+        "requires_public_key": true
+      },
+      "customer_price": {
+        "hourly_usd": 3.024,
+        "currency": "USD",
+        "billing_period": "hour",
+        "price_basis": "exact",
+        "pricing_policy_version": "gpu-hourly-v2-2026-07-28"
+      },
+      "availability": {
+        "status": "available",
+        "matching_capacity_count": null,
+        "aggregate_available_units": null,
+        "source_age_seconds": 6
+      }
+    },
+    {
+      "id": "gpo-25eae3ecd95dc76f724d712d",
+      "label": "A100 80 GB",
+      "execution_class": "container",
+      "accelerator": {
+        "profile_id": "gpo-25eae3ecd95dc76f724d712d",
+        "count": 1,
+        "alternatives": [
+          {
+            "vendor": "nvidia",
+            "model": "a100",
+            "vram_mb": 81920,
+            "interface": "sxm"
+          }
+        ]
+      },
+      "hardware": {
+        "vendor": "NVIDIA",
+        "model": "a100",
+        "vram_mb": 81920,
+        "interface": "sxm",
+        "count": 1
+      },
+      "resources": {
+        "cpu_units": 16,
+        "memory_mb": 122070,
+        "storage_mb": 114440
+      },
+      "locations": [
+        "US"
+      ],
+      "runtime": {
+        "label": "Ubuntu SSH 24.04",
+        "ports": [
+          "22/tcp"
+        ],
+        "startup_command": null,
+        "provider_default": true
+      },
+      "access": {
+        "mode": "ssh",
+        "requires_public_key": true
+      },
+      "customer_price": {
+        "hourly_usd": 3.1185,
+        "currency": "USD",
+        "billing_period": "hour",
+        "price_basis": "exact",
+        "pricing_policy_version": "gpu-hourly-v2-2026-07-28"
+      },
+      "availability": {
+        "status": "available",
+        "matching_capacity_count": null,
+        "aggregate_available_units": null,
+        "source_age_seconds": 6
+      }
+    },
+    {
+      "id": "gpo-2a8d0649c5548e115773b166",
+      "label": "A100 80 GB",
+      "execution_class": "container",
+      "accelerator": {
+        "profile_id": "gpo-2a8d0649c5548e115773b166",
+        "count": 1,
+        "alternatives": [
+          {
+            "vendor": "nvidia",
+            "model": "a100",
+            "vram_mb": 81920,
+            "interface": "sxm"
+          }
+        ]
+      },
+      "hardware": {
+        "vendor": "NVIDIA",
+        "model": "a100",
+        "vram_mb": 81920,
+        "interface": "sxm",
+        "count": 1
+      },
+      "resources": {
+        "cpu_units": 1,
+        "memory_mb": 953,
+        "storage_mb": 953
+      },
+      "locations": [
+        "US"
+      ],
+      "runtime": {
+        "label": "Ubuntu SSH 24.04",
+        "ports": [
+          "22/tcp"
+        ],
+        "startup_command": null,
+        "provider_default": true
+      },
+      "access": {
+        "mode": "ssh",
+        "requires_public_key": true
+      },
+      "customer_price": {
+        "hourly_usd": 2.9835,
+        "currency": "USD",
+        "billing_period": "hour",
+        "price_basis": "exact",
+        "pricing_policy_version": "gpu-hourly-v2-2026-07-28"
+      },
+      "availability": {
+        "status": "available",
+        "matching_capacity_count": null,
+        "aggregate_available_units": null,
+        "source_age_seconds": 6
+      }
+    },
+    {
+      "id": "gpo-771597d4846b3bb8412eaaff",
+      "label": "H100 80 GB",
+      "execution_class": "container",
+      "accelerator": {
+        "profile_id": "gpo-771597d4846b3bb8412eaaff",
+        "count": 1,
+        "alternatives": [
+          {
+            "vendor": "nvidia",
+            "model": "h100",
+            "vram_mb": 81920,
+            "interface": "sxm"
+          }
+        ]
+      },
+      "hardware": {
+        "vendor": "NVIDIA",
+        "model": "h100",
+        "vram_mb": 81920,
+        "interface": "sxm",
+        "count": 1
+      },
+      "resources": {
+        "cpu_units": 32,
+        "memory_mb": 122070,
+        "storage_mb": 114440
+      },
+      "locations": [
+        "NL"
+      ],
+      "runtime": {
+        "label": "Ubuntu SSH 24.04",
+        "ports": [
+          "22/tcp"
+        ],
+        "startup_command": null,
+        "provider_default": true
+      },
+      "access": {
+        "mode": "ssh",
+        "requires_public_key": true
+      },
+      "customer_price": {
+        "hourly_usd": 3.7935,
+        "currency": "USD",
+        "billing_period": "hour",
+        "price_basis": "exact",
+        "pricing_policy_version": "gpu-hourly-v2-2026-07-28"
+      },
+      "availability": {
+        "status": "available",
+        "matching_capacity_count": null,
+        "aggregate_available_units": null,
+        "source_age_seconds": 6
+      }
+    },
+    {
+      "id": "gpo-8057971715b95861f8775a0f",
+      "label": "H100 80 GB",
+      "execution_class": "container",
+      "accelerator": {
+        "profile_id": "gpo-8057971715b95861f8775a0f",
+        "count": 1,
+        "alternatives": [
+          {
+            "vendor": "nvidia",
+            "model": "h100",
+            "vram_mb": 81920,
+            "interface": "sxm"
+          }
+        ]
+      },
+      "hardware": {
+        "vendor": "NVIDIA",
+        "model": "h100",
+        "vram_mb": 81920,
+        "interface": "sxm",
+        "count": 1
+      },
+      "resources": {
+        "cpu_units": 16,
+        "memory_mb": 61035,
+        "storage_mb": 57220
+      },
+      "locations": [
+        "GB",
+        "NL"
+      ],
+      "runtime": {
+        "label": "Ubuntu SSH 24.04",
+        "ports": [
+          "22/tcp"
+        ],
+        "startup_command": null,
+        "provider_default": true
+      },
+      "access": {
+        "mode": "ssh",
+        "requires_public_key": true
+      },
+      "customer_price": {
+        "hourly_usd": 3.6585,
+        "currency": "USD",
+        "billing_period": "hour",
+        "price_basis": "exact",
+        "pricing_policy_version": "gpu-hourly-v2-2026-07-28"
+      },
+      "availability": {
+        "status": "available",
+        "matching_capacity_count": null,
+        "aggregate_available_units": null,
+        "source_age_seconds": 6
+      }
+    },
+    {
+      "id": "gpo-8e286f263440c4b00f4e6a82",
+      "label": "H200 141 GB",
+      "execution_class": "container",
+      "accelerator": {
+        "profile_id": "gpo-8e286f263440c4b00f4e6a82",
+        "count": 1,
+        "alternatives": [
+          {
+            "vendor": "nvidia",
+            "model": "h200",
+            "vram_mb": 144384,
+            "interface": "sxm"
+          }
+        ]
+      },
+      "hardware": {
+        "vendor": "NVIDIA",
+        "model": "h200",
+        "vram_mb": 144384,
+        "interface": "sxm",
+        "count": 1
+      },
+      "resources": {
+        "cpu_units": 32,
+        "memory_mb": 244140,
+        "storage_mb": 228881
+      },
+      "locations": [
+        "US"
+      ],
+      "runtime": {
+        "label": "Ubuntu SSH 24.04",
+        "ports": [
+          "22/tcp"
+        ],
+        "startup_command": null,
+        "provider_default": true
+      },
+      "access": {
+        "mode": "ssh",
+        "requires_public_key": true
+      },
+      "customer_price": {
+        "hourly_usd": 4.806,
+        "currency": "USD",
+        "billing_period": "hour",
+        "price_basis": "exact",
+        "pricing_policy_version": "gpu-hourly-v2-2026-07-28"
+      },
+      "availability": {
+        "status": "available",
+        "matching_capacity_count": null,
+        "aggregate_available_units": null,
+        "source_age_seconds": 6
+      }
+    },
+    {
+      "id": "gpo-aeac286a46120bb06441e4f6",
+      "label": "H200 141 GB",
+      "execution_class": "container",
+      "accelerator": {
+        "profile_id": "gpo-aeac286a46120bb06441e4f6",
+        "count": 1,
+        "alternatives": [
+          {
+            "vendor": "nvidia",
+            "model": "h200",
+            "vram_mb": 144384,
+            "interface": "sxm"
+          }
+        ]
+      },
+      "hardware": {
+        "vendor": "NVIDIA",
+        "model": "h200",
+        "vram_mb": 144384,
+        "interface": "sxm",
+        "count": 1
+      },
+      "resources": {
+        "cpu_units": 64,
+        "memory_mb": 488281,
+        "storage_mb": 457763
+      },
+      "locations": [
+        "US"
+      ],
+      "runtime": {
+        "label": "Ubuntu SSH 24.04",
+        "ports": [
+          "22/tcp"
+        ],
+        "startup_command": null,
+        "provider_default": true
+      },
+      "access": {
+        "mode": "ssh",
+        "requires_public_key": true
+      },
+      "customer_price": {
+        "hourly_usd": 5.13,
+        "currency": "USD",
+        "billing_period": "hour",
+        "price_basis": "exact",
+        "pricing_policy_version": "gpu-hourly-v2-2026-07-28"
+      },
+      "availability": {
+        "status": "available",
+        "matching_capacity_count": null,
+        "aggregate_available_units": null,
+        "source_age_seconds": 6
+      }
+    },
+    {
+      "id": "gpo-d46630726f957ab37eb33a11",
+      "label": "A100 80 GB",
+      "execution_class": "container",
+      "accelerator": {
+        "profile_id": "gpo-d46630726f957ab37eb33a11",
+        "count": 1,
+        "alternatives": [
+          {
+            "vendor": "nvidia",
+            "model": "a100",
+            "vram_mb": 81920,
+            "interface": "sxm"
+          }
+        ]
+      },
+      "hardware": {
+        "vendor": "NVIDIA",
+        "model": "a100",
+        "vram_mb": 81920,
+        "interface": "sxm",
+        "count": 1
+      },
+      "resources": {
+        "cpu_units": 32,
+        "memory_mb": 244140,
+        "storage_mb": 228881
+      },
+      "locations": [
+        "US"
+      ],
+      "runtime": {
+        "label": "Ubuntu SSH 24.04",
+        "ports": [
+          "22/tcp"
+        ],
+        "startup_command": null,
+        "provider_default": true
+      },
+      "access": {
+        "mode": "ssh",
+        "requires_public_key": true
+      },
+      "customer_price": {
+        "hourly_usd": 3.294,
+        "currency": "USD",
+        "billing_period": "hour",
+        "price_basis": "exact",
+        "pricing_policy_version": "gpu-hourly-v2-2026-07-28"
+      },
+      "availability": {
+        "status": "available",
+        "matching_capacity_count": null,
+        "aggregate_available_units": null,
+        "source_age_seconds": 6
+      }
+    }
+  ]
+}
