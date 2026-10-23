@@ -19,6 +19,8 @@ interface DeploymentRecord {
   name: string;
   appName: string;
   runtime?: string;
+  execution_class?: PublicDeployment["execution_class"];
+  access?: PublicDeployment["access"];
   billing?: Record<string, unknown> | null;
   /** The latest durable run and its sealed outcome, as served (D9). */
   run_id: string | null;
@@ -93,6 +95,8 @@ export function normalizeDeployment(item: ServedDeployment): DeploymentRecord {
     name,
     appName: item.appName ?? item.app_name ?? name,
     ...(item.runtime ? { runtime: item.runtime } : {}),
+    ...(item.execution_class !== undefined ? { execution_class: item.execution_class } : {}),
+    ...(item.access !== undefined ? { access: item.access } : {}),
     ...(url ? { url } : {}),
     status: item.status ?? "unknown",
     timestamp: item.createdAt ?? item.created_at ?? "unknown",
@@ -134,7 +138,7 @@ export function registerDeployStatusTool(server: McpServer): void {
       title: "Deployment Status",
       description:
         "List deployments or get status of a specific deployment. " +
-        "Shows the owner-scoped fields returned by the Varity public interface, including URL, status, runtime when available, and creation time. " +
+        "Shows the owner-scoped fields returned by the Varity public interface, including URL, SSH access, execution class, status, runtime when available, and creation time. " +
         "A separate HTTP probe records reachability without overwriting the owner's lifecycle status; authenticated, POST-only, or transiently unavailable apps may return a non-2xx probe. " +
         "Use this when a developer asks about their deployments, wants to check status, " +
         "or needs to find a deployment URL.",
@@ -176,7 +180,7 @@ export function registerDeployStatusTool(server: McpServer): void {
 
           return successResponse(
             { deployment, source: "varity_public_api:/api/deployments" },
-            `Deployment ${deployment.id}: ${deployment.status}${deployment.url ? ` at ${deployment.url}` : ` (${URL_PENDING})`}`
+            `Deployment ${deployment.id}: ${deployment.status}${deployment.url ? ` at ${deployment.url}` : ` (${deployment.access?.protocol === "ssh" ? "SSH access available" : URL_PENDING})`}`
           );
         }
 

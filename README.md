@@ -114,7 +114,7 @@ The MCP exposes Varity's deploy surface so your AI tool can take action — not 
 | `varity_dev_server` | Start the local development server |
 | `varity_create_repo` | Create a GitHub repository and push the project |
 | `varity_deploy` | Deploy the current project to production |
-| `varity_deploy_status` | Check the status of a deployment |
+| `varity_deploy_status` | Read deployment lifecycle, served SSH access or URL, and billing state |
 | `varity_deploy_logs` | Read build and runtime logs |
 | `varity_delete_deployment` | Request deletion; poll `varity_deploy_status` until it is deleted and billing is stopped |
 | `varity_set_env` | Preserve the public tool route while refusing secret values and directing configuration to a secret-safe interface |
@@ -122,6 +122,9 @@ The MCP exposes Varity's deploy surface so your AI tool can take action — not 
 | `varity_machines_list` | List your CPU virtual machines (optionally the CPU VM profile catalog) |
 | `varity_machines_create` | Quote and create a CPU virtual machine with your SSH public key |
 | `varity_machines_delete` | Delete a CPU virtual machine and confirm its billing stopped |
+| `varity_gpu_containers_profiles` | Read current supported GPU container profiles, resources, locations, runtime, SSH requirements, price and availability |
+| `varity_gpu_containers_quote` | Request an exact owner-bound quote for a selected GPU container profile |
+| `varity_gpu_containers_create` | Create using the customer-approved quote token and their SSH public key |
 | `varity_list_templates` | List certified gateway-owned Varity templates |
 | `varity_template_info` | Show full details for one certified template |
 | `varity_deploy_template` | Deploy a public certified template with no required secrets; refuse private or secret-bearing templates |
@@ -129,6 +132,27 @@ The MCP exposes Varity's deploy surface so your AI tool can take action — not 
 | `varity_agent_info` | Backward-compatible alias for `varity_template_info` |
 | `varity_deploy_agent` | Backward-compatible alias for `varity_deploy_template` |
 | `varity_migrate` | Preview Vercel-to-Varity source transformations without mutating or deploying |
+
+## GPU containers
+
+Call `varity_gpu_containers_profiles` for the current v2 catalog, then
+`varity_gpu_containers_quote` with its `profile_id`. Review the returned price,
+authorization and expiry with the customer. Pass the approved `quote_token` as
+`accelerator_quote_token` to `varity_gpu_containers_create`, together with
+`name`, `profile_id` and the customer's `ssh_public_key`. Keep the matching
+private key on the customer's machine; never send it to a tool. Supply and reuse
+`idempotency_key` when retrying the same create request.
+
+The selected profile owns its runtime and resources. Create accepts no image,
+VM, storage or source overrides and never silently obtains another quote. An
+expired or rejected quote requires a fresh quote and customer approval.
+Unknown capacity and prices remain unknown; catalog availability may change.
+
+Create acceptance does not prove the workload works. Use
+`varity_deploy_status` for the served SSH host, port and username, then connect
+with the matching private key and verify the intended GPU work. When finished,
+call `varity_delete_deployment`; poll `varity_deploy_status` until status is
+`deleted` and `billing.state` is `stopped` before reporting billing stopped.
 
 ## Templates
 
