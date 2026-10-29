@@ -172,8 +172,10 @@ npm test
 git diff --check
 ```
 
-CI runs the full build/test job on Node 22.11 and executes the built stdio
-entrypoint on Node 22.11 and Node 24. The runtime test verifies the MCP
+CI runs the full build/test job on maintained Node 22 and executes the built stdio
+entrypoint on maintained Node 22 and Node 24. Both CI and package publication
+install the exact reviewed lock with npm audits disabled, including when the
+environment enables audits. The runtime test verifies the MCP
 initialize response reports the exact package version and that retired network
 transport arguments fail closed.
 

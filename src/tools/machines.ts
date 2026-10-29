@@ -202,7 +202,7 @@ export function registerMachinesTools(server: McpServer): void {
       description:
         "Delete a Varity CPU virtual machine by id and wait (up to 10 minutes) until its billing reads stopped.",
       inputSchema: {
-        machine_id: z.string().uuid().describe("The machine id from varity_machines_list."),
+        machine_id: z.guid().describe("The machine id from varity_machines_list."),
         idempotency_key: z
           .string()
           .regex(/^[A-Za-z0-9._:-]{8,128}$/)

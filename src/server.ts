@@ -48,7 +48,12 @@ export function strictToolInputs(server: McpServer): void {
     const message = accepted.length === 0
       ? `${name} takes no arguments; call it with {}.`
       : `Unknown argument. ${name} accepts only: ${accepted.join(", ")}.`;
-    return register(name, { ...config, inputSchema: z.object(shape as ZodRawShape).strict(message) }, cb);
+    return register(name, {
+      ...config,
+      inputSchema: z.strictObject(shape as ZodRawShape, {
+        error: (issue) => issue.code === "unrecognized_keys" ? message : undefined,
+      }),
+    }, cb);
   };
 }
 
