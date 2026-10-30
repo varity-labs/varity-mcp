@@ -129,6 +129,9 @@ export interface PublicDeployment {
   subdomain?: string;
   status?: string;
   runtime?: string;
+  execution_class?: string | null;
+  /** Served customer endpoint; null means no access has been observed. */
+  access?: { protocol: string; host: string; port: number; username: string } | null;
   public_url?: string;
   url?: string;
   created_at?: string;

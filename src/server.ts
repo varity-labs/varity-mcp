@@ -22,6 +22,7 @@ import { registerDeleteDeploymentTool } from "./tools/delete-deployment.js";
 import { registerSetEnvTool } from "./tools/set-env.js";
 import { registerRedeployTool } from "./tools/redeploy.js";
 import { registerMachinesTools } from "./tools/machines.js";
+import { registerGpuContainerTools } from "./tools/gpu-containers.js";
 import { instrumentMcpServer } from "./telemetry.js";
 
 const require = createRequire(import.meta.url);
@@ -64,15 +65,6 @@ export function strictToolInputs(server: McpServer): void {
  * deploy and operate surface to AI coding tools (Cursor, Claude Code, Codex, etc.)
  * so they can scaffold, build, ship, and manage apps for the user.
  *
- * Tool surface:
- *   - Discovery: search-docs, cost-calculator, doctor
- *   - Setup: install-deps, build, login
- *   - Deploy own code: deploy, deploy-status, deploy-logs, delete-deployment
- *   - Operate: secret-safe set-env compatibility route; redeploy (trackable configuration reapply; not verified restart)
- *   - CPU machines: machines-list, machines-create (caller's SSH public key), machines-delete (waits for billing stop)
- *   - Deploy certified templates: list-templates, template-info, deploy-template
- *   - Local development: open-browser, dev-server
- *   - Project ops: create-repo, migrate
  */
 export function createVarityServer(): McpServer {
   const server = new McpServer({
@@ -113,6 +105,7 @@ export function createVarityServer(): McpServer {
   registerSetEnvTool(server);
   registerRedeployTool(server);
   registerMachinesTools(server);
+  registerGpuContainerTools(server);
   registerAgentTools(server);
   registerMigrateTool(server);
 
