@@ -20,9 +20,11 @@ async function balance(body, status = 200, arguments_ = {}) {
     return { ok: status >= 200 && status < 300, status, json: async () => body };
   };
   try {
+    const catalog = await client.listTools();
     const response = await client.callTool({ name: "varity_balance", arguments: arguments_ });
     const text = response.content[0].text;
-    return { response, output: text.startsWith("{") ? JSON.parse(text) : null, calls };
+    return { response, output: text.startsWith("{") ? JSON.parse(text) : null, calls,
+      definition: catalog.tools.find((tool) => tool.name === "varity_balance") };
   } finally {
     globalThis.fetch = original;
     await client.close();
@@ -38,6 +40,16 @@ test("the agent reads the owner's exact USD balance using its deploy key, withou
   assert.equal(calls[0].url, "https://gw.test/api/credits/balance");
   assert.equal(calls[0].authorization, "Bearer test-deploy-key");
   assert.doesNotMatch(JSON.stringify(output), /must-not-leak|billing\/account|credit(?!s\/balance)/i);
+});
+
+test("authorization maximum is named without implying it reduces the served available balance", async () => {
+  const { output, definition } = await balance({ availableE8: "10000000000", reservedE8: "4506000000", debtE8: "0" });
+  assert.deepEqual(output.data, {
+    currency: "USD", available_usd: "100.00", reserved_usd: "45.06", debt_usd: "0.00",
+    source: "varity_public_api:/api/credits/balance",
+  });
+  assert.equal(output.message, "Available $100.00, authorization maximum $45.06, owed $0.00 (USD).");
+  assert.match(definition.description, /reserved_usd is the served authorization maximum/);
 });
 
 test("exact USD preserves sub-cent amounts and balances beyond floating-point integer precision", async () => {

@@ -21,23 +21,23 @@ function unavailable() {
 export function registerBalanceTool(server: McpServer): void {
   server.registerTool("varity_balance", {
     title: "Account Balance",
-    description: "Read your Varity balance in USD: available, reserved, and owed. Amounts are exact decimal USD strings. Use before deploying or when asked how much balance remains. An unavailable read is never reported as zero.",
+    description: "Read your Varity balance in USD: available, authorization maximum, and owed. reserved_usd is the served authorization maximum, not a measure of funded backing. Amounts are exact decimal USD strings. Use before deploying or when asked how much balance remains. An unavailable read is never reported as zero.",
     inputSchema: {},
     annotations: { readOnlyHint: true },
   }, async () => {
     try {
       const body = await publicApiGet<Record<string, unknown>>(BALANCE_PATH);
       const available = usdAmount(body.availableE8);
-      const reserved = usdAmount(body.reservedE8);
+      const authorizationMaximum = usdAmount(body.reservedE8);
       const debt = usdAmount(body.debtE8);
-      if (available === null || reserved === null || debt === null) return unavailable();
+      if (available === null || authorizationMaximum === null || debt === null) return unavailable();
       return successResponse({
         currency: "USD",
         available_usd: available,
-        reserved_usd: reserved,
+        reserved_usd: authorizationMaximum,
         debt_usd: debt,
         source: `varity_public_api:${BALANCE_PATH}`,
-      }, `Available $${available}, reserved $${reserved}, owed $${debt} (USD).`);
+      }, `Available $${available}, authorization maximum $${authorizationMaximum}, owed $${debt} (USD).`);
     } catch (error) {
       if (error instanceof VarityPublicApiError && (error.code === "NOT_AUTHENTICATED" || error.status === 401 || error.status === 403)) {
         return errorResponse(error.code, error.message, error.action);
