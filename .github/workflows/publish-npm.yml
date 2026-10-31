@@ -24,6 +24,16 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
+      - name: Require main for manual publication
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          SOURCE_REF: ${{ github.ref }}
+        shell: bash
+        run: |
+          if [ "$SOURCE_REF" != "refs/heads/main" ]; then
+            echo "::error::manual package publication requires main"
+            exit 1
+          fi
       - name: Verify the tag matches package.json
         if: github.event_name == 'push'
         shell: bash
@@ -35,6 +45,8 @@ jobs:
             echo "::error::tag mcp-v${requested} does not match package.json version ${package_version}"
             exit 1
           fi
+      - name: Verify release source custody
+        run: node scripts/check-release-custody.cjs
       - name: Refuse to publish without a token
         shell: bash
         run: |
