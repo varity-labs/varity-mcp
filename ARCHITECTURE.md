@@ -187,6 +187,13 @@ unreadable tag custody blocks publication. `test/release-custody.mjs` covers the
 guard, including the candidate manifest against a captured conflicting tag.
 The existing registry check separately refuses an already published version.
 
+`scripts/check-publisher-access.cjs` then verifies npm identity and only that
+principal's write permission for this package, using the existing Actions
+credential in place. Failed or malformed reads and absent/read-only grants
+block publication. Raw npm output, collaborator lists and credentials are never
+logged. These checks do not establish the token's publish scope, 2FA bypass or
+publication success; the unchanged native publish step must still succeed.
+
 High-value coverage includes CLI environment normalization, stderr-only logging,
 public URL liveness classification, log completeness/freshness, lifecycle
 acceptance semantics, public-interface timeout policy, telemetry correlation and
