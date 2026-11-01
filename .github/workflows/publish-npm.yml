@@ -56,6 +56,10 @@ jobs:
           fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Verify npm publisher access
+        run: node scripts/check-publisher-access.cjs
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - run: npm ci --no-audit --no-fund
       - name: Refuse to overwrite a published version
         shell: bash
