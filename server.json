@@ -1,0 +1,22 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.varity-labs/varity-mcp",
+  "title": "Varity",
+  "description": "Deploy apps, AI agents, and LLMs to production from your AI editor, with the cost shown up front.",
+  "repository": {
+    "url": "https://github.com/varity-labs/varity-mcp",
+    "source": "github"
+  },
+  "websiteUrl": "https://varity.so",
+  "version": "2.3.24",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@varity-labs/mcp",
+      "version": "2.3.24",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}
