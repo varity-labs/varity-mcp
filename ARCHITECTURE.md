@@ -179,8 +179,14 @@ environment enables audits. The runtime test verifies the MCP
 initialize response reports the exact package version and that retired network
 transport arguments fail closed.
 
-The existing npm publication workflow requires `main` for manual dispatch and
-runs `scripts/check-release-custody.cjs` before publishing. It reads the clean candidate's exact Git commit and queries
+The existing npm publication workflow requires `main`, an exact lowercase
+40-hex `expected_source` and a bounded `request_id` for manual dispatch. Any
+governed caller must supply these inputs; the workflow rejects a source that
+advanced after the caller selected it before checkout or publishing. Its run
+name is `Publish npm package (<request_id>)`, allowing the release owner to
+bind the native run to that request and source. Tag-triggered publication keeps
+its existing source/version guards. The workflow runs
+`scripts/check-release-custody.cjs` before publishing. It reads the clean candidate's exact Git commit and queries
 the matching remote `mcp-v<package version>` tag, including its peeled target.
 An absent tag or a tag at the same source is allowed; conflicting, malformed or
 unreadable tag custody blocks publication. `test/release-custody.mjs` covers the

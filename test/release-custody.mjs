@@ -60,6 +60,40 @@ test("native Git lookup refuses a stale tag, tracked changes and an unavailable 
   }
 });
 
+test("manual publication binds the reviewed main source and a closed request identity before work", () => {
+  const workflow = readFileSync(new URL(".github/workflows/publish-npm.yml", repositoryRoot), "utf8");
+  const step = workflow.split(/(?=^      - )/m).find(value => value.includes("name: Validate governed publication request"));
+  assert.ok(step, "manual publisher must bind its governed source and request");
+  assert.match(step, /if: github\.event_name == 'workflow_dispatch'/);
+  assert.match(step, /EXPECTED_SOURCE: \$\{\{ inputs\.expected_source \}\}/);
+  assert.match(step, /REQUEST_ID: \$\{\{ inputs\.request_id \}\}/);
+  assert.ok(workflow.indexOf(step) < workflow.indexOf("uses: actions/checkout"));
+  const block = step.match(/run: \|\n([\s\S]*)/);
+  assert.ok(block);
+  const script = block[1].split("\n").map(line => line.slice(10)).join("\n");
+  const run = extra => spawnSync("bash", ["-euo", "pipefail", "-c", script], {
+    encoding: "utf8", env: { ...process.env, SOURCE_REF: "refs/heads/main", SOURCE_SHA: "a".repeat(40), EXPECTED_SOURCE: "a".repeat(40), REQUEST_ID: "mcp-release-123", ...extra },
+  });
+  for (const request of ["mcp-release-123", "A:_-.9", "r" + "x".repeat(127)]) {
+    assert.equal(run({ REQUEST_ID: request }).status, 0, request);
+  }
+  for (const extra of [
+    { SOURCE_REF: "refs/heads/topic" }, { SOURCE_REF: "refs/tags/mcp-v2.3.25" },
+    { EXPECTED_SOURCE: "" }, { EXPECTED_SOURCE: "a".repeat(39) }, { EXPECTED_SOURCE: "A".repeat(40) },
+    { SOURCE_SHA: "b".repeat(40) }, // main advanced after the owner selected it
+    { REQUEST_ID: "" }, { REQUEST_ID: "bad request" }, { REQUEST_ID: "_bad" },
+    { REQUEST_ID: "x".repeat(129) }, { REQUEST_ID: "bad\nrequest" }, { REQUEST_ID: "$(echo unsafe)" },
+  ]) {
+    const result = run(extra);
+    assert.notEqual(result.status, 0, JSON.stringify(extra));
+    assert.doesNotMatch(result.stdout + result.stderr, /unsafe|bad request/);
+  }
+  assert.match(workflow, /^run-name: Publish npm package \(\$\{\{ inputs\.request_id \|\| github\.ref_name \}\}\)$/m);
+  for (const name of ["expected_source", "request_id"]) {
+    assert.match(workflow, new RegExp(`${name}:\\n(?: {8}[^\\n]+\\n)* {8}required: true`));
+  }
+});
+
 test("the existing publisher uses native OIDC without surviving token or npm config credentials", () => {
   const workflow = readFileSync(new URL(".github/workflows/publish-npm.yml", repositoryRoot), "utf8");
   const publish = workflow.split(/(?=^      - )/m).find(step => step.includes("name: Publish npm package with trusted publishing"));
