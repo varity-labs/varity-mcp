@@ -187,12 +187,16 @@ unreadable tag custody blocks publication. `test/release-custody.mjs` covers the
 guard, including the candidate manifest against a captured conflicting tag.
 The existing registry check separately refuses an already published version.
 
-`scripts/check-publisher-access.cjs` then verifies npm identity and only that
-principal's write permission for this package, using the existing Actions
-credential in place. Failed or malformed reads and absent/read-only grants
-block publication. Raw npm output, collaborator lists and credentials are never
-logged. These checks do not establish the token's publish scope, 2FA bypass or
-publication success; the unchanged native publish step must still succeed.
+The same workflow uses npm trusted publishing, with its Node/npm toolchain
+pinned to a compatible release. npm package settings must authorize the exact
+`varity-labs/varity-mcp` workflow `publish-npm.yml` and allow direct publishing;
+there is no GitHub environment on this job. The publish process strips npm
+token/config environment variables, rejects project `.npmrc` residue and uses
+distinct empty user/global configs, so a failed OIDC exchange cannot fall back
+to an old write token. The native publish must succeed; a saved trust setting
+or a dry-run does not establish authorization or publication. Public-source
+provenance and the downstream MCP Registry's separate OIDC identity remain
+part of release verification.
 
 High-value coverage includes CLI environment normalization, stderr-only logging,
 public URL liveness classification, log completeness/freshness, lifecycle

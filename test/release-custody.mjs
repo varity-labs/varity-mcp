@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -60,64 +60,64 @@ test("native Git lookup refuses a stale tag, tracked changes and an unavailable 
   }
 });
 
-test("the native publisher requires its credential-scoped access guard before publication", () => {
+test("the existing publisher uses native OIDC without surviving token or npm config credentials", () => {
   const workflow = readFileSync(new URL(".github/workflows/publish-npm.yml", repositoryRoot), "utf8");
-  const steps = workflow.split(/(?=^      - )/m);
-  const access = steps.find((step) => step.includes("run: node scripts/check-publisher-access.cjs"));
-  const publish = steps.find((step) => step.includes("run: npm publish --access public --provenance"));
-  assert.ok(access, "native publisher must verify the authenticated principal's package write permission");
-  assert.match(access, /NODE_AUTH_TOKEN: \$\{\{ secrets\.NPM_TOKEN \}\}/);
-  assert.doesNotMatch(access, /continue-on-error:\s*true/);
-  assert.ok(publish && workflow.indexOf(access) < workflow.indexOf(publish));
-  assert.doesNotMatch(publish, /always\(\)|failure\(\)/);
-});
-
-test("native npm subprocesses prove identity and only that principal's exact package grant", () => {
-  const directory = mkdtempSync(join(tmpdir(), "mcp-publisher-access-"));
-  const log = join(directory, "argv.jsonl");
-  const canary = "synthetic-credential-must-not-escape";
+  const publish = workflow.split(/(?=^      - )/m).find(step => step.includes("name: Publish npm package with trusted publishing"));
+  assert.ok(publish, "publisher must use its native OIDC publish step");
+  assert.match(workflow, /id-token: write/);
+  assert.match(workflow, /runs-on: ubuntu-latest/);
+  assert.match(workflow, /node-version: 22\.23\.4/);
+  assert.match(workflow, /npm install --global npm@12\.2\.1/);
+  assert.doesNotMatch(workflow, /registry-url:|secrets\.NPM_TOKEN/);
+  assert.ok(workflow.indexOf("node scripts/check-release-custody.cjs") < workflow.indexOf(publish));
+  assert.ok(workflow.indexOf("Refuse to overwrite a published version") < workflow.indexOf(publish));
+  assert.match(workflow, /SOURCE_REF.*refs\/heads\/main/);
+  assert.match(workflow, /mcp-publisher login github-oidc/);
+  assert.match(workflow, /cosign verify-blob/);
+  const block = publish.match(/run: \|\n([\s\S]*?^          NODE$)/m);
+  assert.ok(block, "the workflow's actual publish command must be executable");
+  const script = block[1].split("\n").map(line => line.slice(10)).join("\n");
+  const directory = mkdtempSync(join(tmpdir(), "mcp-native-publish-"));
+  const log = join(directory, "publish.json");
   const fakeNpm = `#!${process.execPath}
 const fs=require('node:fs');
 const args=process.argv.slice(2);
-fs.appendFileSync(process.env.NPM_TEST_ARGV,JSON.stringify(args)+'\\n');
-const scenario=process.env.NPM_TEST_SCENARIO;
-const canary=process.env.NODE_AUTH_TOKEN;
-if(args[0]==='whoami'){
- if(scenario==='identity-error'){console.error(canary);process.exit(1);}
- if(scenario==='identity-malformed'){console.log(canary);process.exit(0);}
- if(scenario==='identity-object'){console.log(JSON.stringify({username:'publisher-user'}));process.exit(0);}
- if(scenario==='identity-option'){console.log(JSON.stringify('--unsafe-option'));process.exit(0);}
- console.log(JSON.stringify('publisher-user'));
-}else{
- if(scenario==='access-error'){console.error(canary);process.exit(1);}
- if(scenario==='access-malformed'){console.log(canary);process.exit(0);}
- if(scenario==='access-array'){console.log('[]');process.exit(0);}
- const result={'unrelated-collaborator':'read-write'};
- if(scenario!=='missing')result['publisher-user']=scenario==='read-only'?'read-only':scenario==='access-grant-malformed'?{}:'read-write';
- console.log(JSON.stringify(result));
-}
+const config=flag=>args.find(x=>x.startsWith(flag+'=')).slice(flag.length+1);
+const user=config('--userconfig'),global=config('--globalconfig');
+fs.writeFileSync(process.env.NPM_TEST_LOG,JSON.stringify({args,user,global,userContents:fs.readFileSync(user,'utf8'),globalContents:fs.readFileSync(global,'utf8'),keys:Object.keys(process.env),oidc:process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}));
+process.exit(Number(process.env.NPM_TEST_EXIT||0));
 `;
   writeFileSync(join(directory, "npm"), fakeNpm, { mode: 0o700 });
   try {
-    for (const scenario of ["allowed", "identity-error", "identity-malformed", "identity-object", "identity-option", "access-error", "access-malformed", "access-array", "access-grant-malformed", "missing", "read-only"]) {
-      writeFileSync(log, "");
-      const result = spawnSync(process.execPath, [new URL("scripts/check-publisher-access.cjs", repositoryRoot).pathname], {
-        encoding: "utf8",
-        env: { ...process.env, PATH: `${directory}:${process.env.PATH}`, NODE_AUTH_TOKEN: canary, NPM_TEST_ARGV: log, NPM_TEST_SCENARIO: scenario },
-      });
-      assert.equal(result.status, scenario === "allowed" ? 0 : 1, scenario);
-      assert.doesNotMatch(result.stdout + result.stderr, new RegExp(canary));
-      assert.doesNotMatch(result.stdout + result.stderr, /unrelated-collaborator|publisher-user/);
-      const calls = readFileSync(log, "utf8").trim().split("\n").map(JSON.parse);
-      assert.deepEqual(calls[0], ["whoami", "--json", "--registry=https://registry.npmjs.org"]);
-      assert.equal(calls.length, scenario.startsWith("identity-") ? 1 : 2);
-      if (calls.length === 2) {
-        assert.deepEqual(calls[1], ["access", "list", "collaborators", "@varity-labs/mcp", "publisher-user", "--json", "--registry=https://registry.npmjs.org"]);
-      }
-      if (scenario === "allowed") assert.match(result.stdout, /token publish scope, 2FA and publication remain unverified/);
-      else assert.match(result.stderr, scenario.startsWith("identity-") ? /npm identity/ : /npm package-access/);
-    }
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
+    const run = (extra = {}) => spawnSync("bash", ["-euo", "pipefail", "-c", script], {
+      cwd: directory, encoding: "utf8",
+      env: { ...process.env, PATH: `${directory}:${process.env.PATH}`, RUNNER_TEMP: directory, NPM_TEST_LOG: log,
+        NODE_AUTH_TOKEN: "fixture-token", NPM_TOKEN: "fixture-token", NPM_ID_TOKEN: "fixture-id-token",
+        npm_config__auth: "fixture-auth", NPM_CONFIG_USERCONFIG: "/must-not-be-read", ACTIONS_ID_TOKEN_REQUEST_TOKEN: "fixture-github-oidc", ...extra },
+    });
+    const result = run();
+    assert.equal(result.status, 0, result.stderr);
+    const actual = JSON.parse(readFileSync(log, "utf8"));
+    assert.equal(actual.args[0], "publish");
+    assert.ok(actual.args.includes("--registry=https://registry.npmjs.org"));
+    assert.ok(actual.args.includes("--provenance"));
+    assert.notEqual(actual.user, actual.global);
+    assert.equal(actual.userContents + actual.globalContents, "");
+    assert.deepEqual(actual.keys.filter(key => /^(?:npm_config_|NODE_AUTH_TOKEN$|NPM_TOKEN$|NPM_ID_TOKEN$)/i.test(key)), []);
+    assert.equal(actual.oidc, "fixture-github-oidc");
+    assert.doesNotMatch(result.stdout + result.stderr, /fixture-token|fixture-id-token|fixture-auth/);
+    assert.ok(!existsSync(actual.user) && !existsSync(actual.global), "temporary configs are removed");
+    const rejected = run({ NPM_TEST_EXIT: "37" });
+    assert.equal(rejected.status, 37, "native npm authentication/publication failure must stop the job");
+    assert.deepEqual(readdirSync(directory).filter(name => name.startsWith("npm-oidc-")), []);
+    rmSync(log);
+    const projectConfig = join(directory, ".npmrc");
+    writeFileSync(projectConfig, "//registry.npmjs.org/:_authToken=fixture-project-token\n");
+    assert.notEqual(run().status, 0);
+    assert.equal(existsSync(log), false, "project credentials refuse before npm can run");
+    rmSync(projectConfig);
+    symlinkSync(join(directory, "absent"), projectConfig);
+    assert.notEqual(run().status, 0, "a dangling config symlink is also residue");
+    assert.equal(existsSync(log), false);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });

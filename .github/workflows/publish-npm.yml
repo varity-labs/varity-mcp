@@ -2,8 +2,8 @@ name: Publish npm package
 
 # Publishes @varity-labs/mcp to npm on a release tag (mcp-v<major>.<minor>.<patch>)
 # or on demand. The package's own `prepublishOnly` (build + prepublish guard)
-# still runs. Requires the repository secret NPM_TOKEN (npm automation token
-# with publish rights on @varity-labs). Without it the job fails closed.
+# still runs. npm package settings must trust this exact GitHub workflow and
+# allow direct publishing. No npm write token is used.
 
 on:
   push:
@@ -22,8 +22,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
-          registry-url: https://registry.npmjs.org
+          node-version: 22.23.4
+      - name: Install the pinned OIDC-capable npm CLI
+        run: |
+          npm install --global npm@12.2.1 --ignore-scripts --no-audit --no-fund --registry=https://registry.npmjs.org
+          test "$(npm --version)" = 12.2.1
       - name: Require main for manual publication
         if: github.event_name == 'workflow_dispatch'
         env:
@@ -47,19 +50,6 @@ jobs:
           fi
       - name: Verify release source custody
         run: node scripts/check-release-custody.cjs
-      - name: Refuse to publish without a token
-        shell: bash
-        run: |
-          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
-            echo "::error::repository secret NPM_TOKEN is not set; refusing to publish"
-            exit 1
-          fi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - name: Verify npm publisher access
-        run: node scripts/check-publisher-access.cjs
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - run: npm ci --no-audit --no-fund
       - name: Refuse to overwrite a published version
         shell: bash
@@ -71,9 +61,33 @@ jobs:
             echo "::error::${name}@${version} is already published"
             exit 1
           fi
-      - run: npm publish --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish npm package with trusted publishing
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { spawnSync } from 'node:child_process';
+          import { lstatSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+          import { join } from 'node:path';
+          // A failed OIDC exchange must not fall back to a surviving token.
+          const env = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
+            !/^(?:npm_config_|NODE_AUTH_TOKEN$|NPM_TOKEN$|NPM_ID_TOKEN$)/i.test(key)));
+          if (lstatSync('.npmrc', { throwIfNoEntry: false })) {
+            throw new Error('Project npm credential/config residue blocks publication.');
+          }
+          const directory = mkdtempSync(join(process.env.RUNNER_TEMP, 'npm-oidc-'));
+          try {
+            const user = join(directory, 'user.npmrc');
+            const global = join(directory, 'global.npmrc');
+            writeFileSync(user, '', { mode: 0o600 });
+            writeFileSync(global, '', { mode: 0o600 });
+            const result = spawnSync('npm', ['publish', '--access', 'public', '--provenance',
+              '--registry=https://registry.npmjs.org', `--userconfig=${user}`, `--globalconfig=${global}`],
+              { env, stdio: 'inherit' });
+            process.exitCode = result.status ?? 1;
+          } finally {
+            rmSync(directory, { recursive: true, force: true });
+          }
+          NODE
 
       # Publish the same version's metadata to the official MCP Registry.
       # Auth is GitHub OIDC (id-token: write above): no extra secret needed.
