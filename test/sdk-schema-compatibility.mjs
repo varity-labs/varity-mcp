@@ -55,7 +55,7 @@ test("real SDK keeps strict accepted-name errors and refuses invalid values befo
   const client = await clientFor(t);
   const calls = gateway(t, () => assert.fail("invalid input must not reach the public API"));
   for (const [name, args, expected] of [
-    ["varity_machines_list", { bogus: true }, /Unknown argument\. varity_machines_list accepts only: include_profiles\./],
+    ["varity_machines_list", { bogus: true }, /Unknown argument\. varity_machines_list accepts only: include_profiles, gpu\./],
     ["varity_balance", { bogus: true }, /varity_balance takes no arguments; call it with \{\}\./],
     ["varity_machines_list", { include_profiles: "yes" }, /include_profiles/],
     ["varity_machines_delete", { machine_id: "not-a-guid" }, /machine_id/],
