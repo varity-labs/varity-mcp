@@ -69,7 +69,7 @@ export function strictToolInputs(server: McpServer): void {
  *   - Setup: install-deps, build, login
  *   - Deploy own code: deploy, deploy-status, deploy-logs, delete-deployment
  *   - Operate: secret-safe set-env compatibility route; redeploy (trackable configuration reapply; not verified restart)
- *   - CPU machines: machines-list, machines-create (caller's SSH public key), machines-delete (waits for billing stop)
+ *   - CPU and GPU VMs: machines-list, machines-create (caller's SSH public key), machines-delete (waits for billing stop)
  *   - Deploy certified templates: list-templates, template-info, deploy-template
  *   - Local development: open-browser, dev-server
  *   - Project ops: create-repo, migrate

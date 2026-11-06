@@ -132,3 +132,55 @@ test("delete stops polling at the operation's execution_deadline_at and reports 
     stub.restore();
   }
 });
+
+test("gpu: true lists GPU VM profiles and creates a GPU virtual machine (never containers or bare metal)", async () => {
+  const handlers = {};
+  registerMachinesTools({ registerTool: (name, _config, handler) => { handlers[name] = handler; } });
+  const list = stubSequence([
+    [200, { machines: [], inventory_status: "complete" }],
+    [200, { execution_class: "virtual_machine", profiles: [] }],
+  ]);
+  try {
+    const out = payload(await handlers.varity_machines_list({ include_profiles: true, gpu: true }));
+    assert.equal(out.success, true);
+    assert.equal(list.calls[1].url, "https://gw.test/api/deployment-profiles?workload=gpu&execution_class=virtual_machine");
+  } finally {
+    list.restore();
+  }
+  const cpu = stubSequence([
+    [200, { machines: [], inventory_status: "complete" }],
+    [200, { execution_class: "cpu_virtual_machine", profiles: [] }],
+  ]);
+  try {
+    await handlers.varity_machines_list({ include_profiles: true });
+    assert.equal(cpu.calls[1].url, "https://gw.test/api/deployment-profiles?workload=cpu&execution_class=cpu_virtual_machine");
+  } finally {
+    cpu.restore();
+  }
+  const create = stubSequence([
+    [200, { quote_token: "aq1.token-abcdefgh", hourly_usd: 0.25 }],
+    [202, { replayed: false, machine_id: MACHINE_ID, operation: { status: "accepted" } }],
+  ]);
+  try {
+    await quoteAndCreateMachine({ name: "gpu-box", profile_id: PROFILE, os_image: OS_IMAGE, ssh_public_key: "ssh-ed25519 AAAA", gpu: true });
+    assert.deepEqual(create.calls[0].body, { profile_id: PROFILE, execution_class: "virtual_machine", os_image: OS_IMAGE });
+    assert.equal(create.calls[1].body.execution_class, "virtual_machine");
+  } finally {
+    create.restore();
+  }
+});
+
+test("gpu: true with additional_storage_gb is refused before any request (storage is CPU-only)", async () => {
+  const handlers = {};
+  registerMachinesTools({ registerTool: (name, _config, handler) => { handlers[name] = handler; } });
+  const stub = stubSequence([[500, {}]]);
+  try {
+    const out = payload(await handlers.varity_machines_create({
+      name: "gpu-box", profile_id: PROFILE, os_image: OS_IMAGE, ssh_public_key: "ssh-ed25519 AAAA", gpu: true, additional_storage_gb: 10,
+    }));
+    assert.equal(out.success, false);
+    assert.equal(stub.calls.length, 0);
+  } finally {
+    stub.restore();
+  }
+});

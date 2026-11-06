@@ -13,7 +13,7 @@ import { INFRASTRUCTURE } from "../utils/config.js";
 
 /**
  * `varity_machines_list` / `varity_machines_create` / `varity_machines_delete`:
- * CPU virtual machines through the one public-API client (MC1). Thin wrapper:
+ * CPU and GPU virtual machines through the one public-API client (MC1). Thin wrapper:
  * the gateway (varity-gateway services/machine-public.ts) owns validation,
  * pricing and lifecycle; this module only sequences its public calls.
  *
@@ -27,11 +27,16 @@ import { INFRASTRUCTURE } from "../utils/config.js";
  *   `execution_deadline_at` from the 202 (no copied budget here). An unread
  *   billing state stays `null` (unobserved); an unread deadline means one read.
  *
- * GPU machines are out of MCP scope; `execution_class` is always
- * `cpu_virtual_machine`.
+ * `execution_class` is `cpu_virtual_machine` by default and `virtual_machine`
+ * (GPU VM) when `gpu` is set. GPU containers and bare metal are not offered
+ * (founder ruling 2026-10-27).
  */
 
-const EXECUTION_CLASS = "cpu_virtual_machine";
+const CPU_EXECUTION_CLASS = "cpu_virtual_machine";
+const GPU_EXECUTION_CLASS = "virtual_machine";
+const executionClass = (gpu?: boolean) => (gpu ? GPU_EXECUTION_CLASS : CPU_EXECUTION_CLASS);
+const profileCatalogPath = (gpu?: boolean) =>
+  `/api/deployment-profiles?workload=${gpu ? "gpu" : "cpu"}&execution_class=${executionClass(gpu)}`;
 const PRIVATE_KEY_MARKER = /PRIVATE KEY|BEGIN OPENSSH|BEGIN RSA|BEGIN EC/i;
 const DELETE_POLL_INTERVAL_MS = 10_000;
 
@@ -49,9 +54,11 @@ export interface MachineCreateInput {
   ssh_public_key: string;
   additional_storage_gb?: number;
   idempotency_key?: string;
+  gpu?: boolean;
 }
 
 export async function quoteAndCreateMachine(input: MachineCreateInput) {
+  const execution_class = executionClass(input.gpu);
   const storage =
     input.additional_storage_gb === undefined ? {} : { additional_storage_gb: input.additional_storage_gb };
   const quote = await publicApiRequest<{
@@ -60,13 +67,13 @@ export async function quoteAndCreateMachine(input: MachineCreateInput) {
     authorization_usd?: number;
     valid_until?: string;
   }>("POST", "/api/pricing/machine-quote", {
-    body: { profile_id: input.profile_id, execution_class: EXECUTION_CLASS, os_image: input.os_image, ...storage },
+    body: { profile_id: input.profile_id, execution_class, os_image: input.os_image, ...storage },
   });
   const accepted = await createMachine(
     {
       name: input.name,
       profile_id: input.profile_id,
-      execution_class: EXECUTION_CLASS,
+      execution_class,
       os_image: input.os_image,
       ...storage,
       ssh_public_key: input.ssh_public_key,
@@ -132,22 +139,22 @@ export function registerMachinesTools(server: McpServer): void {
     "varity_machines_list",
     {
       annotations: { readOnlyHint: true },
-      title: "List CPU Machines",
+      title: "List Machines",
       description:
-        "List the developer's Varity CPU virtual machines with their state, SSH access and billing. " +
-        "Set include_profiles to also get the CPU machine profiles and OS images (profile_id, os_image) " +
-        "that varity_machines_create accepts.",
+        "List the developer's Varity CPU and GPU virtual machines with their state, SSH access and billing. " +
+        "Set include_profiles to also get the machine profiles and OS images (profile_id, os_image) " +
+        "that varity_machines_create accepts: CPU profiles by default, GPU VM profiles (with GPU model, " +
+        "VRAM, hourly price and default_os_image) when gpu is true.",
       inputSchema: {
-        include_profiles: z.boolean().optional().describe("Also return the CPU machine profile catalog."),
+        include_profiles: z.boolean().optional().describe("Also return the machine profile catalog."),
+        gpu: z.boolean().optional().describe("With include_profiles, return GPU VM profiles instead of CPU ones."),
       },
     },
-    async ({ include_profiles }) => {
+    async ({ include_profiles, gpu }) => {
       try {
         const machines = await listMachines();
         const profiles = include_profiles
-          ? await publicApiGet<Record<string, unknown>>(
-              `/api/deployment-profiles?workload=cpu&execution_class=${EXECUTION_CLASS}`
-            )
+          ? await publicApiGet<Record<string, unknown>>(profileCatalogPath(gpu))
           : undefined;
         return successResponse(
           { ...machines, ...(profiles ? { profiles } : {}) },
@@ -163,21 +170,23 @@ export function registerMachinesTools(server: McpServer): void {
   server.registerTool(
     "varity_machines_create",
     {
-      title: "Create a CPU Machine",
+      title: "Create a Machine",
       description:
-        "Create a Varity CPU virtual machine the developer can SSH into. Requires the developer's own SSH PUBLIC key " +
+        "Create a Varity CPU or GPU virtual machine the developer can SSH into. Requires the developer's own SSH PUBLIC key " +
         "(e.g. the contents of ~/.ssh/id_ed25519.pub); never pass a private key. Get profile_id and os_image from " +
-        "varity_machines_list with include_profiles. The machine bills hourly until varity_machines_delete.",
+        "varity_machines_list with include_profiles (and gpu: true for a GPU VM, then pass gpu: true here too). " +
+        "The machine bills hourly until varity_machines_delete.",
       inputSchema: {
         name: z.string().min(1).max(63).describe("Lowercase machine name, e.g. 'dev-box'."),
-        profile_id: z.string().min(1).describe("CPU machine profile id (mp-...)."),
+        profile_id: z.string().min(1).describe("Machine profile id (mp-...)."),
         os_image: z.string().min(1).describe("OS image id offered by that profile (os-...)."),
         ssh_public_key: z
           .string()
           .min(1)
           .refine((key) => !PRIVATE_KEY_MARKER.test(key), "This is a private key. Pass the PUBLIC key (.pub) only.")
           .describe("The developer's SSH public key, e.g. 'ssh-ed25519 AAAA... user@host'."),
-        additional_storage_gb: z.number().int().min(0).optional().describe("Extra disk in GB."),
+        additional_storage_gb: z.number().int().min(0).optional().describe("Extra disk in GB (CPU machines only)."),
+        gpu: z.boolean().optional().describe("Create a GPU virtual machine from a GPU VM profile."),
         idempotency_key: z
           .string()
           .regex(/^[A-Za-z0-9._:-]{8,128}$/)
@@ -186,6 +195,13 @@ export function registerMachinesTools(server: McpServer): void {
       },
     },
     async (input) => {
+      if (input.gpu && input.additional_storage_gb !== undefined) {
+        return errorResponse(
+          "INVALID_INPUT",
+          "additional_storage_gb is only available for CPU machines.",
+          "Omit additional_storage_gb for a GPU machine; its profile already includes its disk."
+        );
+      }
       try {
         return await quoteAndCreateMachine(input);
       } catch (err) {
@@ -198,9 +214,9 @@ export function registerMachinesTools(server: McpServer): void {
     "varity_machines_delete",
     {
       annotations: { destructiveHint: true },
-      title: "Delete a CPU Machine and Stop Its Billing",
+      title: "Delete a Machine and Stop Its Billing",
       description:
-        "Delete a Varity CPU virtual machine by id and wait (up to 10 minutes) until its billing reads stopped.",
+        "Delete a Varity CPU or GPU virtual machine by id and wait (up to 10 minutes) until its billing reads stopped.",
       inputSchema: {
         machine_id: z.guid().describe("The machine id from varity_machines_list."),
         idempotency_key: z
