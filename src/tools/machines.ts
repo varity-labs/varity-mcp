@@ -195,6 +195,13 @@ export function registerMachinesTools(server: McpServer): void {
       },
     },
     async (input) => {
+      if (input.gpu && input.additional_storage_gb !== undefined) {
+        return errorResponse(
+          "INVALID_INPUT",
+          "additional_storage_gb is only available for CPU machines.",
+          "Omit additional_storage_gb for a GPU machine; its profile already includes its disk."
+        );
+      }
       try {
         return await quoteAndCreateMachine(input);
       } catch (err) {
