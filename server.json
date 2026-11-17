@@ -8,12 +8,12 @@
     "source": "github"
   },
   "websiteUrl": "https://varity.so",
-  "version": "2.3.27",
+  "version": "2.3.28",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@varity-labs/mcp",
-      "version": "2.3.27",
+      "version": "2.3.28",
       "transport": {
         "type": "stdio"
       }

@@ -1,29 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z, type ZodRawShape } from "zod";
 import { createRequire } from "node:module";
-import { registerResources } from "./resources/index.js";
-import { registerPrompts } from "./prompts/index.js";
-import { registerSearchDocsTool } from "./tools/search-docs.js";
-import { registerCostCalculatorTool } from "./tools/cost-calculator.js";
-import { registerBalanceTool } from "./tools/balance.js";
-import { registerCreateRepoTool } from "./tools/create-repo.js";
-import { registerDeployTool } from "./tools/deploy.js";
-import { registerDeployStatusTool } from "./tools/deploy-status.js";
-import { registerDeployLogsTool } from "./tools/deploy-logs.js";
-import { registerDoctorTool } from "./tools/doctor.js";
-import { registerInstallDepsTool } from "./tools/install-deps.js";
-import { registerBuildTool } from "./tools/build.js";
-import { registerOpenBrowserTool } from "./tools/open-browser.js";
-import { registerDevServerTool } from "./tools/dev-server.js";
-import { registerLoginTool } from "./tools/login.js";
-import { registerMigrateTool } from "./tools/migrate.js";
-import { registerAgentTools } from "./tools/agent.js";
-import { registerDeleteDeploymentTool } from "./tools/delete-deployment.js";
-import { registerSetEnvTool } from "./tools/set-env.js";
-import { registerRedeployTool } from "./tools/redeploy.js";
-import { registerMachinesTools } from "./tools/machines.js";
 import { instrumentMcpServer } from "./telemetry.js";
-import { setClientInfoProvider } from "./utils/public-api.js";
+import { getApiKey } from "./utils/config.js";
+import { runInCallContext, type CallContext, type CredentialProvider } from "./utils/public-api.js";
+import { registerLocalToolset } from "./toolsets/local.js";
+import { registerRemoteToolset, REMOTE_INSTRUCTIONS } from "./toolsets/remote.js";
+
+export type { CredentialProvider };
 
 const require = createRequire(import.meta.url);
 const packageMetadata = require("../package.json") as { version?: unknown };
@@ -59,65 +43,57 @@ export function strictToolInputs(server: McpServer): void {
 }
 
 /**
- * Create and configure the Varity MCP Server.
- *
- * This package is the published Varity MCP server. It exposes Varity's supported
- * deploy and operate surface to AI coding tools (Cursor, Claude Code, Codex, etc.)
- * so they can scaffold, build, ship, and manage apps for the user.
- *
- * Tool surface:
- *   - Discovery: search-docs, cost-calculator, doctor
- *   - Setup: install-deps, build, login
- *   - Deploy own code: deploy, deploy-status, deploy-logs, delete-deployment
- *   - Operate: secret-safe set-env compatibility route; redeploy (restart of the last successful release at its saved commit)
- *   - CPU and GPU VMs: machines-list, machines-create (caller's SSH public key), machines-delete (waits for billing stop)
- *   - Deploy certified templates: list-templates, template-info, deploy-template
- *   - Local development: open-browser, dev-server
- *   - Project ops: create-repo, migrate
+ * Every tool callback runs inside its server's call context, so the public
+ * client reads this server's credential and client identity even when many
+ * servers share one process (IF-SERVER-FACTORY).
  */
-export function createVarityServer(): McpServer {
-  const server = new McpServer({
-    name: "varity",
-    version: VERSION,
-  });
+function bindCallContext(server: McpServer, context: CallContext): void {
+  const register = server.registerTool.bind(server) as (...args: unknown[]) => unknown;
+  (server as { registerTool: unknown }).registerTool = (name: string, config: unknown, cb: (...args: unknown[]) => unknown) =>
+    register(name, config, (...args: unknown[]) => runInCallContext(context, () => cb(...args)));
+}
+
+export interface VarityServerOptions {
+  /**
+   * Returns the upstream public-API bearer for each call. Default for
+   * `"local"`: the stdio deploy-key order (`src/utils/config.ts`). Default for
+   * `"remote"`: none (every call is NOT_AUTHENTICATED); the hosted mount
+   * always passes its grant-bound key here.
+   */
+  credentialProvider?: CredentialProvider;
+  /** `"local"` (default): the stdio surface. `"remote"`: the hosted 12-tool surface. */
+  toolset?: "local" | "remote";
+}
+
+/**
+ * Create and configure the Varity MCP Server (IF-SERVER-FACTORY, package
+ * export `@varity-labs/mcp/server`).
+ *
+ * The stdio package calls `createVarityServer()` and gets the complete local
+ * surface (`src/toolsets/local.ts`). The hosted mount builds one server per
+ * request with `{ toolset: "remote", credentialProvider }` and gets the
+ * remote surface (`src/toolsets/remote.ts`): no filesystem, process or
+ * credential tool, explain-only billing copy and MCP `instructions`.
+ */
+export function createVarityServer(options: VarityServerOptions = {}): McpServer {
+  const remote = options.toolset === "remote";
+  const server = new McpServer(
+    { name: "varity", version: VERSION },
+    remote ? { instructions: REMOTE_INSTRUCTIONS } : undefined
+  );
 
   // Instrument the registration seam once so every resource, prompt, and tool
   // runs inside the same secret-safe MCP server span implementation.
   instrumentMcpServer(server);
   strictToolInputs(server);
   // The public-API User-Agent names the client from `initialize`.
-  setClientInfoProvider(() => server.server.getClientVersion());
+  bindCallContext(server, {
+    credentials: options.credentialProvider ?? (remote ? async () => null : getApiKey),
+    transport: remote ? "streamable_http" : "stdio",
+    clientInfo: () => server.server.getClientVersion(),
+  });
 
-  // ── Resources (stable routes to live owners) ──
-  registerResources(server);
-
-  // ── Prompts (local workflows may use filesystem/process tools) ──
-  registerPrompts(server);
-
-  // ── Local discovery tools ──
-  registerSearchDocsTool(server);
-  registerCostCalculatorTool(server);
-  registerBalanceTool(server);
-  registerDoctorTool(server);
-
-  // ── Development tools (stdio owns the caller's local filesystem) ──
-  registerLoginTool(server);
-  registerInstallDepsTool(server);
-  registerBuildTool(server);
-  registerOpenBrowserTool(server);
-  registerDevServerTool(server);
-
-  // ── Deployment and project tools (stdio only) ──
-  registerCreateRepoTool(server);
-  registerDeployTool(server);
-  registerDeployStatusTool(server);
-  registerDeployLogsTool(server);
-  registerDeleteDeploymentTool(server);
-  registerSetEnvTool(server);
-  registerRedeployTool(server);
-  registerMachinesTools(server);
-  registerAgentTools(server);
-  registerMigrateTool(server);
-
+  if (remote) registerRemoteToolset(server);
+  else registerLocalToolset(server);
   return server;
 }

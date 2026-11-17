@@ -141,7 +141,7 @@ async function readDeployments(): Promise<DeploymentRecord[]> {
  * (e.g. a refused restart) failed, so the summary says the failure first,
  * with the served codes and action code, never only "live".
  */
-function latestRunFailure(deployment: DeploymentRecord, runOutcome: unknown = null): string | null {
+export function latestRunFailure(deployment: DeploymentRecord, runOutcome: unknown = null): string | null {
   const served = deployment.outcome ?? runOutcome;
   const outcome = (served && typeof served === "object" ? served : {}) as Record<string, unknown>;
   const classification = typeof outcome.classification === "string" ? outcome.classification : null;

@@ -28,7 +28,7 @@ test("retired hosted transport and container release files stay absent", async (
 
   const [entrypoint, server, packageJson, workflow] = await Promise.all([
     source("src/index.ts"),
-    source("src/server.ts"),
+    source("src/toolsets/local.ts"),
     source("package.json"),
     source(".github/workflows/ci.yml"),
   ]);
@@ -72,7 +72,7 @@ test("thin adapters do not restore stale prerequisites or orchestration", async 
     source("src/tools/deploy.ts"),
     source("src/tools/agent.ts"),
     source("src/tools/login.ts"),
-    source("src/server.ts"),
+    source("src/toolsets/local.ts"),
   ]);
   assert.doesNotMatch(doctor, /Not required for MCP tools/);
   assert.doesNotMatch(doctor, /builds run remotely|~3 GB|Python 3\.1[01]/);

@@ -168,7 +168,8 @@ export async function deployTemplate(templateId: string, name?: string) {
   }
 }
 
-export function registerAgentTools(server: McpServer): void {
+/** The certified template tools (both toolsets). */
+export function registerTemplateTools(server: McpServer): void {
   server.registerTool(
     "varity_list_templates",
     {
@@ -212,6 +213,11 @@ export function registerAgentTools(server: McpServer): void {
     },
     async ({ template, name }) => deployTemplate(template, name)
   );
+}
+
+/** The template tools plus their backward-compatible agent aliases (stdio toolset). */
+export function registerAgentTools(server: McpServer): void {
+  registerTemplateTools(server);
 
   server.registerTool(
     "varity_list_agents",

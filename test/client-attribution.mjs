@@ -47,3 +47,34 @@ test("a client name outside the bounded alphabet is normalized, never passed raw
   assert.match(ua, UA);
   assert.equal(ua, `varity-mcp/${VERSION} (Visual-Studio-Code-user-host/1.99.0-evil; transport=stdio)`);
 });
+
+// A2-0 (IF-CLIENT-ORIGIN `dist`): a plugin manifest sets VARITY_DISTRIBUTION;
+// a valid N16 slug (`^[a-z0-9-]{1,32}$`) is appended, anything else is dropped.
+const UA_DIST = /^varity-mcp\/\d+\.\d+\.\d+ \([A-Za-z0-9._-]{1,64}\/[A-Za-z0-9._-]{1,64}; transport=stdio(?:; dist=[a-z0-9-]{1,32})?\)$/;
+
+async function userAgentWithDistribution(value) {
+  if (value === undefined) delete process.env.VARITY_DISTRIBUTION;
+  else process.env.VARITY_DISTRIBUTION = value;
+  try {
+    const [ua] = await userAgentFor({ name: "claude-code", version: "2.1.0" });
+    return ua;
+  } finally {
+    delete process.env.VARITY_DISTRIBUTION;
+  }
+}
+
+test("a valid distribution slug is appended as dist=<slug>", async () => {
+  for (const slug of ["claude-plugin", "npm", "cohort-babson", "a".repeat(32)]) {
+    const ua = await userAgentWithDistribution(slug);
+    assert.match(ua, UA_DIST);
+    assert.equal(ua, `varity-mcp/${VERSION} (claude-code/2.1.0; transport=stdio; dist=${slug})`);
+  }
+});
+
+test("no or an invalid distribution slug is dropped, never normalized", async () => {
+  for (const value of [undefined, "", "Claude-Plugin", "claude plugin", "x;dist=evil", "a".repeat(33), "partner:venice"]) {
+    const ua = await userAgentWithDistribution(value);
+    assert.match(ua, UA_DIST);
+    assert.equal(ua, `varity-mcp/${VERSION} (claude-code/2.1.0; transport=stdio)`, String(value));
+  }
+});

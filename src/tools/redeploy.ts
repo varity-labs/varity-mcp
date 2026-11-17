@@ -3,7 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { redeploy, VarityPublicApiError } from "../utils/public-api.js";
 import { lifecycleAcceptance } from "../utils/lifecycle-acceptance.js";
-import { INFRASTRUCTURE } from "../utils/config.js";
+import { INFRASTRUCTURE } from "../utils/endpoints.js";
 
 /** `varity_redeploy` → `POST /api/deployments/:name/redeploy` through the one public-API client. */
 export async function redeployAccepted(

@@ -3,7 +3,8 @@
 Status: current implementation map
 Scope: stable ownership, interfaces, adapters, state, security, failures, and tests
 
-This repository is the public stdio MCP adapter for Varity. Cross-repository
+This repository is the public stdio MCP adapter for Varity, and the server
+factory and remote toolset that the hosted MCP mount (the gateway) builds on. Cross-repository
 concept ownership is routed by `varity-engineering/architecture/CHANGE-IMPACT.md`;
 source and tests here own the package's executable behavior. Live versions,
 pricing, deployment state, and supported capability come from their executable
@@ -15,6 +16,10 @@ This repository owns:
 
 - the MCP tool, compatibility resource, and prompt interface presented to local
   AI coding clients;
+- the server factory `createVarityServer({credentialProvider?, toolset?})`
+  (package export `@varity-labs/mcp/server`) and the remote toolset, its tool
+  allow-list, annotations, `instructions`, explain-only billing copy and the
+  deployment card (MCP Apps) resource;
 - stdio process composition and JSON-RPC channel custody;
 - translation from validated MCP inputs to the deploy-key-authenticated public
   Varity interface, or (migration preview only) a local `varitykit` command;
@@ -26,8 +31,9 @@ This repository owns:
 
 It does not own:
 
-- a hosted or self-hosted network MCP transport, OAuth service, or container
-  release;
+- the hosted HTTP mount (route, OAuth resource-server behaviour, token
+  verification, rate limits: the gateway's `routes/hosted-mcp.ts`), an OAuth
+  service, or a container release;
 - workload planning, hosting selection, deployment execution, route activation,
   cleanup, or remediation policy;
 - durable deployment/release state, credentials, billing ledgers, profile
@@ -60,11 +66,13 @@ lifecycle state.
 | Module | Interface and invariant | Implementation | Verification |
 |---|---|---|---|
 | Entrypoint | stdio only; stdout contains JSON-RPC only; unknown/retired transport flags fail closed | `src/index.ts` | `test/runtime-version.mjs`, `test/logger-stdio-channel.mjs`, runtime matrix |
-| MCP composition | one complete local surface; no transport-specific alternate registration | `src/server.ts` | `test/tool-annotations.mjs` plus package startup tests |
+| MCP composition | `createVarityServer(options)`: `toolset: "local"` (default) is the complete stdio surface; `"remote"` is the hosted surface. Every tool callback runs in its server's call context (credential provider, transport, client identity) through `AsyncLocalStorage`, so concurrent servers in one process never share a credential | `src/server.ts` | `test/tool-annotations.mjs`, `test/remote-toolset.mjs` plus package startup tests |
+| Toolsets | `local`: all 26 tools, the compatibility resource and prompts. `remote`: exactly 12 tools (search_docs, cost_calculator, balance, list_templates, template_info, deploy_template, deploy, deploy_status, deploy_logs, redeploy, delete_deployment, show_deployment), the deployment card resource and self-contained `instructions` (at most 512 characters); no filesystem, process, credential or machine tool; `varity_deploy` takes `repo_url` or `image` only (no `path`; `files` waits for the upload interface) | `src/toolsets/local.ts`, `src/toolsets/remote.ts` | `test/remote-toolset.mjs`; `npm run check:architecture` refuses a remote static module graph reaching `node:fs`, `node:child_process`, `node:os` or the CLI bridge (`test/architecture-remote-graph.mjs`) |
+| Deployment card | `ui://varity/deployment-card.html`, `text/html;profile=mcp-app`, empty CSP origin lists; attached only to the read-only `varity_show_deployment`; shows the served price, status steps and URL; Refresh calls `varity_deploy_status`, Open uses the host's `ui/open-link`; never deploys and has no billing link | `src/apps/`, `src/tools/show-deployment.ts` | `test/deployment-card.mjs` |
 | Tools | Zod-validated input and shared structured responses; no provider or orchestration policy | `src/tools/` | per-adapter and regression tests under `test/` |
 | Compatibility resource | `varity://deploy/reference` remains stable but routes mutable facts to live docs/tools | `src/resources/index.ts` | cleanup contract and architecture checks |
 | CLI bridge | argv arrays, bounded timeouts/output, normalized environment; `varitykit` is invoked only by the migration preview | `src/utils/cli-bridge.ts` | `test/cli-bridge-env.mjs`, `test/migrate-custody.mjs` |
-| Public-interface client | the one HTTP client for every Cloud read and lifecycle mutation (deploy, template catalog and deploy, delete, redeploy, env, run status, machines); deploy-key auth in the order `VARITY_DEPLOY_KEY`, `~/.varitykit/config.json`, `VARITY_API_KEY` (`src/utils/config.ts`); `User-Agent: varity-mcp/<version> (<client>/<client version>; transport=stdio)` from the client's `initialize` identity, bounded to `[A-Za-z0-9._-]{1,64}` tokens; `source: "mcp"` on create; a per-call `Idempotency-Key` on deploy, template deploy and redeploy; bounded timeout, normalized errors; no copied pricing or lifecycle state | `src/utils/public-api.ts` | `test/public-api-client.mjs`, `test/idempotent-create.mjs`, `test/client-attribution.mjs`, `test/deploy-key-resolution.mjs`, `test/public-api-budget.mjs`, `test/lifecycle-outcomes.mjs`, `test/billing-refusals.mjs`, `test/agent-journey-contract.mjs`, status/log tests |
+| Public-interface client | the one HTTP client for every Cloud read and lifecycle mutation (deploy, template catalog and deploy, delete, redeploy, env, run status, machines); the bearer comes from the current call's credential provider: stdio uses the deploy-key order `VARITY_DEPLOY_KEY`, `~/.varitykit/config.json`, `VARITY_API_KEY` (`src/utils/config.ts`, loaded lazily so the remote graph reads no file); a remote server uses only its provider, and null is `NOT_AUTHENTICATED` with no env or file fallback; `User-Agent: varity-mcp/<version> (<client>/<client version>; transport=<stdio\|streamable_http>[; dist=<slug>])` from the client's `initialize` identity, bounded to `[A-Za-z0-9._-]{1,64}` tokens, where `dist` is `VARITY_DISTRIBUTION` on stdio when it matches `^[a-z0-9-]{1,32}$` and is dropped otherwise; `source: "mcp"` on create; a per-call `Idempotency-Key` on deploy, template deploy and redeploy; bounded timeout, normalized errors; no copied pricing or lifecycle state | `src/utils/public-api.ts` | `test/public-api-client.mjs`, `test/idempotent-create.mjs`, `test/client-attribution.mjs`, `test/deploy-key-resolution.mjs`, `test/public-api-budget.mjs`, `test/lifecycle-outcomes.mjs`, `test/billing-refusals.mjs`, `test/agent-journey-contract.mjs`, status/log tests |
 | Local GitHub helper | credentials come from process environment or `gh`; clean remote URL; normal non-force push | `src/tools/create-repo.ts` | cleanup contract plus Git behavior review |
 | Runtime telemetry | opt-in spans/logs/metrics/errors; protected inputs and stdout excluded | `src/telemetry.ts`, `src/runtime-shutdown.ts`, `src/utils/logger.ts` | telemetry, logger, and shutdown tests |
 
@@ -91,8 +99,8 @@ all four MCP hints (readOnly, destructive, idempotent, openWorld) explicitly;
 
 ## Transport, auth, and trust
 
-The package has one transport: stdio. The MCP process runs under the invoking
-user and may act on explicitly supplied local paths. Varity operations use the
+The package's own process has one transport: stdio. The MCP process runs under
+the invoking user and may act on explicitly supplied local paths. Varity operations use the
 deploy key resolved by `src/utils/config.ts`: env `VARITY_DEPLOY_KEY`, then the
 CLI sign-in file `~/.varitykit/config.json` (`deploy_key`, then `api_key`), then
 the legacy env `VARITY_API_KEY`, which the public AI Gateway docs use for the
@@ -103,10 +111,17 @@ key.
 central logger or `console.error`. A single unrelated stdout byte can corrupt
 the client protocol.
 
-Hosted MCP, Streamable HTTP, OAuth proxying, sessions, request rate limits, the
-runtime container, and GHCR release aliases are retired and absent. Reintroducing
-a network transport is a cross-repository security/topology change, not an
-alternate flag on this process.
+The hosted MCP is served by the gateway, not by this process: the gateway
+mounts `createVarityServer({ toolset: "remote", credentialProvider })` behind
+its own Streamable HTTP route and OAuth resource-server checks, and passes a
+provider that returns the grant-bound upstream key. This package owns the
+remote toolset and the factory; the gateway owns the HTTP mount, token
+verification, rate limits and its release. The remote toolset registers no
+filesystem, process or credential tool, and its copy names no local setup,
+billing link or purchase step. The retired in-package HTTP mode, OAuth
+proxying, in-memory sessions, the runtime container and GHCR release aliases
+stay absent; adding a network listener to this process remains a
+cross-repository security/topology change.
 
 `varity_create_repo` never accepts a credential as MCP input. It reads
 `GITHUB_TOKEN`/`GH_TOKEN` or `gh auth token`, passes the credential to Git only
@@ -127,6 +142,7 @@ The MCP owns no durable deployment, release, pricing, or billing state.
 | State | Location | Custody |
 |---|---|---|
 | Deploy key/config | environment or `~/.varitykit/config.json` | host-local secret; never return or log |
+| Call context (remote) | `AsyncLocalStorage` per tool call | the hosted mount's credential provider and client identity for one call only; nothing is stored between calls |
 | GitHub credential | process environment or GitHub CLI | read for one operation; never place in MCP input, Git argv, or `.git/config` |
 | Docs sections | process memory | expires after five minutes; refresh failure returns no stale authority |
 | Local dev-server registry | `~/.varitykit/dev-servers.json` | host-local helper state, not platform truth |
@@ -155,8 +171,9 @@ or release state.
   code/message/action fields, except: a 402/503 whose code is one of the closed
   billing codes served in `credit_policy.errorCodes` (`GET /api/pricing`)
   keeps its code and gets MCP copy in USD wording (an unreadable list leaves
-  the error unchanged); `invalid_api_key` gets the portal's "deploy key" term
-  and its settings URL; and a served action naming a raw HTTP route is dropped
+  the error unchanged); in the remote toolset that copy only explains (no
+  link and no purchase verb: the account is funded outside the chat); `invalid_api_key` gets the portal's "deploy key" term
+  and its settings URL (remotely: reconnect the connector); and a served action naming a raw HTTP route is dropped
   so the tool's own tool-naming action applies. Transport failures become
   `VARITY_API_UNREACHABLE`.
 - Every tool input is a strict object: an undeclared argument is refused with
