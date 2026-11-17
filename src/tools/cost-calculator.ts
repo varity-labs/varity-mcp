@@ -2,6 +2,7 @@ import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { getDeployment, getPublicProfilePricing, VarityPublicApiError } from "../utils/public-api.js";
+import { monthlyMaximum, usd } from "../utils/money.js";
 
 /**
  * varity_cost_calculator, THIN CLIENT.
@@ -135,12 +136,13 @@ export function registerCostCalculatorTool(server: McpServer): void {
           "For a live deployment, confirm the app slug with varity_deploy_status."
         );
       }
-      const fmt = (n: number) => `$${Number(n).toLocaleString("en-US")}`;
       const estimateName = subdomain ?? data.profile ?? app_profile ?? "current default profile";
       const { unit, ...served } = projection;
       const amount = Object.values(served)[0] as number;
-      const upTo = "monthly_max_usd" in projection && amount > 0 ? "up to " : "";
-      const summary = `${String(estimateName)}: ${upTo}${fmt(amount)}/${unit === "month" ? "mo" : "hour"} (USD) estimate returned by the current Varity pricing interface.`;
+      const price = "monthly_max_usd" in projection
+        ? monthlyMaximum(amount)
+        : `${usd(amount)}/${unit} (USD)`;
+      const summary = `${String(estimateName)}: ${price} estimate returned by the current Varity pricing interface.`;
 
       return successResponse(
         {

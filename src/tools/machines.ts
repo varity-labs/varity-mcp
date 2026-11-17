@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { usd } from "../utils/money.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import {
   createMachine,
@@ -86,7 +87,9 @@ export async function quoteAndCreateMachine(input: MachineCreateInput) {
       ...accepted,
       quote: { hourly_usd: quote.hourly_usd, authorization_usd: quote.authorization_usd, valid_until: quote.valid_until },
     },
-    `Machine create accepted (id ${String(accepted.machine_id)}). Only the holder of the private key for the ` +
+    `Machine create accepted (id ${String(accepted.machine_id)})` +
+      (typeof quote.hourly_usd === "number" ? ` at ${usd(quote.hourly_usd)}/hour (USD)` : "") +
+      `. Only the holder of the private key for the ` +
       "supplied public key can log in. It bills hourly until deleted with varity_machines_delete."
   );
 }

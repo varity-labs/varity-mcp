@@ -9,6 +9,7 @@ import {
   type PublicRunAcceptance,
 } from "../utils/public-api.js";
 import { lifecycleAcceptance } from "../utils/lifecycle-acceptance.js";
+import { monthlyMaximum } from "../utils/money.js";
 
 /**
  * Template tools are a thin projection of the gateway-owned catalog through
@@ -72,7 +73,7 @@ export async function templateDeployAccepted(template: TemplateMeta, name: strin
       ...acceptance,
     },
     acceptance.run_id
-      ? `Template deploy accepted for ${template.name ?? template.id} (run ${acceptance.run_id}, status ${acceptance.public_status ?? "unobserved"}). Track its terminal outcome with varity_deploy_status.`
+      ? `Template deploy accepted for ${template.name ?? template.id} (run ${acceptance.run_id}, status ${acceptance.public_status ?? "unobserved"}), price ${monthlyLabel(template)}. Track its terminal outcome with varity_deploy_status.`
       : `The template deploy returned no run for ${template.name ?? template.id}. The terminal outcome is not proven; inspect varity_deploy_status before reporting completion.`
   );
 }
@@ -80,7 +81,7 @@ export async function templateDeployAccepted(template: TemplateMeta, name: strin
 function monthlyLabel(template: TemplateMeta): string {
   const monthly = template.pricing?.monthlyUsd;
   if (typeof monthly !== "number" || !Number.isFinite(monthly)) return "unavailable";
-  return `~$${monthly.toLocaleString("en-US")}/mo estimate`;
+  return monthlyMaximum(monthly);
 }
 
 function hardwareLabel(template: TemplateMeta): string {
@@ -98,7 +99,7 @@ function summarizeTemplate(template: TemplateMeta): string {
   const requiredEnv = requiredEnvOf(template);
   const required = requiredEnv.length ? requiredEnv.join(", ") : "none";
   const access = template.private ? "private" : "public";
-  return `${template.id} (${template.name ?? template.id}), ${access}, ${hardwareLabel(template)}. ${template.description ?? ""} Required env: ${required}.`;
+  return `${template.id} (${template.name ?? template.id}), ${access}, ${hardwareLabel(template)}, ${monthlyLabel(template)}. ${template.description ?? ""} Required env: ${required}.`;
 }
 
 async function listTemplates() {
