@@ -233,3 +233,20 @@ test("varity_login links the portal's Deploy keys tab, like every other key mess
   }).toString();
   assert.equal(JSON.parse(text).data.settings_url, "https://developer.store.varity.so/dashboard/settings?tab=api-keys");
 });
+
+test("varity_deploy app_name names both URL shapes the gateway serves", async () => {
+  // Gateway publicUrlForRecord (services/deployment-registry.ts): a static site is
+  // https://varity.app/<name>/, every app with a server is https://<name>.varity.app.
+  const client = await connect();
+  const { tools } = await client.listTools();
+  await client.close();
+  const appName = tools.find((t) => t.name === "varity_deploy").inputSchema.properties.app_name.description;
+  assert.match(appName, /https:\/\/varity\.app\/\{app_name\}\//);
+  assert.match(appName, /https:\/\/\{app_name\}\.varity\.app/);
+  assert.match(appName, /varity_deploy_status/);
+});
+
+test("the README license badge does not claim plain MIT", () => {
+  const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  assert.doesNotMatch(readme, /License: MIT|License-MIT/);
+});

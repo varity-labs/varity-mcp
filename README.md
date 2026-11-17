@@ -1,7 +1,7 @@
 # @varity-labs/mcp
 
 [![npm](https://img.shields.io/npm/v/@varity-labs/mcp)](https://www.npmjs.com/package/@varity-labs/mcp)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/varity-labs/varity-mcp/blob/main/LICENSE)
+[![License: see LICENSE](https://img.shields.io/badge/License-see%20LICENSE-blue.svg)](https://github.com/varity-labs/varity-mcp/blob/main/LICENSE)
 [![Status: Beta](https://img.shields.io/badge/Status-Beta-yellow.svg)](https://github.com/varity-labs/varity-mcp)
 
 > The published Varity MCP package for Cursor, Claude Code, VS Code, Windsurf, and other MCP clients.

@@ -96,7 +96,9 @@ export function registerDeployTool(server: McpServer): void {
           .string()
           .optional()
           .describe(
-            "Custom app name that controls the deployment URL: https://varity.app/{app_name}/. " +
+            "Custom app name that controls the deployment URL. A static site is served at " +
+            "https://varity.app/{app_name}/ and an app with a server at https://{app_name}.varity.app; " +
+            "the platform picks which, so read the live URL from varity_deploy_status. " +
             "Must be URL-safe (lowercase letters, numbers, hyphens). " +
             "If omitted, the repository or image name is used. " +
             "Use a different app_name to create named environments (staging, canary, etc.)."
