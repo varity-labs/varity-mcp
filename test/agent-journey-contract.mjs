@@ -5,11 +5,15 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 process.env["VARITY_GATEWAY_URL"] = "https://gw.test";
 process.env["VARITY_DEPLOY_KEY"] = "api-key";
+// An empty HOME, so the host's own ~/.varitykit/config.json never supplies a key.
+process.env["HOME"] = mkdtempSync(join(tmpdir(), "varity-journey-home-"));
+delete process.env["VARITY_API_KEY"];
 
 const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
 const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
@@ -349,4 +353,172 @@ test("delete warns the URL may serve cached content briefly", async () => {
   assert.match(accepted.out.message, /URL may serve cached content briefly/);
   const deleted = await call({ "/api/deployments/app-2": [200, { deleted: true }] }, "varity_delete_deployment", { deployment: "app-2" });
   assert.match(deleted.out.message, /URL may serve cached content briefly/);
+});
+
+// ── 8. Journey 2.3.26 fix rows (evidence phase3/journey-2.3.26) ─────────────
+
+test("J-3: the no-key, wrong-key and not-authenticated remedies are one text naming where to create a key", async () => {
+  const { execFileSync } = await import("node:child_process");
+  // An empty HOME and no key env: the no-key paths as a fresh user meets them.
+  const script = `
+    const { verifyAuthentication } = await import(${JSON.stringify(new URL("../dist/tools/doctor.js", import.meta.url).href)});
+    const api = await import(${JSON.stringify(new URL("../dist/utils/public-api.js", import.meta.url).href)});
+    const noKey = (await verifyAuthentication(null)).fix;
+    let notAuthenticated;
+    try { await api.publicApiGet("/api/deployments"); } catch (err) { notAuthenticated = err.action; }
+    process.stdout.write(JSON.stringify({ noKey, notAuthenticated }));`;
+  const fresh = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], {
+    env: { PATH: process.env.PATH, HOME: mkdtempSync(join(tmpdir(), "varity-nokey-")), VARITY_GATEWAY_URL: "https://gw.test" },
+  }).toString());
+  const wrongKey = (await call({
+    "/api/deployments": [401, { code: "invalid_api_key", message: "The API key is invalid or revoked." }],
+  }, "varity_deploy_status")).out.error.suggestion;
+  assert.match(fresh.noKey, /https:\/\/developer\.store\.varity\.so\/dashboard\/settings\?tab=api-keys/);
+  assert.equal(fresh.noKey, wrongKey);
+  assert.equal(fresh.notAuthenticated, wrongKey);
+});
+
+/** The gateway's served `profile_unknown` menu at 2.3.26 (journey J-1): it still lists ai-agent-gpu. */
+const SERVED_PROFILE_MENU = ["static-site", "web-app", "web-app-db", "ai-agent-cpu", "ai-agent-gpu"];
+
+test("J-1: cost_calculator never offers a profile it refuses", async () => {
+  const unknown = await call({
+    "/api/pricing": [400, { code: "profile_unknown", error: "Unknown pricing profile", profiles: SERVED_PROFILE_MENU }],
+  }, "varity_cost_calculator", { app_profile: "nope" });
+  assert.equal(unknown.out.error.code, "profile_unknown");
+  assert.match(unknown.out.error.suggestion, /static-site, web-app, web-app-db, ai-agent-cpu\.$/);
+  assert.doesNotMatch(unknown.out.error.suggestion, /ai-agent-gpu/);
+});
+
+const STATIC_ESTIMATE = {
+  profile: "static-site", currency: "USD", monthly_max_usd: 0, billing_model: "free_static",
+  billing_note: "First 3 static sites free, then $1/month per site", mode: "static",
+};
+
+test("J-4: the estimate carries the configured deploy key so the owner can price the caller's real count", async () => {
+  const { calls } = await call({ "/api/pricing": [200, STATIC_ESTIMATE] }, "varity_cost_calculator", { app_profile: "static-site" });
+  assert.equal(calls[0].url, "https://gw.test/api/pricing?profile=static-site");
+  assert.equal(calls[0].init.headers.Authorization, "Bearer api-key");
+
+  const saved = process.env["VARITY_DEPLOY_KEY"];
+  delete process.env["VARITY_DEPLOY_KEY"];
+  try {
+    const anonymous = await call({ "/api/pricing": [200, STATIC_ESTIMATE] }, "varity_cost_calculator", { app_profile: "static-site" });
+    assert.equal(anonymous.out.success, true);
+    assert.equal(anonymous.calls[0].init.headers.Authorization, undefined, "without a key the estimate stays anonymous");
+  } finally {
+    process.env["VARITY_DEPLOY_KEY"] = saved;
+  }
+});
+
+test("J-4: a rejected key on the estimate gets the deploy-key remedy, never an anonymous fallback quote", async () => {
+  const { out, calls } = await call({
+    "/api/pricing": [401, { code: "invalid_api_key", message: "The API key is invalid or revoked." }],
+  }, "varity_cost_calculator", { app_profile: "static-site" });
+  assert.equal(out.success, false);
+  assert.equal(out.error.code, "invalid_api_key");
+  assert.match(out.error.suggestion, /deploy key at https:\/\/developer\.store\.varity\.so\/dashboard\/settings\?tab=api-keys/);
+  assert.equal(calls.length, 1, "no second, anonymous request");
+  assert.equal(calls[0].init.headers.Authorization, "Bearer api-key");
+});
+
+test("J-4: the estimate summary states the served billing_note verbatim", async () => {
+  const { out } = await call({ "/api/pricing": [200, STATIC_ESTIMATE] }, "varity_cost_calculator", { app_profile: "static-site" });
+  assert.ok(out.message.includes(STATIC_ESTIMATE.billing_note), out.message);
+});
+
+/** The served uptime-kuma template at 2.3.26 (journey tplinfo). */
+const UPTIME_KUMA = {
+  id: "uptime-kuma", name: "Uptime Kuma", description: "Private uptime monitoring.", category: "monitoring",
+  required_env: [], requiredEnv: [], hardware: { cpu: 1, memory_gb: 2, ephemeral_gb: 5 },
+  volume: { sizeGb: 2, path: "/app/data" }, private: false, resources: [], certification: { state: "certified" },
+};
+
+test("J-6: template_info's hardware line includes the persistent volume", async () => {
+  const { out } = await call({ "/api/templates/uptime-kuma": [200, { template: UPTIME_KUMA }] }, "varity_template_info", { template: "uptime-kuma" });
+  assert.match(out.message, /Hardware: 1 CPU, 2 GiB RAM, 5 GiB ephemeral storage, 2 GiB persistent volume/);
+});
+
+test("J-6: deploy_template states the deployment id exactly as varity_deploy does", async () => {
+  const id = "88d8e064-c086-4757-be4c-7a108a4ea26b";
+  const run = "c03844ee-29dd-48f6-8891-602373984724";
+  const template = await call({
+    "/api/templates/uptime-kuma": [200, { template: UPTIME_KUMA }],
+    "/api/templates/uptime-kuma/deploy": [202, { id, app_name: "j2326-kuma", run_id: run }],
+    [`/api/deployments/runs/${run}`]: [200, { public_status: "deploying" }],
+  }, "varity_deploy_template", { template: "uptime-kuma", name: "j2326-kuma" });
+  const deploy = await call({
+    "/api/deployments": [202, { id, app_name: "j2326-kuma", run_id: run }],
+    [`/api/deployments/runs/${run}`]: [200, { public_status: "deploying" }],
+  }, "varity_deploy", { image: "ghcr.io/you/app:latest", app_name: "j2326-kuma" });
+  const tracked = `(id ${id}, run ${run}, status deploying). Track its terminal outcome with varity_deploy_status using this id; status returns the same id.`;
+  assert.ok(deploy.out.message.includes(tracked), deploy.out.message);
+  assert.ok(template.out.message.includes(tracked), template.out.message);
+});
+
+test("J-7: status reports a failed latest run, its failure and action code, not only 'live at'", async () => {
+  // The real failed restart of a live template app (journey post-restart-status).
+  const id = "88d8e064-c086-4757-be4c-7a108a4ea26b";
+  const run = "8d3a1845-b29a-4f82-a468-209d3b72be8f";
+  const outcome = {
+    classification: "expected_rejection", stage: "allocation", code: "configuration_rejected",
+    action_code: "check_configuration", diagnostic_code: "in_place_resources_changed",
+    terminal_at: "2026-11-17T20:24:49.905517+00:00",
+  };
+  const { out } = await call({
+    [`/api/deployments/${id}`]: [200, { deployment: {
+      id, operation_deployment_id: id, app_name: "j2326-kuma-2021", runtime: "dynamic", status: "live",
+      url: "https://j2326-kuma-2021.varity.app", created_at: "2026-11-17T20:24:32.010Z", run_id: run, outcome,
+    } }],
+    [`/api/deployments/runs/${run}`]: [200, { public_status: "failed", outcome }],
+  }, "varity_deploy_status", { deployment_id: id });
+  assert.equal(out.data.deployment.run_status, "failed");
+  assert.match(out.message, /latest run failed/i);
+  assert.match(out.message, /configuration_rejected/);
+  assert.match(out.message, /in_place_resources_changed/);
+  assert.match(out.message, /check_configuration/);
+  assert.doesNotMatch(out.message, /^Deployment [^:]+: live at/);
+
+  const healthy = await call({
+    [`/api/deployments/${id}`]: [200, { deployment: { id, status: "live", url: "https://a.varity.app", run_id: run, outcome: { classification: "succeeded", code: "deployment_succeeded" } } }],
+    [`/api/deployments/runs/${run}`]: [200, { public_status: "live" }],
+  }, "varity_deploy_status", { deployment_id: id });
+  assert.equal(healthy.out.message, `Deployment ${id}: live at https://a.varity.app`);
+});
+
+test("J-7: a failed run is reported from either signal, and a cancelled run is not called failed", async () => {
+  const id = "op-7";
+  const run = "run-7";
+  const failedOutcome = { classification: "expected_rejection", code: "configuration_rejected", action_code: "check_configuration" };
+  const status = (row, runView) => call({
+    [`/api/deployments/${id}`]: [200, { deployment: { id, status: "live", url: "https://a.varity.app", run_id: run, ...row } }],
+    [`/api/deployments/runs/${run}`]: runView,
+  }, "varity_deploy_status", { deployment_id: id });
+
+  // The run view is unreadable: the row's sealed classification alone says it failed.
+  const unread = await status({ outcome: failedOutcome }, [502, { code: "deploy_status_unavailable" }]);
+  assert.equal(unread.out.data.deployment.run_status, null);
+  assert.match(unread.out.message, /latest run failed \(expected_rejection, configuration_rejected; action check_configuration\)/);
+
+  // The row carries no outcome: the run view's outcome names the failure.
+  const fromRun = await status({}, [200, { public_status: "failed", outcome: failedOutcome }]);
+  assert.match(fromRun.out.message, /latest run failed \(expected_rejection, configuration_rejected; action check_configuration\)/);
+
+  const cancelled = await status({ outcome: { classification: "cancelled", code: "deployment_cancelled" } }, [200, { public_status: "live" }]);
+  assert.match(cancelled.out.message, /latest run was cancelled \(cancelled, deployment_cancelled\)/);
+  assert.doesNotMatch(cancelled.out.message, /failed/);
+});
+
+test("J-7: a deployment that itself failed says so, and the list names a failed most recent run", async () => {
+  const outcome = { classification: "user_workload_failure", code: "health_check_failed", action_code: "check_logs" };
+  const failed = await call({
+    "/api/deployments/op-f": [200, { deployment: { id: "op-f", status: "failed", run_id: "run-f", outcome } }],
+    "/api/deployments/runs/run-f": [200, { public_status: "failed", outcome }],
+  }, "varity_deploy_status", { deployment_id: "op-f" });
+  assert.equal(failed.out.message, "Deployment op-f: latest run failed (user_workload_failure, health_check_failed; action check_logs). Deployment status: failed (URL not assigned yet)");
+
+  const list = await call({
+    "/api/deployments": [200, { deployments: [{ id: "op-f", app_name: "app-f", status: "live", url: "https://app-f.varity.app", created_at: "2026-11-17T20:00:00Z", run_id: "run-f", outcome }] }],
+  }, "varity_deploy_status");
+  assert.match(list.out.message, /Most recent: app-f \(https:\/\/app-f\.varity\.app\), latest run failed \(user_workload_failure, health_check_failed; action check_logs\)$/);
 });

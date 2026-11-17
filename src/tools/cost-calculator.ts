@@ -41,6 +41,13 @@ export function projectOwnerPricing(data: Record<string, unknown>): OwnerPricing
   return null;
 }
 
+/**
+ * GPU containers are hidden on every customer surface (founder ruling
+ * 2026-10-27); GPU virtual machines remain, priced by their own quote. The one
+ * profile this tool refuses: never sent, and never offered from a served menu.
+ */
+const GPU_CONTAINER_PROFILE = "ai-agent-gpu";
+
 export function registerCostCalculatorTool(server: McpServer): void {
   server.registerTool(
     "varity_cost_calculator",
@@ -75,12 +82,10 @@ export function registerCostCalculatorTool(server: McpServer): void {
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     async ({ app_profile, subdomain }) => {
-      // GPU containers are hidden on every customer surface (founder ruling
-      // 2026-10-27); GPU virtual machines remain, priced by their own quote.
-      if (!subdomain && app_profile === "ai-agent-gpu") {
+      if (!subdomain && app_profile === GPU_CONTAINER_PROFILE) {
         return errorResponse(
           "profile_unavailable",
-          "GPU containers are not offered, so the ai-agent-gpu profile has no estimate.",
+          `GPU containers are not offered, so the ${GPU_CONTAINER_PROFILE} profile has no estimate.`,
           "For a GPU virtual machine, list GPU profiles with varity_machines_list (include_profiles, gpu: true); varity_machines_create quotes the hourly price before creating it."
         );
       }
@@ -106,7 +111,10 @@ export function registerCostCalculatorTool(server: McpServer): void {
           } catch (err) {
             if (err instanceof VarityPublicApiError && err.code === "profile_unknown") {
               const served = err.served?.profiles;
-              const profiles = Array.isArray(served) ? served.join(", ") : "a profile from the tool description";
+              const offered = Array.isArray(served)
+                ? served.filter((profile) => profile !== GPU_CONTAINER_PROFILE)
+                : [];
+              const profiles = offered.length > 0 ? offered.join(", ") : "a profile from the tool description";
               return errorResponse(
                 "profile_unknown",
                 `Unknown pricing profile "${app_profile}".`,
@@ -142,7 +150,8 @@ export function registerCostCalculatorTool(server: McpServer): void {
       const price = "monthly_max_usd" in projection
         ? monthlyMaximum(amount)
         : `${usd(amount)}/${unit} (USD)`;
-      const summary = `${String(estimateName)}: ${price} estimate returned by the current Varity pricing interface.`;
+      const note = typeof data.billing_note === "string" && data.billing_note ? ` ${data.billing_note}` : "";
+      const summary = `${String(estimateName)}: ${price} estimate returned by the current Varity pricing interface.${note}`;
 
       return successResponse(
         {

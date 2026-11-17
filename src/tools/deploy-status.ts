@@ -102,14 +102,17 @@ export function normalizeDeployment(item: ServedDeployment): DeploymentRecord {
   };
 }
 
-/** Read the run's `public_status` so a failed deploy shows why, not only `failed`. */
-async function readRunStatus(runId: string | null): Promise<string | null> {
-  if (!runId) return null;
+/**
+ * Read the latest run's `public_status` and sealed `outcome` so a failed run
+ * shows why, not only `failed`. Unreadable is `null` (unobserved).
+ */
+async function readRun(runId: string | null): Promise<{ status: string | null; outcome: unknown }> {
+  if (!runId) return { status: null, outcome: null };
   try {
     const run = await getRun(runId);
-    return typeof run.public_status === "string" ? run.public_status : null;
+    return { status: typeof run.public_status === "string" ? run.public_status : null, outcome: run.outcome ?? null };
   } catch {
-    return null;
+    return { status: null, outcome: null };
   }
 }
 
@@ -118,6 +121,28 @@ async function readDeployments(): Promise<DeploymentRecord[]> {
   return deployments.sort(
     (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
   );
+}
+
+/**
+ * The latest run's terminal outcome when it did not succeed: `run_status:
+ * "failed"` or a sealed classification other than `succeeded` (from the row,
+ * else the run view). A live deployment keeps its status while a later run
+ * (e.g. a refused restart) failed, so the summary says the failure first,
+ * with the served codes and action code, never only "live".
+ */
+function latestRunFailure(deployment: DeploymentRecord, runOutcome: unknown = null): string | null {
+  const served = deployment.outcome ?? runOutcome;
+  const outcome = (served && typeof served === "object" ? served : {}) as Record<string, unknown>;
+  const classification = typeof outcome.classification === "string" ? outcome.classification : null;
+  if (deployment.run_status !== "failed" && (classification === null || classification === "succeeded")) {
+    return null;
+  }
+  const text = (value: unknown): value is string => typeof value === "string" && value !== "" && value !== "succeeded";
+  const failure = [classification, outcome.code, outcome.diagnostic_code].filter(text).join(", ");
+  const action = text(outcome.action_code) ? `action ${outcome.action_code}` : "";
+  const detail = [failure, action].filter(Boolean).join("; ");
+  const verb = classification === "cancelled" ? "was cancelled" : "failed";
+  return `latest run ${verb}${detail ? ` (${detail})` : ""}`;
 }
 
 function apiFailure(err: unknown, action: string) {
@@ -169,12 +194,17 @@ export function registerDeployStatusTool(server: McpServer): void {
       try {
         if (deployment_id) {
           const deployment = normalizeDeployment(await getDeployment(deployment_id));
-          deployment.run_status = await readRunStatus(deployment.run_id);
+          const run = await readRun(deployment.run_id);
+          deployment.run_status = run.status;
           await applyLiveness([deployment]);
 
+          const state = `${deployment.status}${deployment.url ? ` at ${deployment.url}` : ` (${URL_PENDING})`}`;
+          const failure = latestRunFailure(deployment, run.outcome);
           return successResponse(
             { deployment, source: "varity_public_api:/api/deployments" },
-            `Deployment ${deployment.id}: ${deployment.status}${deployment.url ? ` at ${deployment.url}` : ` (${URL_PENDING})`}`
+            failure
+              ? `Deployment ${deployment.id}: ${failure}. Deployment status: ${state}`
+              : `Deployment ${deployment.id}: ${state}`
           );
         }
 
@@ -192,6 +222,7 @@ export function registerDeployStatusTool(server: McpServer): void {
         const hasMore = deployments.length > maxResults;
 
         await applyLiveness(limited);
+        const recentFailure = latestRunFailure(limited[0]!);
 
         return successResponse(
           {
@@ -205,7 +236,8 @@ export function registerDeployStatusTool(server: McpServer): void {
               ? { pagination_note: `Showing ${limited.length} of ${deployments.length}. Increase "limit" to see more.` }
               : {}),
           },
-          `Found ${deployments.length} deployment(s). Most recent: ${limited[0]!.name} (${limited[0]!.url ?? URL_PENDING})`
+          `Found ${deployments.length} deployment(s). Most recent: ${limited[0]!.name} (${limited[0]!.url ?? URL_PENDING})` +
+            (recentFailure ? `, ${recentFailure}` : "")
         );
       } catch (err) {
         return apiFailure(err, "Run varity_login, then retry varity_deploy_status.");

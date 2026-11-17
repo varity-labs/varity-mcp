@@ -1,8 +1,8 @@
 {
   "name": "@varity-labs/mcp",
-  "version": "2.3.26",
+  "version": "2.3.27",
   "mcpName": "io.github.varity-labs/varity-mcp",
-  "description": "Varity's stdio MCP server for supported local AI coding clients.",
+  "description": "Deploy apps and AI agents to production from your AI editor, with the cost shown up front.",
   "type": "module",
   "bin": {
     "varity-mcp": "./dist/index.js"

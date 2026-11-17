@@ -3,7 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { execCLI, isCLIAvailable } from "../utils/cli-bridge.js";
 import { resolveDeployKey } from "../utils/config.js";
-import { publicApiGet, VarityPublicApiError } from "../utils/public-api.js";
+import { DEPLOY_KEY_ACTION, publicApiGet, VarityPublicApiError } from "../utils/public-api.js";
 
 export interface Check {
   name: string;
@@ -33,9 +33,6 @@ export function classifyReadiness(checks: Check[]): {
   };
 }
 
-const SIGN_IN_FIX =
-  "Set VARITY_DEPLOY_KEY in the MCP server environment, or run `varitykit auth login` in a trusted terminal (it saves the key to ~/.varitykit/config.json).";
-
 export async function verifyAuthentication(
   apiKey: string | null,
   verify: () => Promise<unknown> = () => publicApiGet<{ deployments?: unknown[] }>("/api/deployments")
@@ -45,7 +42,7 @@ export async function verifyAuthentication(
       name: "Authentication",
       status: "fail",
       message: "Not authenticated: no deploy key found in VARITY_DEPLOY_KEY, ~/.varitykit/config.json or VARITY_API_KEY",
-      fix: SIGN_IN_FIX,
+      fix: DEPLOY_KEY_ACTION,
     };
   }
   try {
@@ -67,7 +64,7 @@ export async function verifyAuthentication(
         ? `Authentication was rejected by the Varity public interface: ${detail}`
         : `Deployment readiness could not be verified: ${detail}`,
       fix: authenticationFailure
-        ? (ownerError?.action ?? `${SIGN_IN_FIX} Then retry varity_doctor.`)
+        ? (ownerError?.action ?? DEPLOY_KEY_ACTION)
         : (ownerError?.action ?? "Check your connection and retry varity_doctor."),
     };
   }
@@ -197,7 +194,7 @@ export function registerDoctorTool(server: McpServer): void {
       const deployKeySource = resolved?.source ?? null;
       const authentication = await verifyAuthentication(resolved?.key ?? null);
       checks.push(authentication);
-      if (authentication.status === "fail") nextSteps.push(authentication.fix ?? SIGN_IN_FIX);
+      if (authentication.status === "fail") nextSteps.push(authentication.fix ?? DEPLOY_KEY_ACTION);
 
       // 5. GitHub token, required specifically for varity_create_repo
       // Treated as "warn" (not "fail") because deployment and all other tools work without it.
