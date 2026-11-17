@@ -150,7 +150,9 @@ export function registerCostCalculatorTool(server: McpServer): void {
       const price = "monthly_max_usd" in projection
         ? monthlyMaximum(amount)
         : `${usd(amount)}/${unit} (USD)`;
-      const note = typeof data.billing_note === "string" && data.billing_note ? ` ${data.billing_note}` : "";
+      // The served note verbatim, closed as a sentence when the owner sent none.
+      const servedNote = typeof data.billing_note === "string" ? data.billing_note.trim() : "";
+      const note = servedNote ? ` ${servedNote}${/[.!?]$/.test(servedNote) ? "" : "."}` : "";
       const summary = `${String(estimateName)}: ${price} estimate returned by the current Varity pricing interface.${note}`;
 
       return successResponse(

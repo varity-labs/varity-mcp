@@ -522,3 +522,31 @@ test("J-7: a deployment that itself failed says so, and the list names a failed 
   }, "varity_deploy_status");
   assert.match(list.out.message, /Most recent: app-f \(https:\/\/app-f\.varity\.app\), latest run failed \(user_workload_failure, health_check_failed; action check_logs\)$/);
 });
+
+// ── 9. Journey 2.3.27 re-run rows ───────────────────────────────────────────
+
+test("J-10: the billing_note joins the summary as a full sentence, whatever punctuation is served", async () => {
+  const estimate = (billing_note) => call({
+    "/api/pricing": [200, { ...STATIC_ESTIMATE, billing_note }],
+  }, "varity_cost_calculator", { app_profile: "static-site" });
+  const bare = await estimate("First 3 static sites free, then $1/month per site");
+  assert.match(bare.out.message, / First 3 static sites free, then \$1\/month per site\.$/);
+  const stopped = await estimate("First 3 static sites are free, then $1/month per site.");
+  assert.match(stopped.out.message, / then \$1\/month per site\.$/);
+  assert.doesNotMatch(stopped.out.message, /\.\.$/);
+  const padded = await estimate("  Billed $1/month!  ");
+  assert.match(padded.out.message, /interface\. Billed \$1\/month!$/);
+});
+
+test("J-11: a deleted deployment never points at its retired URL", async () => {
+  const id = "op-del";
+  const row = { id, operation_deployment_id: id, app_name: "gone-app", status: "deleted", url: "https://gone-app.varity.app", created_at: "2026-11-17T20:00:00Z", run_id: "run-del", outcome: { classification: "succeeded", code: "deployment_deleted" } };
+  const single = await call({
+    [`/api/deployments/${id}`]: [200, { deployment: row }],
+    "/api/deployments/runs/run-del": [200, { public_status: "deleted" }],
+  }, "varity_deploy_status", { deployment_id: id });
+  assert.equal(single.out.message, `Deployment ${id}: deleted`);
+  const list = await call({ "/api/deployments": [200, { deployments: [row] }] }, "varity_deploy_status");
+  assert.match(list.out.message, /Most recent: gone-app \(deleted\)$/);
+  assert.doesNotMatch(`${single.out.message} ${list.out.message}`, /gone-app\.varity\.app/);
+});
