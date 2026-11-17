@@ -1,6 +1,6 @@
 {
   "name": "@varity-labs/mcp",
-  "version": "2.3.27",
+  "version": "2.3.28",
   "mcpName": "io.github.varity-labs/varity-mcp",
   "description": "Deploy apps and AI agents to production from your AI editor, with the cost shown up front.",
   "type": "module",
@@ -8,6 +8,11 @@
     "varity-mcp": "./dist/index.js"
   },
   "main": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./server": "./dist/server.js",
+    "./package.json": "./package.json"
+  },
   "files": [
     "dist",
     "README.md",
@@ -44,6 +49,7 @@
   "author": "Varity Labs <support@varity.so>",
   "license": "SEE LICENSE IN LICENSE",
   "dependencies": {
+    "@modelcontextprotocol/ext-apps": "1.7.5",
     "@modelcontextprotocol/sdk": "^1.32.0",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/api-logs": "^0.221.0",

@@ -2,27 +2,55 @@
  * The one HTTP client for every Varity Cloud call the MCP makes.
  *
  * Every read and every lifecycle mutation (deployments and CPU machines) goes
- * through `publicApiRequest`, so auth (the deploy key resolved by
- * `getApiKey`), the User-Agent, the timeout and error shape exist once. The
+ * through `publicApiRequest`, so auth (the credential of the current call),
+ * the User-Agent, the timeout and error shape exist once. The
  * gateway attributes a create by its body `source` field
  * (`deploymentOperationSurfaceForCreate`), so `createDeployment` sets
  * `source: "mcp"`.
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
-import { getApiKey, INFRASTRUCTURE } from "./config.js";
+import { INFRASTRUCTURE } from "./endpoints.js";
 
 const PACKAGE_VERSION = (createRequire(import.meta.url)("../../package.json") as { version: string }).version;
 
-/**
- * The MCP client's `initialize` identity, read per request. The stdio process
- * runs one server, which sets this once; a later server in the same process
- * replaces it.
- */
-let clientInfo: () => { name?: string; version?: string } | undefined = () => undefined;
+/** Returns the upstream public-API bearer for the current call, or null (not signed in). */
+export type CredentialProvider = () => Promise<string | null>;
 
-export function setClientInfoProvider(provider: () => { name?: string; version?: string } | undefined): void {
-  clientInfo = provider;
+/**
+ * What one tool call runs with (IF-SERVER-FACTORY). `createVarityServer`
+ * binds it around every tool callback through `runInCallContext`, so two
+ * concurrent calls from different users (hosted mount) never share a
+ * credential or client identity.
+ */
+export interface CallContext {
+  credentials: CredentialProvider;
+  transport: "stdio" | "streamable_http";
+  /** The MCP client's `initialize` identity. */
+  clientInfo: () => { name?: string; version?: string } | undefined;
+}
+
+const callContext = new AsyncLocalStorage<CallContext>();
+
+export function runInCallContext<T>(context: CallContext, fn: () => T): T {
+  return callContext.run(context, fn);
+}
+
+/**
+ * Outside a bound call (direct library use) the stdio deploy-key order
+ * applies. `config.ts` reads the filesystem, so it is loaded only here, never
+ * by a remote call: a remote server always binds its own provider.
+ */
+const stdioCredentials: CredentialProvider = async () => (await import("./config.js")).getApiKey();
+
+function currentCall(): CallContext {
+  return callContext.getStore() ?? { credentials: stdioCredentials, transport: "stdio", clientInfo: () => undefined };
+}
+
+/** A hosted (remote) call: copy names no local setup, link or purchase step. */
+export function isRemoteCall(): boolean {
+  return currentCall().transport === "streamable_http";
 }
 
 /** A bounded, low-cardinality token: no spaces, parentheses, separators or private text. */
@@ -31,14 +59,23 @@ function uaToken(value: string | undefined): string {
   return token || "unknown";
 }
 
+/** A distribution slug (vocabulary N16, owner conversion-funnel); anything else is dropped. */
+const DISTRIBUTION_SLUG = /^[a-z0-9-]{1,32}$/;
+
 /**
- * `varity-mcp/<version> (<client>/<client version>; transport=stdio)`. Attribution
- * only: `source: "mcp"` on create stays canonical, and no key, path,
- * repository or account value is ever part of it.
+ * `varity-mcp/<version> (<client>/<client version>; transport=<stdio|streamable_http>[; dist=<slug>])`
+ * (IF-CLIENT-ORIGIN). `dist` comes from `VARITY_DISTRIBUTION`, which a plugin
+ * manifest sets for its stdio server; a hosted call is attributed by its
+ * OAuth client instead, so it never carries one. Attribution only:
+ * `source: "mcp"` on create stays canonical, and no key, path, repository or
+ * account value is ever part of it.
  */
 export function userAgent(): string {
-  const client = clientInfo();
-  return `varity-mcp/${PACKAGE_VERSION} (${uaToken(client?.name)}/${uaToken(client?.version)}; transport=stdio)`;
+  const call = currentCall();
+  const client = call.clientInfo();
+  const distribution = process.env["VARITY_DISTRIBUTION"] ?? "";
+  const dist = call.transport === "stdio" && DISTRIBUTION_SLUG.test(distribution) ? `; dist=${distribution}` : "";
+  return `varity-mcp/${PACKAGE_VERSION} (${uaToken(client?.name)}/${uaToken(client?.version)}; transport=${call.transport}${dist})`;
 }
 
 export class VarityPublicApiError extends Error {
@@ -62,6 +99,12 @@ export const DEPLOY_KEY_URL = `${INFRASTRUCTURE.DASHBOARD}/settings?tab=api-keys
 export const DEPLOY_KEY_ACTION =
   `Create a deploy key at ${DEPLOY_KEY_URL}, set it as VARITY_DEPLOY_KEY in the MCP server environment ` +
   "(or run `varitykit auth login` in a trusted terminal; it saves the key to ~/.varitykit/config.json), then call varity_doctor.";
+/** A hosted call signs in through the host's connector, not a local key. */
+const REMOTE_SIGN_IN_ACTION = "Reconnect the Varity connector in this app to sign in again, then retry.";
+
+function signInAction(): string {
+  return isRemoteCall() ? REMOTE_SIGN_IN_ACTION : DEPLOY_KEY_ACTION;
+}
 
 /**
  * MCP copy for billing refusals, keyed by the closed codes the owner serves in
@@ -111,6 +154,24 @@ const BILLING_FALLBACK = {
 };
 
 /**
+ * Hosted copy: explain only. No link and no purchase verb (a chat host may
+ * not carry checkout); the account is funded outside the chat.
+ */
+const OUTSIDE_CHAT = "This is managed in the user's Varity account, outside this chat.";
+const REMOTE_BILLING_ACTIONS: Readonly<Record<string, string>> = {
+  insufficient_credits: `${OUTSIDE_CHAT} Retry once the balance covers the request.`,
+  daily_free_limit_reached: "Retry after the daily reset.",
+  spending_limit_reached: `${OUTSIDE_CHAT} Retry next month or once the limit changes.`,
+  subscription_required: `${OUTSIDE_CHAT} Retry once a plan is active.`,
+  wallet_frozen: "Contact Varity support to restore billing on the account.",
+  payment_method_shared: OUTSIDE_CHAT,
+  quote_expired: "Retry the request to get a fresh quote.",
+  billing_unavailable: "Retry in a few minutes.",
+};
+/** A served text a hosted call may not pass on: a link or a purchase step. */
+const PURCHASE_TEXT = /https?:\/\/|\/billing|\b(?:add funds|top up|choose a plan|upgrade|buy|purchase|subscribe)\b/i;
+
+/**
  * The closed billing refusal codes served in `GET /api/pricing`
  * (`credit_policy.errorCodes`, owner: billing-meter), read per use: refusals
  * are rare and an uncached read never serves a stale list. `null` means
@@ -133,9 +194,23 @@ export async function getBillingErrorCodes(): Promise<readonly string[] | null> 
 async function withBillingCopy(err: VarityPublicApiError): Promise<VarityPublicApiError> {
   if (err.status !== 402 && err.status !== 503) return err;
   const codes = await getBillingErrorCodes();
-  if (!codes?.includes(err.code)) return err;
-  const copy = Object.hasOwn(BILLING_COPY, err.code) ? BILLING_COPY[err.code] : BILLING_FALLBACK;
-  return new VarityPublicApiError(copy.message, err.code, err.status, copy.action);
+  const listed = codes?.includes(err.code) === true;
+  if (!isRemoteCall()) {
+    if (!listed) return err;
+    const copy = Object.hasOwn(BILLING_COPY, err.code) ? BILLING_COPY[err.code] : BILLING_FALLBACK;
+    return new VarityPublicApiError(copy.message, err.code, err.status, copy.action);
+  }
+  // Hosted: explain only. A listed code (or any 402, which is always a payment
+  // refusal, even when the list is unreadable) gets the remote copy; any other
+  // served text that carries a link or purchase step is replaced, never passed on.
+  if (listed || err.status === 402) {
+    const message = Object.hasOwn(BILLING_COPY, err.code) ? BILLING_COPY[err.code].message : BILLING_FALLBACK.message;
+    const action = Object.hasOwn(REMOTE_BILLING_ACTIONS, err.code) ? REMOTE_BILLING_ACTIONS[err.code] : OUTSIDE_CHAT;
+    return new VarityPublicApiError(message, err.code, err.status, action);
+  }
+  const message = PURCHASE_TEXT.test(err.message) ? BILLING_FALLBACK.message : err.message;
+  const action = err.action && PURCHASE_TEXT.test(err.action) ? OUTSIDE_CHAT : err.action;
+  return new VarityPublicApiError(message, err.code, err.status, action, err.served);
 }
 
 /**
@@ -179,14 +254,14 @@ export const PUBLIC_API_GET_TIMEOUT_MS = 60_000;
 
 /** With `optional`, no configured key means an anonymous request instead of NOT_AUTHENTICATED. */
 async function authHeaders(optional = false): Promise<Record<string, string>> {
-  const key = await getApiKey();
+  const key = await currentCall().credentials();
   if (!key && optional) return { Accept: "application/json" };
   if (!key) {
     throw new VarityPublicApiError(
       "Not authenticated with Varity.",
       "NOT_AUTHENTICATED",
       401,
-      DEPLOY_KEY_ACTION
+      signInAction()
     );
   }
   return {
@@ -234,7 +309,7 @@ async function sendRequest<T>(
       const code = body.code ?? errorCode ?? "VARITY_API_ERROR";
       // The served key wording ("API key", no URL) is not the portal's term.
       const badKey = code === "invalid_api_key";
-      const action = badKey ? DEPLOY_KEY_ACTION : agentAction(body.action);
+      const action = badKey ? signInAction() : agentAction(body.action);
       const prose = typeof body.error === "string" && !errorCode ? body.error : undefined;
       throw new VarityPublicApiError(
         badKey ? "The deploy key is invalid or revoked." : body.message ?? prose ?? `Varity API returned ${res.status}.`,

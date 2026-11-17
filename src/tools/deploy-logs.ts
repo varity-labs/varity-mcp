@@ -2,7 +2,7 @@ import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { getDeploymentLogs, VarityPublicApiError } from "../utils/public-api.js";
-import { stripAnsi } from "../utils/cli-bridge.js";
+import { stripAnsi } from "../utils/ansi.js";
 
 export function registerDeployLogsTool(server: McpServer): void {
   server.registerTool(

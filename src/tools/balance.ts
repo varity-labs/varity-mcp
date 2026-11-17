@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { publicApiGet, VarityPublicApiError } from "../utils/public-api.js";
+import { isRemoteCall, publicApiGet, VarityPublicApiError } from "../utils/public-api.js";
 import { errorResponse, successResponse } from "../utils/responses.js";
-import { INFRASTRUCTURE } from "../utils/config.js";
+import { INFRASTRUCTURE } from "../utils/endpoints.js";
 
 const BALANCE_PATH = "/api/credits/balance";
 const BILLING_URL = `${INFRASTRUCTURE.DASHBOARD}/billing`;
@@ -15,7 +15,9 @@ function usdAmount(value: unknown): string | null {
 }
 
 function unavailable() {
-  return errorResponse("balance_unavailable", "Your Varity balance is unavailable right now.", `Retry varity_balance, or see ${BILLING_URL}.`);
+  // A hosted call names no billing link (explain-only copy).
+  const action = isRemoteCall() ? "Retry varity_balance." : `Retry varity_balance, or see ${BILLING_URL}.`;
+  return errorResponse("balance_unavailable", "Your Varity balance is unavailable right now.", action);
 }
 
 export function registerBalanceTool(server: McpServer): void {

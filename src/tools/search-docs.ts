@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
-import { INFRASTRUCTURE } from "../utils/config.js";
+import { INFRASTRUCTURE } from "../utils/endpoints.js";
 
 // Thin proxy to live documentation. The package ships no embedded doc corpus.
 // A short bounded cache avoids a network request per tool call without turning

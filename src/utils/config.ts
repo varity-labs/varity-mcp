@@ -49,13 +49,6 @@ export async function isAuthenticated(): Promise<boolean> {
   return key !== null;
 }
 
-/**
- * Infrastructure endpoints (all LIVE).
- */
-export const INFRASTRUCTURE = {
-  GATEWAY: process.env["VARITY_GATEWAY_URL"] ?? "https://varity.app",
-  DOCS: "https://docs.varity.so",
-  DEVELOPER_PORTAL: "https://developer.store.varity.so",
-  /** Where a user lists and manages deployments. `varity.app/dashboard` is a 404 (evidence p2-cli-mcp D7). */
-  DASHBOARD: "https://developer.store.varity.so/dashboard",
-} as const;
+// The endpoint table lives in an fs-free module so the remote toolset can
+// import it; stdio callers keep importing it from here.
+export { INFRASTRUCTURE } from "./endpoints.js";

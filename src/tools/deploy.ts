@@ -1,6 +1,4 @@
 import { z } from "zod";
-import { access, readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { createDeployment, VarityPublicApiError } from "../utils/public-api.js";
@@ -11,37 +9,15 @@ import { acceptanceSummary, lifecycleAcceptance } from "../utils/lifecycle-accep
  * (no CLI subprocess). The body is the same public create contract
  * the CLI sends (`app_name`, `repo_url` | `image`, `port`, `volume_*`); the
  * control plane owns framework detection, hosting, build and lifecycle. The
- * MCP only names the source: an explicit repo/image, else the project's
- * `origin` remote. A bare local directory has nothing the cloud can build.
+ * MCP only names the source: an explicit repo/image, else (stdio only) the
+ * project's `origin` remote through the injected `LocalSource`. A bare local
+ * directory has nothing the cloud can build. The remote toolset registers
+ * this tool without a local source, so its schema has no `path` and this
+ * module reads no file.
  */
 
-/** The `origin` remote of `<project>/.git/config`, as an https URL the backend can clone. */
-export async function detectGitRemote(projectPath: string): Promise<string | null> {
-  let config: string;
-  try {
-    config = await readFile(join(projectPath, ".git", "config"), "utf-8");
-  } catch {
-    return null;
-  }
-  let inOrigin = false;
-  let url: string | null = null;
-  for (const raw of config.split("\n")) {
-    const line = raw.trim();
-    if (line.startsWith("[")) {
-      inOrigin = line === '[remote "origin"]';
-    } else if (inOrigin && line.startsWith("url") && line.includes("=")) {
-      url = line.slice(line.indexOf("=") + 1).trim();
-      break;
-    }
-  }
-  if (!url) return null;
-  if (url.startsWith("git@")) {
-    // git@github.com:owner/repo.git -> https://github.com/owner/repo
-    const [host, path] = [url.slice(4, url.indexOf(":")), url.slice(url.indexOf(":") + 1)];
-    url = `https://${host}/${path}`;
-  }
-  return url.replace(/\.git$/, "");
-}
+/** Resolves a project directory to its deploy source; stdio only (`deploy-local-source.ts`). */
+export type LocalSource = (path: string | undefined) => Promise<{ repoUrl: string } | ReturnType<typeof errorResponse>>;
 
 /** A contract-valid app name (`^[a-z0-9-]{1,63}$`) from the repo or image name. */
 export function defaultAppName(source: string): string {
@@ -77,7 +53,20 @@ function unreadableRepository(repoUrl: string | undefined): [string, string] {
   ];
 }
 
-export function registerDeployTool(server: McpServer): void {
+export function registerDeployTool(server: McpServer, localSource?: LocalSource): void {
+  const pathInput = {
+    path: z
+      .string()
+      .optional()
+      .describe(
+        "Absolute path to the project directory (e.g. '/home/user/my-app'). " +
+        "Used only to read the Git `origin` remote when repo_url and image are omitted. " +
+        "If omitted, the MCP server's working directory is used (which is rarely the correct project root)."
+      ),
+  };
+  const repoUrlHint = localSource
+    ? "If omitted, auto-detected from .git/config. Use the repo_url returned by varity_create_repo as the value here."
+    : "Pass repo_url or image.";
   server.registerTool(
     "varity_deploy",
     {
@@ -92,21 +81,12 @@ export function registerDeployTool(server: McpServer): void {
         "the latest commit (varity_redeploy does not pick up new commits). " +
         "To stop a deployment and its billing, use varity_delete_deployment.",
       inputSchema: {
-        path: z
-          .string()
-          .optional()
-          .describe(
-            "Absolute path to the project directory (e.g. '/home/user/my-app'). " +
-            "Used only to read the Git `origin` remote when repo_url and image are omitted. " +
-            "If omitted, the MCP server's working directory is used (which is rarely the correct project root)."
-          ),
+        ...(localSource ? pathInput : {}),
         repo_url: z
           .string()
           .optional()
           .describe(
-            "GitHub repository URL for the app (e.g. 'https://github.com/user/my-app'). " +
-            "If omitted, auto-detected from .git/config. " +
-            "Use the repo_url returned by varity_create_repo as the value here."
+            "GitHub repository URL for the app (e.g. 'https://github.com/user/my-app'). " + repoUrlHint
           ),
         app_name: z
           .string()
@@ -150,30 +130,24 @@ export function registerDeployTool(server: McpServer): void {
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
-    async ({ path, repo_url, app_name, image, port, volume_size, volume_path }) => {
+    async ({ path, repo_url, app_name, image, port, volume_size, volume_path }: {
+      path?: string; repo_url?: string; app_name?: string; image?: string; port?: number; volume_size?: number; volume_path?: string;
+    }) => {
       if (repo_url && image) {
         return errorResponse("INVALID_SOURCE", "Pass repo_url or image, not both.", "Choose one deploy source.");
       }
       let repoUrl = repo_url;
       if (!repoUrl && !image) {
-        const cwd = path || process.cwd();
-        try {
-          await access(cwd);
-        } catch {
-          return errorResponse(
-            "PATH_NOT_FOUND",
-            `Project directory does not exist: ${cwd}`,
-            "Check the path and ensure the project directory exists."
-          );
-        }
-        repoUrl = (await detectGitRemote(cwd)) ?? undefined;
-        if (!repoUrl) {
+        if (!localSource) {
           return errorResponse(
             "NO_DEPLOY_SOURCE",
-            `No deploy source found for ${cwd}: it has no Git origin remote.`,
-            "Varity builds in the cloud from a source it can reach. Push the project with varity_create_repo and pass its repo_url, or pass a prebuilt image."
+            "No deploy source: pass repo_url or image.",
+            "Pass the app's public GitHub repo_url or a prebuilt image, or deploy a certified template with varity_deploy_template."
           );
         }
+        const local = await localSource(path);
+        if (!("repoUrl" in local)) return local;
+        repoUrl = local.repoUrl;
       }
 
       const source = (image ?? repoUrl)!;
