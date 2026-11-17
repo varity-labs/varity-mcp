@@ -130,9 +130,7 @@ export function registerBuildTool(server: McpServer): void {
             "Path to the project directory (default: current directory)"
           ),
       },
-      annotations: {
-        destructiveHint: true,
-      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async ({ path }) => {
       const cwd = path || process.cwd();

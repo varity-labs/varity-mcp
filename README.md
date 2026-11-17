@@ -6,7 +6,7 @@
 
 > The published Varity MCP package for Cursor, Claude Code, VS Code, Windsurf, and other MCP clients.
 
-This repository contains only `@varity-labs/mcp`, the npm MCP server. It is a thin tool wrapper around `varitykit` and Varity's gateway APIs; it is not the Python CLI, the portal, the dormant SDK, or an app-store package.
+This repository contains only `@varity-labs/mcp`, the npm MCP server. It is a thin client of Varity's public API; it is not the Python CLI, the portal, the dormant SDK, or an app-store package.
 
 The Varity MCP Server lets a supported local AI coding client build, deploy, and manage supported apps in production for you.
 
@@ -88,7 +88,8 @@ The MCP exposes Varity's deploy surface so your AI tool can take action — not 
 - "Show my deployments"
 - "What's the URL of my last deploy?"
 - "Stop my-app and stop billing it"
-- "Get the build logs for my deployment"
+- "Why did my deployment fail?"
+- "Show the runtime logs for my deployment"
 
 **Preview a Vercel migration**
 - "Preview what would change when migrating github.com/me/my-app"
@@ -107,15 +108,15 @@ The MCP exposes Varity's deploy surface so your AI tool can take action — not 
 | `varity_cost_calculator` | Project the live owner's monthly or hourly USD estimate without converting units; pre-deploy estimates need no sign-in |
 | `varity_balance` | Read your available balance, authorization maximum (`reserved_usd`) and amount owed as exact decimal USD strings using your deploy key; the authorization maximum is not funded backing, and unavailable reads never become zero |
 | `varity_doctor` | Check that your environment is ready to deploy |
-| `varity_login` | Check authentication and route login through the trusted `varitykit auth login` terminal flow |
+| `varity_login` | Check authentication and route sign-in to `VARITY_DEPLOY_KEY` or the trusted `varitykit auth login` terminal flow |
 | `varity_install_deps` | Install project dependencies |
 | `varity_build` | Build the project |
 | `varity_open_browser` | Open a URL locally |
 | `varity_dev_server` | Start the local development server |
 | `varity_create_repo` | Create a GitHub repository and push the project |
 | `varity_deploy` | Deploy the current project to production |
-| `varity_deploy_status` | Check the status of a deployment |
-| `varity_deploy_logs` | Read build and runtime logs |
+| `varity_deploy_status` | Check the status of a deployment, including why a build failed |
+| `varity_deploy_logs` | Read runtime logs |
 | `varity_delete_deployment` | Request deletion; poll `varity_deploy_status` until it is deleted and billing is stopped |
 | `varity_set_env` | Preserve the public tool route while refusing secret values and directing configuration to a secret-safe interface |
 | `varity_redeploy` | Reapply an existing deployment's saved configuration; unchanged input may be a no-op |
@@ -172,7 +173,14 @@ that require a remote MCP URL are not supported by this package.
 ## Prerequisites
 
 - **Node.js** >= 22.11 (the current supported LTS baseline; EOL Node 18/20 are unsupported)
-- **For deployment**: `pip install varitykit`
+- **A Varity deploy key** for deploys and account reads. Create one at
+  https://developer.store.varity.so/dashboard/settings?tab=api-keys and set it
+  as `VARITY_DEPLOY_KEY` in the MCP server environment, or run
+  `varitykit auth login` in a trusted terminal. Never paste a key into chat.
+  The key is read in this order: `VARITY_DEPLOY_KEY`, then the sign-in file
+  `~/.varitykit/config.json`, then the legacy `VARITY_API_KEY`.
+  `varity_doctor` reports which source supplied it.
+- **varitykit** (`pipx install varitykit`) only for `varity_migrate`
 
 ---
 

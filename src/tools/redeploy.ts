@@ -23,7 +23,7 @@ export function registerRedeployTool(server: McpServer): void {
   server.registerTool(
     "varity_redeploy",
     {
-      annotations: { destructiveHint: true },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
       title: "Reapply an Existing Deployment Configuration",
       description:
         "Reapply the saved configuration for an app that is ALREADY deployed. Use this when a developer " +

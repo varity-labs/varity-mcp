@@ -23,6 +23,7 @@ import { registerSetEnvTool } from "./tools/set-env.js";
 import { registerRedeployTool } from "./tools/redeploy.js";
 import { registerMachinesTools } from "./tools/machines.js";
 import { instrumentMcpServer } from "./telemetry.js";
+import { setClientInfoProvider } from "./utils/public-api.js";
 
 const require = createRequire(import.meta.url);
 const packageMetadata = require("../package.json") as { version?: unknown };
@@ -84,6 +85,8 @@ export function createVarityServer(): McpServer {
   // runs inside the same secret-safe MCP server span implementation.
   instrumentMcpServer(server);
   strictToolInputs(server);
+  // The public-API User-Agent names the client from `initialize`.
+  setClientInfoProvider(() => server.server.getClientVersion());
 
   // ── Resources (stable routes to live owners) ──
   registerResources(server);

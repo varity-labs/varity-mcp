@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-process.env["VARITY_API_KEY"] = "test-key";
+process.env["VARITY_DEPLOY_KEY"] = "test-key";
 
 // Load the compiled module (built before running this test)
 const { getDeploymentLogs } = await import("../dist/utils/public-api.js");

@@ -24,9 +24,7 @@ export function registerDeployLogsTool(server: McpServer): void {
           .default(100)
           .describe("Maximum number of log lines to return (default: 100)"),
       },
-      annotations: {
-        readOnlyHint: true,
-      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     async ({ deployment, limit }) => {
       try {

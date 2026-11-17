@@ -8,6 +8,7 @@ export function registerOpenBrowserTool(server: McpServer): void {
     "varity_open_browser",
     {
       title: "Open in Browser",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       description:
         "Open a URL in the user's default browser. " +
         "Use after deploying to show the live app or after starting the dev server.",

@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 process.env["VARITY_GATEWAY_URL"] = "https://gw.test";
-process.env["VARITY_API_KEY"] = "api-key";
+process.env["VARITY_DEPLOY_KEY"] = "api-key";
 
 const { quoteAndCreateMachine, deleteAndConfirmMachine, registerMachinesTools } = await import(
   "../dist/tools/machines.js"

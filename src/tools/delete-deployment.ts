@@ -31,7 +31,7 @@ export function registerDeleteDeploymentTool(server: McpServer): void {
   server.registerTool(
     "varity_delete_deployment",
     {
-      annotations: { destructiveHint: true },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
       title: "Request Deletion of a Deployment",
       description:
         "Request deletion of an existing Varity deployment by id or app name. Returns as soon as the delete is accepted, " +

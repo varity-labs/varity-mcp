@@ -16,8 +16,8 @@ This repository owns:
 - the MCP tool, compatibility resource, and prompt interface presented to local
   AI coding clients;
 - stdio process composition and JSON-RPC channel custody;
-- translation from validated MCP inputs to either local `varitykit` commands or
-  the deploy-key-authenticated public Varity interface;
+- translation from validated MCP inputs to the deploy-key-authenticated public
+  Varity interface, or (migration preview only) a local `varitykit` command;
 - consistent structured success/error responses;
 - secret-safe telemetry through standard OpenTelemetry exporters and optional
   Better Stack error ingestion;
@@ -41,15 +41,15 @@ It does not own:
 flowchart LR
   CLIENT[Local MCP client] -->|stdio JSON-RPC| SERVER[MCP composition]
   SERVER --> TOOLS[Tools, resource router, prompts]
-  TOOLS --> CLI[CLI bridge] --> VK[varitykit] --> CONTROL[Varity public control plane]
-  TOOLS --> PUBLIC[Public-interface adapter] --> CONTROL
+  TOOLS --> PUBLIC[Public-interface adapter] --> CONTROL[Varity public control plane]
+  TOOLS --> CLI[CLI bridge] --> VK[varitykit migrate preview]
   TOOLS --> LOCAL[Local filesystem and processes]
   SERVER --> TELEMETRY[Secret-safe telemetry] --> OTLP[Configured OTLP/error endpoints]
 ```
 
-Deployment-lifecycle mutations (deploy, delete, redeploy) reach the downstream
-control plane through the public-interface client; template, login and
-migration commands still go through `varitykit`. Local build, dependency, browser, development-server, and
+Deployment-lifecycle mutations (deploy, template deploy, delete, redeploy) and
+the template catalog reach the downstream control plane through the
+public-interface client; only the migration preview runs `varitykit`. Local build, dependency, browser, development-server, and
 repository helpers remain local adapters, as the routing table below records.
 MCP output is a projection of downstream truth: process exit can prove command
 acceptance, but only a durable run or owner-scoped status read can prove later
@@ -60,18 +60,19 @@ lifecycle state.
 | Module | Interface and invariant | Implementation | Verification |
 |---|---|---|---|
 | Entrypoint | stdio only; stdout contains JSON-RPC only; unknown/retired transport flags fail closed | `src/index.ts` | `test/runtime-version.mjs`, `test/logger-stdio-channel.mjs`, runtime matrix |
-| MCP composition | one complete local surface; no transport-specific alternate registration | `src/server.ts` | `test/launch-readiness-audit.mjs` plus package startup tests |
+| MCP composition | one complete local surface; no transport-specific alternate registration | `src/server.ts` | `test/tool-annotations.mjs` plus package startup tests |
 | Tools | Zod-validated input and shared structured responses; no provider or orchestration policy | `src/tools/` | per-adapter and regression tests under `test/` |
 | Compatibility resource | `varity://deploy/reference` remains stable but routes mutable facts to live docs/tools | `src/resources/index.ts` | cleanup contract and architecture checks |
-| CLI bridge | argv arrays, bounded timeouts/output, normalized environment, durable run-reference extraction | `src/utils/cli-bridge.ts` | `test/cli-bridge-env.mjs`, `test/lifecycle-outcomes.mjs` |
-| Public-interface client | the one HTTP client for every Cloud read and lifecycle mutation (deploy, delete, redeploy, env, run status, machines); `VARITY_API_KEY ?? VARITY_DEPLOY_KEY` auth, `source: "mcp"` on create, bounded timeout, normalized errors; no copied pricing or lifecycle state | `src/utils/public-api.ts` | `test/public-api-client.mjs`, `test/public-api-budget.mjs`, `test/lifecycle-outcomes.mjs`, `test/billing-refusals.mjs`, `test/agent-journey-contract.mjs`, status/log tests |
+| CLI bridge | argv arrays, bounded timeouts/output, normalized environment; `varitykit` is invoked only by the migration preview | `src/utils/cli-bridge.ts` | `test/cli-bridge-env.mjs`, `test/migrate-custody.mjs` |
+| Public-interface client | the one HTTP client for every Cloud read and lifecycle mutation (deploy, template catalog and deploy, delete, redeploy, env, run status, machines); deploy-key auth in the order `VARITY_DEPLOY_KEY`, `~/.varitykit/config.json`, `VARITY_API_KEY` (`src/utils/config.ts`); `User-Agent: varity-mcp/<version> (<client>/<client version>; transport=stdio)` from the client's `initialize` identity, bounded to `[A-Za-z0-9._-]{1,64}` tokens; `source: "mcp"` on create; a per-call `Idempotency-Key` on deploy, template deploy and redeploy; bounded timeout, normalized errors; no copied pricing or lifecycle state | `src/utils/public-api.ts` | `test/public-api-client.mjs`, `test/idempotent-create.mjs`, `test/client-attribution.mjs`, `test/deploy-key-resolution.mjs`, `test/public-api-budget.mjs`, `test/lifecycle-outcomes.mjs`, `test/billing-refusals.mjs`, `test/agent-journey-contract.mjs`, status/log tests |
 | Local GitHub helper | credentials come from process environment or `gh`; clean remote URL; normal non-force push | `src/tools/create-repo.ts` | cleanup contract plus Git behavior review |
 | Runtime telemetry | opt-in spans/logs/metrics/errors; protected inputs and stdout excluded | `src/telemetry.ts`, `src/runtime-shutdown.ts`, `src/utils/logger.ts` | telemetry, logger, and shutdown tests |
 
-The CLI bridge and public-interface client are separate deep adapters because
-their current callers need different downstream interfaces. Removing either
-without migrating its callers would spread auth, timeout, parsing, and failure
-logic into individual tools.
+The CLI bridge and public-interface client are separate adapters because their
+callers need different downstream interfaces: the migration preview transforms
+a local checkout, which no public route does. Every tool advertises a title and
+all four MCP hints (readOnly, destructive, idempotent, openWorld) explicitly;
+`test/tool-annotations.mjs` holds the binding table.
 
 ## Tool routing
 
@@ -80,10 +81,10 @@ logic into individual tools.
 | Deploy source/public image | MCP tool → public-interface client → `POST /api/deployments` | The source is a repo URL (explicit or the project's `origin` remote) or an image; the control plane owns build and hosting policy |
 | Delete and reapply | MCP tool → public-interface client → `DELETE`/`POST .../redeploy` | Status is the run's `public_status` from `GET /api/deployments/runs/:id`; no run or an unreadable run is `null` (unobserved) |
 | CPU and GPU VMs (list/create/delete) | `src/tools/machines.ts` → public-interface client → `POST /api/pricing/machine-quote`, `POST`/`DELETE /api/machines` (Idempotency-Key) | Create needs the caller's SSH public key; delete polls `GET /api/machines/:id` until `billing.state` is `stopped` (≤ 600 s), an unread state stays `null` (unobserved); `gpu: true` selects GPU VMs (`virtual_machine`); GPU containers and bare metal are out of MCP scope |
-| Template list/detail/deploy | MCP tool → CLI bridge → `varitykit` | Catalog, certification, hardware, and price fields are downstream-owned |
+| Template list/detail/deploy | MCP tool → public-interface client → `GET /api/templates`, `GET /api/templates/:id`, `POST /api/templates/:id/deploy` | Catalog, certification, hardware, and price fields are downstream-owned; a missing `pricing.monthlyUsd` is shown as unavailable; private or secret-bearing templates are refused before any deploy request |
 | Migration preview | temporary clone → `varitykit migrate apply --dry-run` → exact cleanup | URL-based apply/deploy fails closed until transformed-source custody is explicit |
 | Deployment list/status/logs | MCP tool → public-interface adapter | Owner-scoped response is authoritative for this client; the returned `id` is the served `operation_deployment_id` (the id `varity_deploy` returned) when present, else the row id; a URL the owner has not assigned is omitted, and month-to-date accrual under an unobserved `billing.state` is `"unavailable"`, never 0 |
-| Cost estimate | MCP tool → public `GET /api/pricing?profile=` (no auth) or the owner-scoped deployment billing block | Profile keys, currency, billing model, and values are returned by the live owner under their served field names; USD only, no other unit |
+| Cost estimate | MCP tool → public `GET /api/pricing?profile=` (no auth) or the owner-scoped deployment billing block | `ai-agent-gpu` (GPU containers) is refused without a request; profile keys, currency, billing model, and values are returned by the live owner under their served field names; USD only, no other unit |
 | Balance | `varity_balance` → deploy-key-authenticated public `GET /api/credits/balance` | The key selects its owner. Only available balance, authorization maximum and amount owed are projected as exact decimal USD strings. Compatibility field `reserved_usd` is the served authorization maximum, not funded backing; the tool does not infer backing or subtract it from available balance. Missing or malformed money and failed reads remain unavailable. No portal-session billing details are requested. |
 | Docs search | MCP tool → public `llms-full.txt`/`llms.txt` | Five-minute process cache; stale entries are not served after expiry if refresh fails |
 | Build, install, browser, dev server, repository creation | local process/filesystem adapters | Operate on the invoking user's machine and credentials |
@@ -92,7 +93,11 @@ logic into individual tools.
 
 The package has one transport: stdio. The MCP process runs under the invoking
 user and may act on explicitly supplied local paths. Varity operations use the
-deploy key resolved by `varitykit` or `src/utils/config.ts`.
+deploy key resolved by `src/utils/config.ts`: env `VARITY_DEPLOY_KEY`, then the
+CLI sign-in file `~/.varitykit/config.json` (`deploy_key`, then `api_key`), then
+the legacy env `VARITY_API_KEY`, which the public AI Gateway docs use for the
+inference key. `varity_doctor` reports which source supplied the key, never the
+key.
 
 **stdout is the JSON-RPC channel.** Diagnostics go to stderr through the
 central logger or `console.error`. A single unrelated stdout byte can corrupt
@@ -136,6 +141,10 @@ or release state.
 
 - CLI command failures return normalized stdout, stderr, and an exit code;
   tools convert that result into the shared MCP error shape.
+- Deploy, template deploy and redeploy send an `Idempotency-Key` generated per
+  call, never derived from the request. A 504 `deploy_acceptance_unconfirmed`
+  is resent exactly once with the same key; any other failure, or a second
+  504, is returned unchanged.
 - Deployment-family success means command acceptance. Tools project only a
   valid durable run reference and an explicitly reported public URL; they never
   manufacture deployment IDs, terminal status, or liveness.
@@ -173,36 +182,23 @@ git diff --check
 ```
 
 CI runs the full build/test job on maintained Node 22 and executes the built stdio
-entrypoint on maintained Node 22 and Node 24. Both CI and package publication
-install the exact reviewed lock with npm audits disabled, including when the
+entrypoint on maintained Node 22 and Node 24. CI installs the exact reviewed lock with npm audits disabled, including when the
 environment enables audits. The runtime test verifies the MCP
 initialize response reports the exact package version and that retired network
 transport arguments fail closed.
 
-The existing npm publication workflow requires `main`, an exact lowercase
-40-hex `expected_source` and a bounded `request_id` for manual dispatch. Any
-governed caller must supply these inputs; the workflow rejects a source that
-advanced after the caller selected it before checkout or publishing. Its run
-name is `Publish npm package (<request_id>)`, allowing the release owner to
-bind the native run to that request and source. Tag-triggered publication keeps
-its existing source/version guards. The workflow runs
-`scripts/check-release-custody.cjs` before publishing. It reads the clean candidate's exact Git commit and queries
-the matching remote `mcp-v<package version>` tag, including its peeled target.
-An absent tag or a tag at the same source is allowed; conflicting, malformed or
-unreadable tag custody blocks publication. `test/release-custody.mjs` covers the
-guard, including the candidate manifest against a captured conflicting tag.
-The existing registry check separately refuses an already published version.
-
-The same workflow uses npm trusted publishing, with its Node/npm toolchain
-pinned to a compatible release. npm package settings must authorize the exact
-`varity-labs/varity-mcp` workflow `publish-npm.yml` and allow direct publishing;
-there is no GitHub environment on this job. The publish process strips npm
-token/config environment variables, rejects project `.npmrc` residue and uses
-distinct empty user/global configs, so a failed OIDC exchange cannot fall back
-to an old write token. The native publish must succeed; a saved trust setting
-or a dry-run does not establish authorization or publication. Public-source
-provenance and the downstream MCP Registry's separate OIDC identity remain
-part of release verification.
+Publication is a hand publish by the release owner; no workflow publishes the
+package, so a tag push publishes nothing. From a fresh clone checked out at the
+exact release commit: `node scripts/check-release-custody.cjs`, then
+`npm ci --no-audit --no-fund && npm run build && npm test && npm pack --dry-run`,
+then `npm publish`, then `mcp-publisher` for the MCP Registry.
+`scripts/check-release-custody.cjs` reads the clean candidate's exact Git commit
+and queries the matching remote `mcp-v<package version>` tag, including its
+peeled target. An absent tag or a tag at the same source is allowed;
+conflicting, malformed or unreadable tag custody refuses publication.
+`test/release-custody.mjs` covers the guard, and `test/server-json.mjs` keeps
+`server.json` versions equal to the package version. A hand publish carries no
+npm provenance, so the GitHub Release records the npm `dist.integrity`.
 
 High-value coverage includes CLI environment normalization, stderr-only logging,
 public URL liveness classification, log completeness/freshness, lifecycle

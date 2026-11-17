@@ -9,7 +9,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 process.env["VARITY_GATEWAY_URL"] = "https://gw.test";
-process.env["VARITY_API_KEY"] = "api-key";
+process.env["VARITY_DEPLOY_KEY"] = "api-key";
 
 const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
 const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
@@ -174,8 +174,8 @@ test("the cost calculator lists its profiles and estimates before sign-in", asyn
   const cost = tools.find((t) => t.name === "varity_cost_calculator");
   assert.match(JSON.stringify(cost), /static-site/);
 
-  const saved = process.env["VARITY_API_KEY"];
-  delete process.env["VARITY_API_KEY"];
+  const saved = process.env["VARITY_DEPLOY_KEY"];
+  delete process.env["VARITY_DEPLOY_KEY"];
   try {
     const { out, calls } = await call({
       "/api/pricing": [200, { profile: "static-site", currency: "USD", monthly_max_usd: 0, billing_model: "free_static" }],
@@ -185,7 +185,7 @@ test("the cost calculator lists its profiles and estimates before sign-in", asyn
     assert.equal(calls[0].url, "https://gw.test/api/pricing?profile=static");
     assert.equal(calls[0].init.headers.Authorization, undefined, "a pre-deploy estimate needs no key");
   } finally {
-    process.env["VARITY_API_KEY"] = saved;
+    process.env["VARITY_DEPLOY_KEY"] = saved;
   }
 
   const unknown = await call({

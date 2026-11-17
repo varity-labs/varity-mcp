@@ -300,7 +300,7 @@ export function registerCreateRepoTool(server: McpServer): void {
         "Create a new GitHub repository and push your local project to it. " +
         "Pass the 'path' parameter with the local project directory. This creates an empty repo " +
         "and pushes your actual code to GitHub. " +
-        "The GitHub URL is required for dynamic deployments, so call this before varity_deploy when you have code locally but no repo yet. " +
+        "varity_deploy builds from a Git repository URL (or takes a prebuilt image), so call this before varity_deploy when you have code locally but no repository yet. " +
         "Requires GitHub CLI authentication or a GITHUB_TOKEN/GH_TOKEN environment variable with repository access.",
       inputSchema: {
         name: z
@@ -316,13 +316,11 @@ export function registerCreateRepoTool(server: McpServer): void {
           .describe(
             "Absolute path to the local project directory to push to GitHub " +
             "(e.g. '/home/user/my-app'). Pushes the actual project code. " +
-            "Required for apps that will use varity_deploy with dynamic hosting."
+            "Pass its returned repo_url to varity_deploy."
           ),
         visibility: z.enum(["public", "private"]).default("private").describe("Repository visibility"),
       },
-      annotations: {
-        destructiveHint: true,
-      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
     async ({ name, description, path: projectPath, visibility }) => {
       // Credentials are read from the MCP host, never accepted in tool arguments.

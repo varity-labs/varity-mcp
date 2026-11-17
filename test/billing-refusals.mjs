@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 process.env["VARITY_GATEWAY_URL"] = "https://gw.test";
-process.env["VARITY_API_KEY"] = "api-key";
+process.env["VARITY_DEPLOY_KEY"] = "api-key";
 
 /** The served `credit_policy` block, verbatim from varity-engineering#225 (2026-10-18, incl. the enterprise and static amendments). */
 const CREDIT_POLICY = {

@@ -5,25 +5,40 @@ import { homedir } from "node:os";
 const VARITYKIT_CONFIG_DIR = join(homedir(), ".varitykit");
 const VARITYKIT_CONFIG_FILE = join(VARITYKIT_CONFIG_DIR, "config.json");
 
-/**
- * Get the API key (deploy key) from config file or environment variable.
- * The CLI stores config as JSON: { "deploy_key": "..." }
- */
-export async function getApiKey(): Promise<string | null> {
-  // Check env var first
-  const envKey = process.env["VARITY_API_KEY"] ?? process.env["VARITY_DEPLOY_KEY"];
-  if (envKey) return envKey;
+/** Where the deploy key came from; reported by varity_doctor, never the key itself. */
+export type DeployKeySource = "env:VARITY_DEPLOY_KEY" | "config:~/.varitykit/config.json" | "env:VARITY_API_KEY";
 
-  // Check config file (JSON format, matches CLI's auth.py)
+/**
+ * Resolve the deploy key in this order:
+ *   1. env `VARITY_DEPLOY_KEY` (the override)
+ *   2. the CLI sign-in file `~/.varitykit/config.json`: `deploy_key`, then `api_key`
+ *   3. env `VARITY_API_KEY` (legacy alias)
+ * WHY: the public AI Gateway docs use `VARITY_API_KEY` for the inference key,
+ * so an exported inference key read first refused every deploy with 403 even
+ * when a deploy key was configured.
+ */
+export async function resolveDeployKey(): Promise<{ key: string; source: DeployKeySource } | null> {
+  const deployEnv = process.env["VARITY_DEPLOY_KEY"];
+  if (deployEnv) return { key: deployEnv, source: "env:VARITY_DEPLOY_KEY" };
+
   try {
-    const configContent = await readFile(VARITYKIT_CONFIG_FILE, "utf-8");
-    const config = JSON.parse(configContent);
-    return config.deploy_key ?? config.api_key ?? null;
+    const config = JSON.parse(await readFile(VARITYKIT_CONFIG_FILE, "utf-8"));
+    const configKey = config.deploy_key ?? config.api_key;
+    if (typeof configKey === "string" && configKey) {
+      return { key: configKey, source: "config:~/.varitykit/config.json" };
+    }
   } catch {
     // Config file doesn't exist or invalid JSON
   }
 
+  const legacyEnv = process.env["VARITY_API_KEY"];
+  if (legacyEnv) return { key: legacyEnv, source: "env:VARITY_API_KEY" };
   return null;
+}
+
+/** The deploy key from `resolveDeployKey`, or null. */
+export async function getApiKey(): Promise<string | null> {
+  return (await resolveDeployKey())?.key ?? null;
 }
 
 /**

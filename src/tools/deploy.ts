@@ -130,9 +130,7 @@ export function registerDeployTool(server: McpServer): void {
             "Requires volume_size."
           ),
       },
-      annotations: {
-        destructiveHint: true, // Deploys real infrastructure
-      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
     async ({ path, repo_url, app_name, image, port, volume_size, volume_path }) => {
       if (repo_url && image) {

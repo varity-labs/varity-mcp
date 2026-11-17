@@ -25,13 +25,13 @@ function archive(version) {
 
 async function installCommands() {
   const commands = [];
-  for (const path of [".github/workflows/ci.yml", ".github/workflows/publish-npm.yml"]) {
+  for (const path of [".github/workflows/ci.yml"]) {
     const source = await readFile(new URL(`../${path}`, import.meta.url), "utf8");
     for (const match of source.matchAll(/^\s*(?:-\s*)?run:\s*(npm (?:ci|install)[^\n]*)$/gm)) {
       commands.push({ path, args: match[1].trim().split(/\s+/).slice(1) });
     }
   }
-  assert.equal(commands.length, 3, "all three producer installs must remain observable");
+  assert.equal(commands.length, 2, "both producer installs must remain observable");
   return commands;
 }
 

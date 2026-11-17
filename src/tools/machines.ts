@@ -138,7 +138,7 @@ export function registerMachinesTools(server: McpServer): void {
   server.registerTool(
     "varity_machines_list",
     {
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
       title: "List Machines",
       description:
         "List the developer's Varity CPU and GPU virtual machines with their state, SSH access and billing. " +
@@ -171,6 +171,7 @@ export function registerMachinesTools(server: McpServer): void {
     "varity_machines_create",
     {
       title: "Create a Machine",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
       description:
         "Create a Varity CPU or GPU virtual machine the developer can SSH into. Requires the developer's own SSH PUBLIC key " +
         "(e.g. the contents of ~/.ssh/id_ed25519.pub); never pass a private key. Get profile_id and os_image from " +
@@ -213,7 +214,7 @@ export function registerMachinesTools(server: McpServer): void {
   server.registerTool(
     "varity_machines_delete",
     {
-      annotations: { destructiveHint: true },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
       title: "Delete a Machine and Stop Its Billing",
       description:
         "Delete a Varity CPU or GPU virtual machine by id and wait (up to 10 minutes) until its billing reads stopped.",

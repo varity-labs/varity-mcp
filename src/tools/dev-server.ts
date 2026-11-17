@@ -70,6 +70,7 @@ export function registerDevServerTool(server: McpServer): void {
     "varity_dev_server",
     {
       title: "Development Server",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       description:
         "Start, stop, or check the local development server. " +
         "Returns the localhost URL for previewing the app.",
