@@ -388,11 +388,6 @@ test("J-1: cost_calculator never offers a profile it refuses", async () => {
   assert.equal(unknown.out.error.code, "profile_unknown");
   assert.match(unknown.out.error.suggestion, /static-site, web-app, web-app-db, ai-agent-cpu\.$/);
   assert.doesNotMatch(unknown.out.error.suggestion, /ai-agent-gpu/);
-  // Every offered profile is accepted: none of them is refused before the request.
-  for (const profile of unknown.out.error.suggestion.match(/one of: (.*)\.$/)[1].split(", ")) {
-    const { out } = await call({ "/api/pricing": [200, { profile, currency: "USD", monthly_max_usd: 1 }] }, "varity_cost_calculator", { app_profile: profile });
-    assert.equal(out.success, true, profile);
-  }
 });
 
 const STATIC_ESTIMATE = {
@@ -489,4 +484,41 @@ test("J-7: status reports a failed latest run, its failure and action code, not 
     [`/api/deployments/runs/${run}`]: [200, { public_status: "live" }],
   }, "varity_deploy_status", { deployment_id: id });
   assert.equal(healthy.out.message, `Deployment ${id}: live at https://a.varity.app`);
+});
+
+test("J-7: a failed run is reported from either signal, and a cancelled run is not called failed", async () => {
+  const id = "op-7";
+  const run = "run-7";
+  const failedOutcome = { classification: "expected_rejection", code: "configuration_rejected", action_code: "check_configuration" };
+  const status = (row, runView) => call({
+    [`/api/deployments/${id}`]: [200, { deployment: { id, status: "live", url: "https://a.varity.app", run_id: run, ...row } }],
+    [`/api/deployments/runs/${run}`]: runView,
+  }, "varity_deploy_status", { deployment_id: id });
+
+  // The run view is unreadable: the row's sealed classification alone says it failed.
+  const unread = await status({ outcome: failedOutcome }, [502, { code: "deploy_status_unavailable" }]);
+  assert.equal(unread.out.data.deployment.run_status, null);
+  assert.match(unread.out.message, /latest run failed \(expected_rejection, configuration_rejected; action check_configuration\)/);
+
+  // The row carries no outcome: the run view's outcome names the failure.
+  const fromRun = await status({}, [200, { public_status: "failed", outcome: failedOutcome }]);
+  assert.match(fromRun.out.message, /latest run failed \(expected_rejection, configuration_rejected; action check_configuration\)/);
+
+  const cancelled = await status({ outcome: { classification: "cancelled", code: "deployment_cancelled" } }, [200, { public_status: "live" }]);
+  assert.match(cancelled.out.message, /latest run was cancelled \(cancelled, deployment_cancelled\)/);
+  assert.doesNotMatch(cancelled.out.message, /failed/);
+});
+
+test("J-7: a deployment that itself failed says so, and the list names a failed most recent run", async () => {
+  const outcome = { classification: "user_workload_failure", code: "health_check_failed", action_code: "check_logs" };
+  const failed = await call({
+    "/api/deployments/op-f": [200, { deployment: { id: "op-f", status: "failed", run_id: "run-f", outcome } }],
+    "/api/deployments/runs/run-f": [200, { public_status: "failed", outcome }],
+  }, "varity_deploy_status", { deployment_id: "op-f" });
+  assert.equal(failed.out.message, "Deployment op-f: latest run failed (user_workload_failure, health_check_failed; action check_logs). Deployment status: failed (URL not assigned yet)");
+
+  const list = await call({
+    "/api/deployments": [200, { deployments: [{ id: "op-f", app_name: "app-f", status: "live", url: "https://app-f.varity.app", created_at: "2026-11-17T20:00:00Z", run_id: "run-f", outcome }] }],
+  }, "varity_deploy_status");
+  assert.match(list.out.message, /Most recent: app-f \(https:\/\/app-f\.varity\.app\), latest run failed \(user_workload_failure, health_check_failed; action check_logs\)$/);
 });

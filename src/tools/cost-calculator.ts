@@ -85,7 +85,7 @@ export function registerCostCalculatorTool(server: McpServer): void {
       if (!subdomain && app_profile === GPU_CONTAINER_PROFILE) {
         return errorResponse(
           "profile_unavailable",
-          "GPU containers are not offered, so the ai-agent-gpu profile has no estimate.",
+          `GPU containers are not offered, so the ${GPU_CONTAINER_PROFILE} profile has no estimate.`,
           "For a GPU virtual machine, list GPU profiles with varity_machines_list (include_profiles, gpu: true); varity_machines_create quotes the hourly price before creating it."
         );
       }

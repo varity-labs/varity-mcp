@@ -177,8 +177,10 @@ export interface PublicLogLine {
 
 export const PUBLIC_API_GET_TIMEOUT_MS = 60_000;
 
-async function authHeaders(): Promise<Record<string, string>> {
+/** With `optional`, no configured key means an anonymous request instead of NOT_AUTHENTICATED. */
+async function authHeaders(optional = false): Promise<Record<string, string>> {
   const key = await getApiKey();
+  if (!key && optional) return { Accept: "application/json" };
   if (!key) {
     throw new VarityPublicApiError(
       "Not authenticated with Varity.",
@@ -199,6 +201,8 @@ export interface PublicApiRequestOptions {
   idempotencyKey?: string;
   /** A public read (no auth): sent without a key, so it works before sign-in. */
   anonymous?: boolean;
+  /** A public read that carries the key when one is configured, else is anonymous. */
+  keyOptional?: boolean;
 }
 
 /** One HTTP exchange; every failure is a `VarityPublicApiError` carrying the served code. */
@@ -209,7 +213,7 @@ async function sendRequest<T>(
 ): Promise<T> {
   const headers: Record<string, string> = options.anonymous
     ? { Accept: "application/json" }
-    : await authHeaders();
+    : await authHeaders(options.keyOptional);
   headers["User-Agent"] = userAgent();
   if (options.body !== undefined) headers["Content-Type"] = "application/json";
   if (options.idempotencyKey) headers["Idempotency-Key"] = options.idempotencyKey;
@@ -461,5 +465,5 @@ export async function deleteMachine(
  */
 export async function getPublicProfilePricing(profile: string | undefined): Promise<Record<string, unknown>> {
   const qs = profile ? `?profile=${encodeURIComponent(profile)}` : "";
-  return sendRequest<Record<string, unknown>>("GET", `/api/pricing${qs}`, { anonymous: !(await getApiKey()) });
+  return sendRequest<Record<string, unknown>>("GET", `/api/pricing${qs}`, { keyOptional: true });
 }
