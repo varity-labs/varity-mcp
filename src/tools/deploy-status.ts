@@ -70,12 +70,14 @@ type ServedDeployment = PublicDeployment & { run_id?: string | null; outcome?: u
 /** Said wherever a URL would be, while the owner has not assigned one. */
 export const URL_PENDING = "URL not assigned yet";
 
-/**
- * The status and where it serves. A deleted deployment's URL no longer
- * serves (it returns 404), so it is never pointed at.
- */
+/** A deleted deployment's URL no longer serves (it returns 404), so summaries never point at it. */
+function urlRetired(deployment: DeploymentRecord): boolean {
+  return deployment.status === "deleted";
+}
+
+/** The status and where it serves. */
 function servingState(deployment: DeploymentRecord): string {
-  if (deployment.status === "deleted") return deployment.status;
+  if (urlRetired(deployment)) return deployment.status;
   return `${deployment.status}${deployment.url ? ` at ${deployment.url}` : ` (${URL_PENDING})`}`;
 }
 
@@ -245,7 +247,7 @@ export function registerDeployStatusTool(server: McpServer): void {
               ? { pagination_note: `Showing ${limited.length} of ${deployments.length}. Increase "limit" to see more.` }
               : {}),
           },
-          `Found ${deployments.length} deployment(s). Most recent: ${limited[0]!.name} (${limited[0]!.status === "deleted" ? "deleted" : limited[0]!.url ?? URL_PENDING})` +
+          `Found ${deployments.length} deployment(s). Most recent: ${limited[0]!.name} (${urlRetired(limited[0]!) ? limited[0]!.status : limited[0]!.url ?? URL_PENDING})` +
             (recentFailure ? `, ${recentFailure}` : "")
         );
       } catch (err) {

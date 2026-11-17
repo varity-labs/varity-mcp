@@ -536,6 +536,19 @@ test("J-10: the billing_note joins the summary as a full sentence, whatever punc
   assert.doesNotMatch(stopped.out.message, /\.\.$/);
   const padded = await estimate("  Billed $1/month!  ");
   assert.match(padded.out.message, /interface\. Billed \$1\/month!$/);
+  assert.equal(padded.out.data.billing_note, "  Billed $1/month!  ", "the structured note stays as served");
+  const twoSentences = await estimate("You have 3 active static sites. This one is $1/month");
+  assert.match(twoSentences.out.message, /interface\. You have 3 active static sites\. This one is \$1\/month\.$/);
+  const bracketed = await estimate("First 3 sites are free (then $1/month per site.)");
+  assert.match(bracketed.out.message, /per site\.\)$/);
+  const quoted = await estimate('Sites are "free."');
+  assert.match(quoted.out.message, /"free\."$/);
+  const ellipsis = await estimate("More soon\u2026");
+  assert.match(ellipsis.out.message, /More soon\u2026$/);
+  for (const empty of ["", "   "]) {
+    const none = await estimate(empty);
+    assert.match(none.out.message, /current Varity pricing interface\.$/);
+  }
 });
 
 test("J-11: a deleted deployment never points at its retired URL", async () => {
