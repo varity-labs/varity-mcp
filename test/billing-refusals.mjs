@@ -128,7 +128,7 @@ test("an unreadable policy leaves billing errors as the server sent them", async
 test("a profile estimate is USD only, in text and data alike", async () => {
   const out = await costTool([200, { profile: "web-app", monthly_max_usd: 12.29, credit_policy: CREDIT_POLICY }], [500, {}], {});
   assert.equal(out.data.monthly_max_usd, 12.29);
-  assert.match(out.message, /up to \$12\.29\/mo \(USD\)/);
+  assert.match(out.message, /up to \$12\.29\/month \(monthly maximum, USD\)/);
   assert.doesNotMatch(JSON.stringify(out), /credit/i);
 });
 
