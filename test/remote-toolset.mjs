@@ -243,3 +243,57 @@ test("a remote request says transport=streamable_http in the User-Agent", async 
     stub.restore();
   }
 });
+
+test("remote deploy_status never fetches the deployment URL (no server-side probe, SSRF)", async () => {
+  const deployment = { id: "d1", status: "running", public_url: "http://169.254.169.254/latest/meta-data/" };
+  const stub = stubFetch(async (url) => url.startsWith("https://gw.test/api/deployments/")
+    ? { body: { deployment } }
+    : url === "https://gw.test/api/deployments" ? { body: { deployments: [deployment] } } : { body: {} });
+  try {
+    const client = await connect({ toolset: "remote", credentialProvider: async () => "k" });
+    const one = await client.callTool({ name: "varity_deploy_status", arguments: { deployment_id: "d1" } });
+    const list = await client.callTool({ name: "varity_deploy_status", arguments: {} });
+    await client.close();
+    assert.ok(stub.seen.every((call) => call.url.startsWith("https://gw.test/")), JSON.stringify(stub.seen.map((c) => c.url)));
+    assert.equal(parse(one).data.deployment.http_probe, undefined);
+    assert.equal(parse(list).data.deployments[0].http_probe, undefined);
+  } finally {
+    stub.restore();
+  }
+});
+
+test("stdio deploy_status keeps its client-side URL probe", async () => {
+  const deployment = { id: "d1", status: "running", public_url: "https://app.example.test/" };
+  const stub = stubFetch(async (url) => url.startsWith("https://gw.test/api/deployments/") ? { body: { deployment } } : { body: {} });
+  try {
+    const client = await connect({});
+    await client.callTool({ name: "varity_deploy_status", arguments: { deployment_id: "d1" } });
+    await client.close();
+    assert.ok(stub.seen.some((call) => call.url === "https://app.example.test/"));
+  } finally {
+    stub.restore();
+  }
+});
+
+test("(5) with the billing list unreadable or the code unlisted, remote 402/503 text still has no link or purchase verb", async () => {
+  const cases = [
+    { pricing: { status: 500, body: {} }, status: 402, code: "insufficient_credits" },
+    { pricing: { status: 500, body: {} }, status: 402, code: "new_billing_code" },
+    { pricing: { body: { credit_policy: { errorCodes: [] } } }, status: 503, code: "upstream_billing_hold" },
+    { pricing: { status: 500, body: {} }, status: 503, code: "spending_limit_reached" },
+  ];
+  for (const { pricing, status, code } of cases) {
+    const stub = stubFetch(async (url) => url.includes("/api/pricing")
+      ? pricing
+      : { status, body: { code, message: "Add funds at https://developer.store.varity.so/dashboard/billing", action: "Choose a plan at https://x.test/billing" } });
+    try {
+      const client = await connect({ toolset: "remote", credentialProvider: async () => "k" });
+      const result = await client.callTool({ name: "varity_deploy", arguments: { repo_url: "https://github.com/o/r" } });
+      await client.close();
+      assert.equal(parse(result).error.code, code);
+      assert.ok(!PURCHASE.test(result.content[0].text), `${status} ${code}: ${result.content[0].text}`);
+    } finally {
+      stub.restore();
+    }
+  }
+});

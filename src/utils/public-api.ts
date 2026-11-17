@@ -163,9 +163,13 @@ const REMOTE_BILLING_ACTIONS: Readonly<Record<string, string>> = {
   daily_free_limit_reached: "Retry after the daily reset.",
   spending_limit_reached: `${OUTSIDE_CHAT} Retry next month or once the limit changes.`,
   subscription_required: `${OUTSIDE_CHAT} Retry once a plan is active.`,
+  wallet_frozen: "Contact Varity support to restore billing on the account.",
   payment_method_shared: OUTSIDE_CHAT,
+  quote_expired: "Retry the request to get a fresh quote.",
+  billing_unavailable: "Retry in a few minutes.",
 };
-const REMOTE_BILLING_FALLBACK_ACTION = OUTSIDE_CHAT;
+/** A served text a hosted call may not pass on: a link or a purchase step. */
+const PURCHASE_TEXT = /https?:\/\/|\/billing|\b(?:add funds|top up|choose a plan|upgrade|buy|purchase|subscribe)\b/i;
 
 /**
  * The closed billing refusal codes served in `GET /api/pricing`
@@ -190,13 +194,23 @@ export async function getBillingErrorCodes(): Promise<readonly string[] | null> 
 async function withBillingCopy(err: VarityPublicApiError): Promise<VarityPublicApiError> {
   if (err.status !== 402 && err.status !== 503) return err;
   const codes = await getBillingErrorCodes();
-  if (!codes?.includes(err.code)) return err;
-  const copy = Object.hasOwn(BILLING_COPY, err.code) ? BILLING_COPY[err.code] : BILLING_FALLBACK;
-  if (!isRemoteCall()) return new VarityPublicApiError(copy.message, err.code, err.status, copy.action);
-  const remote = Object.hasOwn(BILLING_COPY, err.code) && !copy.action.includes(BILLING_URL)
-    ? copy.action
-    : Object.hasOwn(REMOTE_BILLING_ACTIONS, err.code) ? REMOTE_BILLING_ACTIONS[err.code] : REMOTE_BILLING_FALLBACK_ACTION;
-  return new VarityPublicApiError(copy.message, err.code, err.status, remote);
+  const listed = codes?.includes(err.code) === true;
+  if (!isRemoteCall()) {
+    if (!listed) return err;
+    const copy = Object.hasOwn(BILLING_COPY, err.code) ? BILLING_COPY[err.code] : BILLING_FALLBACK;
+    return new VarityPublicApiError(copy.message, err.code, err.status, copy.action);
+  }
+  // Hosted: explain only. A listed code (or any 402, which is always a payment
+  // refusal, even when the list is unreadable) gets the remote copy; any other
+  // served text that carries a link or purchase step is replaced, never passed on.
+  if (listed || err.status === 402) {
+    const message = Object.hasOwn(BILLING_COPY, err.code) ? BILLING_COPY[err.code].message : BILLING_FALLBACK.message;
+    const action = Object.hasOwn(REMOTE_BILLING_ACTIONS, err.code) ? REMOTE_BILLING_ACTIONS[err.code] : OUTSIDE_CHAT;
+    return new VarityPublicApiError(message, err.code, err.status, action);
+  }
+  const message = PURCHASE_TEXT.test(err.message) ? BILLING_FALLBACK.message : err.message;
+  const action = err.action && PURCHASE_TEXT.test(err.action) ? OUTSIDE_CHAT : err.action;
+  return new VarityPublicApiError(message, err.code, err.status, action, err.served);
 }
 
 /**

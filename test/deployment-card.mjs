@@ -64,8 +64,8 @@ test("the card HTML has no canon §4 term, no em or en dash, no billing link and
   assert.ok(!/\/billing/.test(html), "no billing link");
   assert.ok(!/(?:src|href)\s*=\s*["']?https?:/i.test(html), "no external script, style or link");
   assert.match(html, /ui\/open-link/, "Open goes through the host");
-  assert.match(html, /varity_deploy_status/, "Refresh calls the read-only status tool");
-  assert.ok(!/varity_deploy["'`]/.test(html) && !/varity_deploy_template/.test(html), "the card never deploys");
+  assert.match(html, /name: "varity_show_deployment"/, "Refresh calls the read-only card tool");
+  assert.ok(!/varity_(?:deploy|deploy_template|redeploy|delete_deployment)["'`]/.test(html), "the card never deploys or deletes");
 });
 
 test("varity_show_deployment returns the served card fields as structured content", async () => {
@@ -115,4 +115,124 @@ test("the stdio toolset does not gain the card", async () => {
   const { tools } = await client.listTools();
   await client.close();
   assert.ok(!tools.some((tool) => tool.name === "varity_show_deployment"));
+});
+
+// The card's inline script runs in a minimal fake frame: postMessage
+// custody (parent-only sender, pinned host origin) and the Open URL rule.
+const vm = await import("node:vm");
+const { DEPLOYMENT_CARD_HTML } = await import("../dist/apps/deployment-card-html.js");
+
+function cardFrame() {
+  const sent = [];
+  const parent = { postMessage: (message, target) => sent.push({ message, target }) };
+  const elements = new Map();
+  const element = (id) => {
+    if (!elements.has(id)) {
+      const listeners = {};
+      elements.set(id, { textContent: "", hidden: false, disabled: false, className: "",
+        addEventListener: (type, fn) => { listeners[type] = fn; }, click: () => listeners.click?.() });
+    }
+    return elements.get(id);
+  };
+  const windowListeners = [];
+  const window = { parent, addEventListener: (type, fn) => { if (type === "message") windowListeners.push(fn); } };
+  const document = { getElementById: element, querySelectorAll: () => [] };
+  const script = DEPLOYMENT_CARD_HTML.match(/<script>([\s\S]*)<\/script>/)[1];
+  vm.runInNewContext(script, { window, document, URL, Promise, JSON, String });
+  const dispatch = (data, { source = parent, origin = "https://host.example" } = {}) =>
+    windowListeners.forEach((fn) => fn({ data, source, origin }));
+  const flush = () => new Promise((resolve) => setImmediate(resolve));
+  return { sent, element, dispatch, flush, parent };
+}
+
+const CARD_RESULT = (url) => ({
+  jsonrpc: "2.0", method: "ui/notifications/tool-result",
+  params: { structuredContent: { id: "op_1", app_name: "shop", status: "running", url, monthly_price_usd: "7.00", billing_model: "fixed_monthly", failure: null } },
+});
+
+async function initialized(origin = "https://host.example") {
+  const frame = cardFrame();
+  const init = frame.sent[0].message;
+  assert.equal(init.method, "ui/initialize");
+  assert.equal(frame.sent[0].target, "*", "the host origin is unknown before it answers");
+  frame.dispatch({ jsonrpc: "2.0", id: init.id, result: {} }, { origin });
+  await frame.flush();
+  return frame;
+}
+
+test("card: messages from any sender other than the parent frame are dropped", async () => {
+  const frame = cardFrame();
+  const init = frame.sent[0].message;
+  frame.dispatch({ jsonrpc: "2.0", id: init.id, result: {} }, { source: {}, origin: "https://evil.example" });
+  await frame.flush();
+  assert.equal(frame.sent.length, 1, "a non-parent answer does not complete initialize");
+  const ok = await initialized();
+  ok.dispatch(CARD_RESULT("https://shop.varity.app"), { source: {} });
+  assert.equal(ok.element("name").textContent, "", "a non-parent tool result is not rendered");
+});
+
+test("card: the host origin from ui/initialize is pinned; other origins are dropped", async () => {
+  const frame = await initialized("https://host.example");
+  assert.equal(frame.sent[1].message.method, "ui/notifications/initialized");
+  assert.equal(frame.sent[1].target, "https://host.example", "later messages target the pinned origin");
+  frame.dispatch(CARD_RESULT("https://evil.example"), { origin: "https://other.example" });
+  assert.equal(frame.element("name").textContent, "", "another origin is dropped");
+  frame.dispatch(CARD_RESULT("https://shop.varity.app"), { origin: "https://host.example" });
+  assert.equal(frame.element("name").textContent, "shop");
+});
+
+test("card: before initialize completes, only the initialize answer is accepted", async () => {
+  const frame = cardFrame();
+  frame.dispatch(CARD_RESULT("https://shop.varity.app"), { origin: "https://evil.example" });
+  assert.equal(frame.element("name").textContent, "", "an unsolicited first message cannot pin the origin");
+});
+
+test("card: Open sends only http(s) URLs to ui/open-link", async () => {
+  for (const [url, allowed] of [
+    ["https://shop.varity.app/", true], ["http://shop.varity.app/", true],
+    ["javascript:alert(1)", false], ["data:text/html,x", false], ["file:///etc/passwd", false], ["not a url", false],
+  ]) {
+    const frame = await initialized();
+    frame.dispatch(CARD_RESULT(url));
+    const before = frame.sent.length;
+    frame.element("open").click();
+    const opened = frame.sent.slice(before).filter((entry) => entry.message.method === "ui/open-link");
+    assert.equal(opened.length, allowed ? 1 : 0, url);
+    assert.equal(frame.element("open").disabled, !allowed, url);
+    if (allowed) assert.equal(opened[0].message.params.url, url);
+  }
+});
+
+test("card: Refresh re-renders the served failure reason from varity_show_deployment", async () => {
+  const frame = await initialized();
+  frame.dispatch(CARD_RESULT("https://shop.varity.app"));
+  frame.element("refresh").click();
+  const call = frame.sent.at(-1).message;
+  assert.equal(call.method, "tools/call");
+  assert.deepEqual(JSON.parse(JSON.stringify(call.params)), { name: "varity_show_deployment", arguments: { deployment_id: "op_1" } });
+  frame.dispatch({ jsonrpc: "2.0", id: call.id, result: { structuredContent: {
+    id: "op_1", app_name: "shop", status: "failed", url: null, monthly_price_usd: "7.00", billing_model: "fixed_monthly",
+    failure: "latest run failed (expected_rejection, configuration_rejected; action check_configuration)",
+  } } });
+  await frame.flush();
+  assert.equal(frame.element("failure").textContent, "latest run failed (expected_rejection, configuration_rejected; action check_configuration)");
+  assert.equal(frame.element("failure").hidden, false);
+});
+
+test("varity_show_deployment states the run view's failure reason like varity_deploy_status", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url) => ({
+    ok: true, status: 200,
+    json: async () => String(url).includes("/runs/")
+      ? { public_status: "failed", outcome: { classification: "expected_rejection", code: "configuration_rejected", action_code: "check_configuration" } }
+      : { deployment: { id: "dep_1", app_name: "shop", status: "failed", run_id: "run_1" } },
+  });
+  try {
+    const client = await connect({ toolset: "remote", credentialProvider: async () => "k" });
+    const result = await client.callTool({ name: "varity_show_deployment", arguments: { deployment_id: "shop" } });
+    await client.close();
+    assert.equal(result.structuredContent.failure, "latest run failed (expected_rejection, configuration_rejected; action check_configuration)");
+  } finally {
+    globalThis.fetch = original;
+  }
 });

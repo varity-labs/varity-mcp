@@ -27,7 +27,8 @@ export function registerRemoteToolset(server: McpServer): void {
   registerBalanceTool(server);
   registerTemplateTools(server);
   registerDeployTool(server);
-  registerDeployStatusTool(server);
+  // No server-side URL probe remotely (it would fetch arbitrary URLs from Varity).
+  registerDeployStatusTool(server, { probe: false });
   registerDeployLogsTool(server);
   registerRedeployTool(server);
   registerDeleteDeploymentTool(server);

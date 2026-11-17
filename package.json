@@ -10,7 +10,8 @@
   "main": "./dist/index.js",
   "exports": {
     ".": "./dist/index.js",
-    "./server": "./dist/server.js"
+    "./server": "./dist/server.js",
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",

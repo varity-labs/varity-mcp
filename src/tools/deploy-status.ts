@@ -117,7 +117,7 @@ export function normalizeDeployment(item: ServedDeployment): DeploymentRecord {
  * Read the latest run's `public_status` and sealed `outcome` so a failed run
  * shows why, not only `failed`. Unreadable is `null` (unobserved).
  */
-async function readRun(runId: string | null): Promise<{ status: string | null; outcome: unknown }> {
+export async function readRun(runId: string | null): Promise<{ status: string | null; outcome: unknown }> {
   if (!runId) return { status: null, outcome: null };
   try {
     const run = await getRun(runId);
@@ -163,7 +163,14 @@ function apiFailure(err: unknown, action: string) {
   return errorResponse("VARITY_API_ERROR", "Varity API request failed.", action);
 }
 
-export function registerDeployStatusTool(server: McpServer): void {
+/**
+ * `probe` (stdio only) adds a client-side HTTP reachability probe of each
+ * deployment URL. The remote toolset registers without it: on the hosted
+ * server that fetch would run from Varity's infrastructure against any URL a
+ * deployment row names, so remotely the served status is the only liveness.
+ */
+export function registerDeployStatusTool(server: McpServer, options: { probe: boolean } = { probe: true }): void {
+  const probe = options.probe ? applyLiveness : async () => {};
   server.registerTool(
     "varity_deploy_status",
     {
@@ -171,7 +178,9 @@ export function registerDeployStatusTool(server: McpServer): void {
       description:
         "List deployments or get status of a specific deployment. " +
         "Shows the owner-scoped fields returned by the Varity public interface, including URL, status, runtime when available, and creation time. " +
-        "A separate HTTP probe records reachability without overwriting the owner's lifecycle status; authenticated, POST-only, or transiently unavailable apps may return a non-2xx probe. " +
+        (options.probe
+          ? "A separate HTTP probe records reachability without overwriting the owner's lifecycle status; authenticated, POST-only, or transiently unavailable apps may return a non-2xx probe. "
+          : "Liveness is the platform's served status. ") +
         "Use this when a developer asks about their deployments, wants to check status, " +
         "or needs to find a deployment URL.",
       inputSchema: {
@@ -207,7 +216,7 @@ export function registerDeployStatusTool(server: McpServer): void {
           const deployment = normalizeDeployment(await getDeployment(deployment_id));
           const run = await readRun(deployment.run_id);
           deployment.run_status = run.status;
-          await applyLiveness([deployment]);
+          await probe([deployment]);
 
           const state = servingState(deployment);
           const failure = latestRunFailure(deployment, run.outcome);
@@ -232,7 +241,7 @@ export function registerDeployStatusTool(server: McpServer): void {
         const limited = deployments.slice(0, maxResults);
         const hasMore = deployments.length > maxResults;
 
-        await applyLiveness(limited);
+        await probe(limited);
         const recentFailure = latestRunFailure(limited[0]!);
 
         return successResponse(

@@ -4,9 +4,12 @@
  * font or image, so its CSP allows no origin. It talks to the host only
  * through the MCP Apps postMessage bridge: `ui/initialize`, the
  * `ui/notifications/tool-result` of `varity_show_deployment`, `tools/call`
- * of the read-only `varity_deploy_status` for Refresh, and `ui/open-link`
+ * of the read-only `varity_show_deployment` for Refresh (served status and
+ * failure reason), and `ui/open-link`
  * for Open (the host asks the user to confirm). It never deploys and shows
- * no checkout or account link.
+ * no checkout or account link. It accepts messages only from its parent
+ * frame, pins the host origin from the `ui/initialize` response and drops
+ * any other origin after that, and opens only http(s) URLs.
  */
 export const DEPLOYMENT_CARD_HTML = `<!doctype html>
 <html lang="en">
@@ -43,8 +46,15 @@ export const DEPLOYMENT_CARD_HTML = `<!doctype html>
 </div>
 <script>
 (function () {
-  var nextId = 1, pending = {}, current = null;
-  function send(message) { window.parent.postMessage(message, "*"); }
+  var nextId = 1, pending = {}, current = null, initId = null, hostOrigin = null;
+  // The host origin is unknown until it answers ui/initialize; then it is pinned.
+  function send(message) { window.parent.postMessage(message, hostOrigin || "*"); }
+  function safeUrl(value) {
+    try {
+      var url = new URL(String(value));
+      return url.protocol === "https:" || url.protocol === "http:" ? url.href : null;
+    } catch (error) { return null; }
+  }
   function request(method, params) {
     var id = nextId++;
     send({ jsonrpc: "2.0", id: id, method: method, params: params || {} });
@@ -68,10 +78,18 @@ export const DEPLOYMENT_CARD_HTML = `<!doctype html>
     failure.hidden = !card.failure && !FAILED[status];
     failure.textContent = card.failure || (FAILED[status] ? "Status: " + status : "");
     text("url", card.url || "The URL appears once the deployment is live.");
-    document.getElementById("open").disabled = !card.url;
+    document.getElementById("open").disabled = !safeUrl(card.url);
     document.getElementById("refresh").disabled = !card.id;
   }
   window.addEventListener("message", function (event) {
+    if (event.source !== window.parent) return;
+    if (hostOrigin === null) {
+      // Before the host answers ui/initialize, only that answer is accepted; its origin is pinned.
+      if (!event.data || event.data.id !== initId || initId === null) return;
+      hostOrigin = event.origin;
+    } else if (event.origin !== hostOrigin) {
+      return;
+    }
     var message = event.data;
     if (!message || message.jsonrpc !== "2.0") return;
     if (message.id !== undefined && pending[message.id]) {
@@ -83,20 +101,16 @@ export const DEPLOYMENT_CARD_HTML = `<!doctype html>
     if (message.method === "ui/notifications/tool-result" && message.params) render(message.params.structuredContent);
   });
   document.getElementById("open").addEventListener("click", function () {
-    if (current && current.url) request("ui/open-link", { url: current.url });
+    var url = current && safeUrl(current.url);
+    if (url) request("ui/open-link", { url: url });
   });
   document.getElementById("refresh").addEventListener("click", function () {
     if (!current || !current.id) return;
-    request("tools/call", { name: "varity_deploy_status", arguments: { deployment_id: current.id } }).then(function (result) {
-      var body = JSON.parse(result.content[0].text);
-      var deployment = body.data && body.data.deployment;
-      if (!deployment) return;
-      render({
-        id: current.id, app_name: current.app_name, monthly_price_usd: current.monthly_price_usd, billing_model: current.billing_model,
-        status: deployment.status, url: deployment.status === "deleted" ? null : (deployment.url || null), failure: current.failure
-      });
+    request("tools/call", { name: "varity_show_deployment", arguments: { deployment_id: current.id } }).then(function (result) {
+      if (result && !result.isError && result.structuredContent) render(result.structuredContent);
     }).catch(function () { text("failure", "Refresh failed. Try again."); document.getElementById("failure").hidden = false; });
   });
+  initId = nextId;
   request("ui/initialize", {
     protocolVersion: "2026-01-26",
     appInfo: { name: "varity-deployment-card", version: "1" },
