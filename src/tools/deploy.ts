@@ -74,7 +74,10 @@ export function registerDeployTool(server: McpServer): void {
         "The control plane detects the framework, selects hosting, builds, and manages lifecycle state. " +
         "Use this when a developer wants to deploy, publish, ship, or make their app live. " +
         "If the developer wants to deploy a certified template rather than their own code, " +
-        "use varity_deploy_template instead. To stop a deployment and its billing, use varity_delete_deployment.",
+        "use varity_deploy_template instead. To ship new code for an app that is already deployed, push it and call " +
+        "varity_deploy again with the same app_name: the same owner and workload shape updates that app in place at " +
+        "the latest commit (varity_redeploy does not pick up new commits). " +
+        "To stop a deployment and its billing, use varity_delete_deployment.",
       inputSchema: {
         path: z
           .string()

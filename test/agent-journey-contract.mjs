@@ -250,3 +250,21 @@ test("the README license badge does not claim plain MIT", () => {
   const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
   assert.doesNotMatch(readme, /License: MIT|License-MIT/);
 });
+
+test("redeploy restarts the last release; deploying again with the same app_name ships new code", async () => {
+  // deploy-api restart reconstructs the active release verbatim (sealed commit_sha);
+  // a create with the same owner, name and workload shape advances that deployment
+  // at the resolved HEAD (evidence phase2/a-plugin/23-redeploy-vs-deploy-source.md).
+  const client = await connect();
+  const { tools } = await client.listTools();
+  const { messages } = await client.getPrompt({ name: "deploy", arguments: {} });
+  await client.close();
+  const describe = (name) => tools.find((t) => t.name === name).description;
+  assert.match(describe("varity_redeploy"), /last successful release/);
+  assert.match(describe("varity_redeploy"), /saved commit/);
+  assert.match(describe("varity_redeploy"), /does not pick up new commits/);
+  for (const text of [describe("varity_deploy"), messages[0].content.text]) {
+    assert.match(text, /same app_name/);
+    assert.match(text, /in place/);
+  }
+});
