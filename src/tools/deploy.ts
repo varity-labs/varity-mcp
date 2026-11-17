@@ -8,7 +8,7 @@ import { lifecycleAcceptance } from "../utils/lifecycle-acceptance.js";
 
 /**
  * `varity_deploy` → `POST /api/deployments` through the one public-API client
- * (no `varitykit` subprocess). The body is the same public create contract
+ * (no CLI subprocess). The body is the same public create contract
  * the CLI sends (`app_name`, `repo_url` | `image`, `port`, `volume_*`); the
  * control plane owns framework detection, hosting, build and lifecycle. The
  * MCP only names the source: an explicit repo/image, else the project's

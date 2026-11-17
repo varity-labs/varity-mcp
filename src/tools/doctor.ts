@@ -34,7 +34,7 @@ export function classifyReadiness(checks: Check[]): {
 }
 
 const SIGN_IN_FIX =
-  "Set VARITY_DEPLOY_KEY in the MCP server environment, or run `varitykit auth login` in a trusted terminal.";
+  "Set VARITY_DEPLOY_KEY in the MCP server environment, or run `varitykit auth login` in a trusted terminal (it saves the key to ~/.varitykit/config.json).";
 
 export async function verifyAuthentication(
   apiKey: string | null,

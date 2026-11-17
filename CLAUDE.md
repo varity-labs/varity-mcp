@@ -27,19 +27,21 @@ refs, CI receipts, and fresh live evidence own those facts.
 
 - The published package serves MCP clients over stdio only. Hosted MCP, its
   OAuth adapter, and its container release lane are retired and absent here.
-- Deployment and machine reads and mutations (deploy, delete, redeploy, logs,
-  status, runs, machines) and pricing reads use the one owner-scoped public
-  Varity client in `src/utils/public-api.ts`.
-- Template operations, login, and migration use the `varitykit` CLI adapter in
-  `src/utils/cli-bridge.ts`.
+- Deployment, template and machine reads and mutations (deploy, template
+  catalog and deploy, delete, redeploy, logs, status, runs, machines) and
+  pricing reads use the one owner-scoped public Varity client in
+  `src/utils/public-api.ts`.
+- Only the migration preview runs the `varitykit` CLI, through
+  `src/utils/cli-bridge.ts`. Sign-in reads the deploy key from
+  `VARITY_DEPLOY_KEY`, the file `varitykit auth login` writes, or the legacy
+  `VARITY_API_KEY` (`src/utils/config.ts`); it runs no CLI.
 - Several developer tools operate directly on the MCP host's filesystem or
   processes; in stdio mode this is the invoking user's machine.
 - The MCP never calls provider, static-storage, db-proxy, credential-proxy, or
   billing internals directly.
 
-The older statement that every deploy operation shells to `varitykit` is too
-broad. Preserve both real adapter seams unless a separately reviewed change
-migrates callers and proves behavior through their interfaces.
+Keep new Cloud calls on the public client; the CLI bridge exists for the
+local migration preview only.
 
 ## Commands
 
@@ -50,9 +52,9 @@ npm run check:architecture
 npm start
 ```
 
-Publishing is a founder/release action. Keep `package.json` and
-`src/server.ts` versions synchronized, then use the repository's publish
-guard. Do not publish from an architecture-only branch.
+Publishing is a founder hand publish; no workflow publishes the package. Keep
+`package.json` and `server.json` versions equal (`test/server-json.mjs`). The
+release sequence is in [ARCHITECTURE.md](ARCHITECTURE.md#verification).
 
 ## Change rules
 

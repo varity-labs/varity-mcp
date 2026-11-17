@@ -6,7 +6,7 @@ const execFileAsync = promisify(execFile);
 const isWindows = process.platform === "win32";
 
 /**
- * Terminal escape sequences the varitykit CLI can emit.
+ * Terminal escape sequences a local CLI can emit.
  *
  * This is the union of the three copies that previously lived in deploy.ts,
  * deploy-logs.ts and migrate.ts. Two of them shared one pattern; migrate.ts had
@@ -29,7 +29,8 @@ export interface CLIResult {
 
 /**
  * Execute a CLI command and return structured output.
- * Used to bridge MCP tool calls to existing varitykit CLI.
+ * Used by the local tools (build, install, browser, doctor probes) and the
+ * migration preview.
  *
  * On Windows, routes through cmd.exe /c to resolve .cmd/.bat wrappers
  * (npm, npx, pip, etc. are .cmd files that execFile cannot find directly).
@@ -88,7 +89,7 @@ export async function isCLIAvailable(command: string): Promise<boolean> {
 }
 
 /**
- * Execute `varitykit` CLI command.
+ * Run `varitykit` for the migration preview, its only caller.
  *
  * On Windows, pip installs varitykit to %APPDATA%\Python\Scripts which is
  * NOT always in the default PATH. If `varitykit` isn't found (ENOENT), we

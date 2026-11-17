@@ -25,7 +25,13 @@ async function persistPortToConfig(projectPath: string, port: number): Promise<v
   }
 }
 
-const SERVERS_FILE = join(homedir(), ".varitykit", "dev-servers.json");
+/**
+ * This MCP's own registry of the dev servers it started. It lives in the
+ * directory of the CLI sign-in file so existing installs keep their entries;
+ * nothing else reads or writes it.
+ */
+const REGISTRY_DIR = join(homedir(), ".varitykit");
+const SERVERS_FILE = join(REGISTRY_DIR, "dev-servers.json");
 
 /** Track running dev servers by resolved project path. */
 const runningServers = new Map<
@@ -40,7 +46,7 @@ async function loadPersistedServers(): Promise<Record<string, PersistedServer>> 
 }
 
 async function savePersistedServers(data: Record<string, PersistedServer>): Promise<void> {
-  await mkdir(join(homedir(), ".varitykit"), { recursive: true });
+  await mkdir(REGISTRY_DIR, { recursive: true });
   await writeFile(SERVERS_FILE, JSON.stringify(data, null, 2));
 }
 

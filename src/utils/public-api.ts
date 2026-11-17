@@ -3,9 +3,8 @@
  *
  * Every read and every lifecycle mutation (deployments and CPU machines) goes
  * through `publicApiRequest`, so auth (the deploy key resolved by
- * `getApiKey`), the User-Agent, the timeout and error shape exist once. WHY: mutations used to shell to the `varitykit` CLI, which read a
- * different key and tagged every MCP deploy as `cli` (evidence p2-cli-mcp D10,
- * D11). The gateway attributes a create by its body `source` field
+ * `getApiKey`), the User-Agent, the timeout and error shape exist once. The
+ * gateway attributes a create by its body `source` field
  * (`deploymentOperationSurfaceForCreate`), so `createDeployment` sets
  * `source: "mcp"`.
  */
@@ -61,7 +60,7 @@ const BILLING_URL = `${INFRASTRUCTURE.DASHBOARD}/billing`;
 export const DEPLOY_KEY_URL = `${INFRASTRUCTURE.DASHBOARD}/settings?tab=api-keys`;
 const DEPLOY_KEY_ACTION =
   `Create a new deploy key at ${DEPLOY_KEY_URL}, set it as VARITY_DEPLOY_KEY in the MCP server environment ` +
-  "(or run `varitykit auth login` in a trusted terminal), then call varity_doctor.";
+  "(or run `varitykit auth login` in a trusted terminal; it saves the key to ~/.varitykit/config.json), then call varity_doctor.";
 
 /**
  * MCP copy for billing refusals, keyed by the closed codes the owner serves in
