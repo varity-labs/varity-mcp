@@ -91,7 +91,7 @@ test("template list and detail read the public API without a child process", asy
   const { out, spawned } = await callTool({ "GET /api/templates/demo": [[200, { template: TEMPLATE }]] }, "varity_template_info", { template: "demo" });
   assert.equal(spawned, false);
   assert.equal(out.success, true);
-  assert.match(out.message, /Pricing: unavailable/);
+  assert.match(out.message, /Pricing: price unavailable/);
 });
 
 test("template info shows the catalog price when served", async () => {
