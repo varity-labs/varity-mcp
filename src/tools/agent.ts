@@ -13,7 +13,7 @@ import { lifecycleAcceptance } from "../utils/lifecycle-acceptance.js";
 /**
  * Template tools are a thin projection of the gateway-owned catalog through
  * the one public-API client: `GET /api/templates`, `GET /api/templates/:id`
- * and `POST /api/templates/:id/deploy` (no varitykit subprocess).
+ * and `POST /api/templates/:id/deploy` (no CLI subprocess).
  */
 
 function catalogError(error: unknown, id?: string) {
@@ -95,7 +95,8 @@ function hardwareLabel(template: TemplateMeta): string {
 }
 
 function summarizeTemplate(template: TemplateMeta): string {
-  const required = requiredEnvOf(template).length ? requiredEnvOf(template).join(", ") : "none";
+  const requiredEnv = requiredEnvOf(template);
+  const required = requiredEnv.length ? requiredEnv.join(", ") : "none";
   const access = template.private ? "private" : "public";
   return `${template.id} (${template.name ?? template.id}), ${access}, ${hardwareLabel(template)}. ${template.description ?? ""} Required env: ${required}.`;
 }

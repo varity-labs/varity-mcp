@@ -23,7 +23,7 @@ export async function resolveDeployKey(): Promise<{ key: string; source: DeployK
 
   try {
     const config = JSON.parse(await readFile(VARITYKIT_CONFIG_FILE, "utf-8"));
-    const configKey = config.deploy_key ?? config.api_key;
+    const configKey = config.deploy_key || config.api_key;
     if (typeof configKey === "string" && configKey) {
       return { key: configKey, source: "config:~/.varitykit/config.json" };
     }

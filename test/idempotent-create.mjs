@@ -185,3 +185,13 @@ test("any other failure is not resent", async () => {
   const { calls } = await callTool({ "POST /api/deployments": [[502, { code: "bad_gateway" }]] }, "varity_deploy", { repo_url: "https://github.com/me/app" });
   assert.equal(posts(calls, "POST /api/deployments").length, 1);
 });
+
+test("the resend uses the key the 504 names when the gateway serves one", async () => {
+  const { calls } = await callTool({
+    "POST /api/deployments": [[504, { ...UNCONFIRMED[1], idempotency_key: "served-key-12345678" }], ACCEPTED],
+    [RUN_ROUTE]: [[200, { public_status: "deploying" }]],
+  }, "varity_deploy", { repo_url: "https://github.com/me/app" });
+  const sent = posts(calls, "POST /api/deployments");
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1].init.headers["Idempotency-Key"], "served-key-12345678");
+});

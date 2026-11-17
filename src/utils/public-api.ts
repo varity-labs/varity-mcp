@@ -15,7 +15,11 @@ import { getApiKey, INFRASTRUCTURE } from "./config.js";
 
 const PACKAGE_VERSION = (createRequire(import.meta.url)("../../package.json") as { version: string }).version;
 
-/** The MCP client's `initialize` identity, read per request; set once by the server. */
+/**
+ * The MCP client's `initialize` identity, read per request. The stdio process
+ * runs one server, which sets this once; a later server in the same process
+ * replaces it.
+ */
 let clientInfo: () => { name?: string; version?: string } | undefined = () => undefined;
 
 export function setClientInfoProvider(provider: () => { name?: string; version?: string } | undefined): void {
@@ -327,7 +331,8 @@ export interface PublicRunAcceptance {
  * from the request: REGRESSIONS-LEDGER R839). A 504
  * `deploy_acceptance_unconfirmed` means the gateway cannot tell whether the
  * create was accepted; exactly one resend with the same key returns the
- * existing operation and never starts a second one (gateway #857). Any other
+ * existing operation and never starts a second one (gateway #857); the served
+ * `idempotency_key` is used when present. Any other
  * failure, or a second 504, is returned unchanged.
  */
 async function idempotentCreate<T>(path: string, body: unknown, keyPrefix: string): Promise<T> {
@@ -338,7 +343,12 @@ async function idempotentCreate<T>(path: string, body: unknown, keyPrefix: strin
     if (!(err instanceof VarityPublicApiError && err.status === 504 && err.code === "deploy_acceptance_unconfirmed")) {
       throw err;
     }
-    return publicApiRequest<T>("POST", path, { body, idempotencyKey });
+    // The gateway names the key it holds the create under; it equals ours.
+    const served = err.served?.idempotency_key;
+    return publicApiRequest<T>("POST", path, {
+      body,
+      idempotencyKey: typeof served === "string" && served ? served : idempotencyKey,
+    });
   }
 }
 
