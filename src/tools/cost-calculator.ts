@@ -150,7 +150,12 @@ export function registerCostCalculatorTool(server: McpServer): void {
       const price = "monthly_max_usd" in projection
         ? monthlyMaximum(amount)
         : `${usd(amount)}/${unit} (USD)`;
-      const note = typeof data.billing_note === "string" && data.billing_note ? ` ${data.billing_note}` : "";
+      // The served note's words unchanged, trimmed and closed as a sentence
+      // only when it has no terminal punctuation (before any closing quote or
+      // bracket); `data.billing_note` stays exactly as served.
+      const servedNote = typeof data.billing_note === "string" ? data.billing_note.trim() : "";
+      const closed = /[.!?\u2026]["'\u2019\u201D)\]]*$/.test(servedNote);
+      const note = servedNote ? ` ${servedNote}${closed ? "" : "."}` : "";
       const summary = `${String(estimateName)}: ${price} estimate returned by the current Varity pricing interface.${note}`;
 
       return successResponse(

@@ -70,6 +70,17 @@ type ServedDeployment = PublicDeployment & { run_id?: string | null; outcome?: u
 /** Said wherever a URL would be, while the owner has not assigned one. */
 export const URL_PENDING = "URL not assigned yet";
 
+/** A deleted deployment's URL no longer serves (it returns 404), so summaries never point at it. */
+function urlRetired(deployment: DeploymentRecord): boolean {
+  return deployment.status === "deleted";
+}
+
+/** The status and where it serves. */
+function servingState(deployment: DeploymentRecord): string {
+  if (urlRetired(deployment)) return deployment.status;
+  return `${deployment.status}${deployment.url ? ` at ${deployment.url}` : ` (${URL_PENDING})`}`;
+}
+
 /**
  * The served `billing` block with no false zero: `accrued_this_month_usd` is
  * trusted only while `billing.state` is observed. With `state: null` the owner
@@ -198,7 +209,7 @@ export function registerDeployStatusTool(server: McpServer): void {
           deployment.run_status = run.status;
           await applyLiveness([deployment]);
 
-          const state = `${deployment.status}${deployment.url ? ` at ${deployment.url}` : ` (${URL_PENDING})`}`;
+          const state = servingState(deployment);
           const failure = latestRunFailure(deployment, run.outcome);
           return successResponse(
             { deployment, source: "varity_public_api:/api/deployments" },
@@ -236,7 +247,7 @@ export function registerDeployStatusTool(server: McpServer): void {
               ? { pagination_note: `Showing ${limited.length} of ${deployments.length}. Increase "limit" to see more.` }
               : {}),
           },
-          `Found ${deployments.length} deployment(s). Most recent: ${limited[0]!.name} (${limited[0]!.url ?? URL_PENDING})` +
+          `Found ${deployments.length} deployment(s). Most recent: ${limited[0]!.name} (${urlRetired(limited[0]!) ? limited[0]!.status : limited[0]!.url ?? URL_PENDING})` +
             (recentFailure ? `, ${recentFailure}` : "")
         );
       } catch (err) {
