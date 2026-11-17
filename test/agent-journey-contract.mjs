@@ -268,3 +268,85 @@ test("redeploy restarts the last release; deploying again with the same app_name
     assert.match(text, /in place/);
   }
 });
+
+// ── 7. E1 live journeys (2026-11-17, evidence distribution-reverify-20261116/e1) ──
+
+test("a private or unreachable repo names the working remedies, not 'the supplied token'", async () => {
+  // Live 422 from the gateway; the local MCP supplies no git token (E1 journey 1).
+  const { out } = await call({
+    "/api/deployments": [422, {
+      code: "source_repository_unreadable",
+      message: "The repository could not be read. Check that it exists and that the supplied token grants access to it.",
+      action: "Fix the request and retry. Deterministic rejections create no deployment or charge.",
+    }],
+  }, "varity_deploy", { repo_url: "https://github.com/acme/secret-app.git", app_name: "secret-app" });
+  assert.equal(out.error.code, "source_repository_unreadable");
+  assert.match(out.error.message, /private or unreachable/);
+  assert.match(out.error.message, /cannot read private repositories from the MCP yet/);
+  assert.doesNotMatch(out.error.message, /supplied token/);
+  assert.match(out.error.suggestion, /gh repo edit acme\/secret-app --visibility public/);
+  assert.match(out.error.suggestion, /container image/);
+});
+
+test("varity_create_repo still creates a private repository by default", async () => {
+  const client = await connect();
+  const { tools } = await client.listTools();
+  await client.close();
+  const visibility = tools.find((t) => t.name === "varity_create_repo").inputSchema.properties.visibility;
+  assert.equal(visibility.default, "private");
+});
+
+test("redeploy on a static app says what redeploy restarts and how to ship, never 'retry later'", async () => {
+  // Live: POST /api/deployments/<static app>/redeploy -> 409 retryable:false (E1 journey 3 step 8).
+  for (const [status, body] of [
+    [409, { code: "redeploy_failed", message: "Durable redeploy could not be accepted.", retryable: false }],
+    [409, { code: "restart_unavailable", message: "This deployment cannot be restarted from saved configuration.", action: "Redeploy re-applies the saved configuration when a restart is not possible.", retryable: false }],
+    [501, { code: "restart_unavailable", message: "A verified app restart is not available yet.", retryable: false }],
+  ]) {
+    const { out } = await call({ "/api/deployments/site-1/redeploy": [status, body] }, "varity_redeploy", { name: "site-1" });
+    assert.equal(out.error.code, body.code);
+    assert.match(out.error.message, /restarts dynamic and container apps only/);
+    assert.match(out.error.suggestion, /static site/);
+    assert.match(out.error.suggestion, /varity_deploy again with the same app_name/);
+    assert.doesNotMatch(`${out.error.message} ${out.error.suggestion}`, /retry/i);
+  }
+  const client = await connect();
+  const { tools } = await client.listTools();
+  await client.close();
+  const description = tools.find((t) => t.name === "varity_redeploy").description;
+  assert.match(description, /restarts dynamic and container apps only/);
+  assert.match(description, /static site/);
+});
+
+test("a retryable redeploy refusal keeps its retry guidance", async () => {
+  const { out } = await call({
+    "/api/deployments/api-1/redeploy": [503, { code: "restart_unavailable", message: "The restart could not be accepted right now.", action: "Retry in a moment.", retryable: true }],
+  }, "varity_redeploy", { name: "api-1" });
+  assert.equal(out.error.suggestion, "Retry in a moment.");
+});
+
+test("an unpriced template reads 'price unavailable' in list, info and deploy", async () => {
+  const template = { id: "adminer", name: "Adminer", private: false, requiredEnv: [] };
+  const list = await call({ "/api/templates": [200, { templates: [template], count: 1 }] }, "varity_list_templates");
+  assert.match(list.out.message, /, price unavailable\./);
+  const info = await call({ "/api/templates/adminer": [200, { template }] }, "varity_template_info", { template: "adminer" });
+  assert.match(info.out.message, /Pricing: price unavailable/);
+  const deployed = await call({
+    "/api/templates/adminer": [200, { template }],
+    "/api/templates/adminer/deploy": [202, { id: "d-1", run_id: "run-1" }],
+    "/api/deployments/runs/run-1": [200, { public_status: "deploying" }],
+  }, "varity_deploy_template", { template: "adminer" });
+  assert.match(deployed.out.message, /price unavailable/);
+  assert.doesNotMatch(deployed.out.message, /price price/);
+});
+
+test("delete warns the URL may serve cached content briefly", async () => {
+  // Live: status deleted and billing stopped while the URL still served 200 for up to ~40 s (E1 journey 3 step 9).
+  const accepted = await call({
+    "/api/deployments/app-1": [202, { status: "deleting", run_id: "run-1" }],
+    "/api/deployments/runs/run-1": [200, { public_status: "deleting" }],
+  }, "varity_delete_deployment", { deployment: "app-1" });
+  assert.match(accepted.out.message, /URL may serve cached content briefly/);
+  const deleted = await call({ "/api/deployments/app-2": [200, { deleted: true }] }, "varity_delete_deployment", { deployment: "app-2" });
+  assert.match(deleted.out.message, /URL may serve cached content briefly/);
+});

@@ -73,14 +73,14 @@ export async function templateDeployAccepted(template: TemplateMeta, name: strin
       ...acceptance,
     },
     acceptance.run_id
-      ? `Template deploy accepted for ${template.name ?? template.id} (run ${acceptance.run_id}, status ${acceptance.public_status ?? "unobserved"}), price ${monthlyLabel(template)}. Track its terminal outcome with varity_deploy_status.`
+      ? `Template deploy accepted for ${template.name ?? template.id} (run ${acceptance.run_id}, status ${acceptance.public_status ?? "unobserved"}), ${monthlyLabel(template)}. Track its terminal outcome with varity_deploy_status.`
       : `The template deploy returned no run for ${template.name ?? template.id}. The terminal outcome is not proven; inspect varity_deploy_status before reporting completion.`
   );
 }
 
 function monthlyLabel(template: TemplateMeta): string {
   const monthly = template.pricing?.monthlyUsd;
-  if (typeof monthly !== "number" || !Number.isFinite(monthly)) return "unavailable";
+  if (typeof monthly !== "number" || !Number.isFinite(monthly)) return "price unavailable";
   return monthlyMaximum(monthly);
 }
 

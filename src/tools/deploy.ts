@@ -64,6 +64,21 @@ export async function deployAccepted(accepted: Awaited<ReturnType<typeof createD
   );
 }
 
+/**
+ * The gateway answers 422 `source_repository_unreadable` for a private or
+ * missing repository. The local MCP sends no git credential, so its served
+ * advice about "the supplied token" does not apply (E1 journey 1).
+ */
+function unreadableRepository(repoUrl: string | undefined): [string, string] {
+  const slug = repoUrl?.match(/github\.com[/:]([^/]+\/[^/]+?)(?:\.git)?\/?$/)?.[1] ?? "<owner>/<repo>";
+  return [
+    "Varity could not read this repository: it is private or unreachable. " +
+      "Varity cannot read private repositories from the MCP yet. No deployment or charge was created.",
+    `Make the repository public (gh repo edit ${slug} --visibility public --accept-visibility-change-consequences) ` +
+      "and call varity_deploy again, or deploy a prebuilt container image with the image argument.",
+  ];
+}
+
 export function registerDeployTool(server: McpServer): void {
   server.registerTool(
     "varity_deploy",
@@ -178,6 +193,9 @@ export function registerDeployTool(server: McpServer): void {
       try {
         return await deployAccepted(await createDeployment(request));
       } catch (err) {
+        if (err instanceof VarityPublicApiError && err.code === "source_repository_unreadable") {
+          return errorResponse(err.code, ...unreadableRepository(repoUrl));
+        }
         if (err instanceof VarityPublicApiError) {
           return errorResponse(err.code, err.message, err.action ?? "Check the request and retry.");
         }

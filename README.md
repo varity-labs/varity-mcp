@@ -119,7 +119,7 @@ The MCP exposes Varity's deploy surface so your AI tool can take action — not 
 | `varity_deploy_logs` | Read runtime logs |
 | `varity_delete_deployment` | Request deletion; poll `varity_deploy_status` until it is deleted and billing is stopped |
 | `varity_set_env` | Preserve the public tool route while refusing secret values and directing configuration to a secret-safe interface |
-| `varity_redeploy` | Restart a deployed app from its last successful release at its saved commit; to ship new commits, push and run `varity_deploy` again with the same app name |
+| `varity_redeploy` | Restart a deployed dynamic or container app from its last successful release at its saved commit; a static site cannot be restarted. To ship new commits, push and run `varity_deploy` again with the same app name |
 | `varity_machines_list` | List your CPU and GPU virtual machines (optionally the CPU or, with `gpu`, GPU VM profile catalog) |
 | `varity_machines_create` | Quote and create a CPU or (`gpu: true`) GPU virtual machine with your SSH public key |
 | `varity_machines_delete` | Delete a CPU or GPU virtual machine and confirm its billing stopped |
