@@ -58,8 +58,9 @@ export class VarityPublicApiError extends Error {
 const BILLING_URL = `${INFRASTRUCTURE.DASHBOARD}/billing`;
 /** Where the portal's "Create deploy key" button lives; the portal calls these keys "deploy keys". */
 export const DEPLOY_KEY_URL = `${INFRASTRUCTURE.DASHBOARD}/settings?tab=api-keys`;
-const DEPLOY_KEY_ACTION =
-  `Create a new deploy key at ${DEPLOY_KEY_URL}, set it as VARITY_DEPLOY_KEY in the MCP server environment ` +
+/** The one sign-in remedy: no key (doctor), a rejected key and an unauthenticated call all say it. */
+export const DEPLOY_KEY_ACTION =
+  `Create a deploy key at ${DEPLOY_KEY_URL}, set it as VARITY_DEPLOY_KEY in the MCP server environment ` +
   "(or run `varitykit auth login` in a trusted terminal; it saves the key to ~/.varitykit/config.json), then call varity_doctor.";
 
 /**
@@ -183,7 +184,7 @@ async function authHeaders(): Promise<Record<string, string>> {
       "Not authenticated with Varity.",
       "NOT_AUTHENTICATED",
       401,
-      `Run varity_login, or create a deploy key at ${DEPLOY_KEY_URL} and set it as VARITY_DEPLOY_KEY in the MCP server environment.`
+      DEPLOY_KEY_ACTION
     );
   }
   return {
@@ -451,8 +452,14 @@ export async function deleteMachine(
   );
 }
 
-/** Public `GET /api/pricing?profile=` (no auth): the pre-deploy estimate the portal deploy page shows. */
+/**
+ * Public `GET /api/pricing?profile=`: the pre-deploy estimate the portal deploy
+ * page shows. It carries the deploy key when one is configured, so the owner
+ * can price the caller's own account (e.g. its active static-site count); with
+ * no key it stays anonymous and needs no sign-in. A rejected key is the
+ * standard `invalid_api_key` refusal, never retried anonymously.
+ */
 export async function getPublicProfilePricing(profile: string | undefined): Promise<Record<string, unknown>> {
   const qs = profile ? `?profile=${encodeURIComponent(profile)}` : "";
-  return sendRequest<Record<string, unknown>>("GET", `/api/pricing${qs}`, { anonymous: true });
+  return sendRequest<Record<string, unknown>>("GET", `/api/pricing${qs}`, { anonymous: !(await getApiKey()) });
 }

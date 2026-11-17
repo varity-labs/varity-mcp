@@ -8,7 +8,7 @@ import {
   VarityPublicApiError,
   type PublicRunAcceptance,
 } from "../utils/public-api.js";
-import { lifecycleAcceptance } from "../utils/lifecycle-acceptance.js";
+import { acceptanceSummary, lifecycleAcceptance } from "../utils/lifecycle-acceptance.js";
 import { monthlyMaximum } from "../utils/money.js";
 
 /**
@@ -52,6 +52,8 @@ export interface TemplateMeta {
   private?: boolean;
   pricing?: { monthlyUsd?: number | null };
   hardware?: { cpu?: number; memory_gb?: number; ephemeral_gb?: number };
+  /** The template's persistent volume, billed with it. */
+  volume?: { sizeGb?: number; path?: string } | null;
   resources?: Array<{ kind?: string; engine?: string; label?: string }>;
   certification?: { state?: string; reason?: string };
 }
@@ -72,9 +74,7 @@ export async function templateDeployAccepted(template: TemplateMeta, name: strin
       app_name: accepted.app_name ?? null,
       ...acceptance,
     },
-    acceptance.run_id
-      ? `Template deploy accepted for ${template.name ?? template.id} (run ${acceptance.run_id}, status ${acceptance.public_status ?? "unobserved"}), ${monthlyLabel(template)}. Track its terminal outcome with varity_deploy_status.`
-      : `The template deploy returned no run for ${template.name ?? template.id}. The terminal outcome is not proven; inspect varity_deploy_status before reporting completion.`
+    `${acceptanceSummary(`Template deploy of ${template.name ?? template.id}`, accepted.id, acceptance)} Price: ${monthlyLabel(template)}.`
   );
 }
 
@@ -91,6 +91,7 @@ function hardwareLabel(template: TemplateMeta): string {
     typeof hardware.cpu === "number" ? `${hardware.cpu} CPU` : null,
     typeof hardware.memory_gb === "number" ? `${hardware.memory_gb} GiB RAM` : null,
     typeof hardware.ephemeral_gb === "number" ? `${hardware.ephemeral_gb} GiB ephemeral storage` : null,
+    typeof template.volume?.sizeGb === "number" ? `${template.volume.sizeGb} GiB persistent volume` : null,
   ].filter(Boolean);
   return parts.length > 0 ? parts.join(", ") : "hardware profile unavailable";
 }

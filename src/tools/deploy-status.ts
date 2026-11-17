@@ -120,6 +120,27 @@ async function readDeployments(): Promise<DeploymentRecord[]> {
   );
 }
 
+/**
+ * The served terminal outcome of the latest run when that run did not succeed:
+ * `run_status: "failed"` or a sealed classification other than `succeeded`.
+ * A live deployment keeps its status while a later run (e.g. a refused
+ * restart) failed, so the failure is said first, never hidden behind "live".
+ */
+function latestRunFailure(deployment: DeploymentRecord): string | null {
+  const outcome = (deployment.outcome && typeof deployment.outcome === "object"
+    ? deployment.outcome
+    : {}) as Record<string, unknown>;
+  const classification = typeof outcome.classification === "string" ? outcome.classification : null;
+  if (deployment.run_status !== "failed" && (classification === null || classification === "succeeded")) {
+    return null;
+  }
+  const text = (value: unknown): value is string => typeof value === "string" && value !== "";
+  const failure = [classification, outcome.code, outcome.diagnostic_code].filter(text).join(", ");
+  const action = text(outcome.action_code) ? `action ${outcome.action_code}` : "";
+  const detail = [failure, action].filter(Boolean).join("; ");
+  return `latest run failed${detail ? ` (${detail})` : ""}`;
+}
+
 function apiFailure(err: unknown, action: string) {
   if (err instanceof VarityPublicApiError) {
     return errorResponse(err.code, err.message, err.action ?? action);
@@ -172,9 +193,13 @@ export function registerDeployStatusTool(server: McpServer): void {
           deployment.run_status = await readRunStatus(deployment.run_id);
           await applyLiveness([deployment]);
 
+          const state = `${deployment.status}${deployment.url ? ` at ${deployment.url}` : ` (${URL_PENDING})`}`;
+          const failure = latestRunFailure(deployment);
           return successResponse(
             { deployment, source: "varity_public_api:/api/deployments" },
-            `Deployment ${deployment.id}: ${deployment.status}${deployment.url ? ` at ${deployment.url}` : ` (${URL_PENDING})`}`
+            failure
+              ? `Deployment ${deployment.id}: ${failure}. Deployment status: ${state}.`
+              : `Deployment ${deployment.id}: ${state}`
           );
         }
 

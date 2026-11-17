@@ -34,3 +34,16 @@ export async function lifecycleAcceptance(
     return { run_id: runId, public_status: null, outcome: null };
   }
 }
+
+/**
+ * The one summary of an accepted create (deploy and template deploy): the
+ * deployment id the agent tracks, the run and its observed status. Without a
+ * run nothing is proven.
+ */
+export function acceptanceSummary(subject: string, id: unknown, acceptance: LifecycleAcceptance): string {
+  if (!acceptance.run_id) {
+    return `${subject} returned no run. A live deployment is not yet proven; inspect varity_deploy_status before reporting completion.`;
+  }
+  return `${subject} accepted (id ${id ?? "unassigned"}, run ${acceptance.run_id}, status ${acceptance.public_status ?? "unobserved"}). ` +
+    "Track its terminal outcome with varity_deploy_status using this id; status returns the same id.";
+}

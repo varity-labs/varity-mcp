@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { createDeployment, VarityPublicApiError } from "../utils/public-api.js";
-import { lifecycleAcceptance } from "../utils/lifecycle-acceptance.js";
+import { acceptanceSummary, lifecycleAcceptance } from "../utils/lifecycle-acceptance.js";
 
 /**
  * `varity_deploy` → `POST /api/deployments` through the one public-API client
@@ -58,9 +58,7 @@ export async function deployAccepted(accepted: Awaited<ReturnType<typeof createD
       app_name: accepted.app_name ?? null,
       ...acceptance,
     },
-    acceptance.run_id
-      ? `Deploy accepted (id ${accepted.id ?? "unassigned"}, run ${acceptance.run_id}, status ${acceptance.public_status ?? "unobserved"}). Track its terminal outcome with varity_deploy_status using this id; status returns the same id.`
-      : "The deploy request returned no run. A live deployment is not yet proven; inspect varity_deploy_status before reporting completion."
+    acceptanceSummary("Deploy", accepted.id, acceptance)
   );
 }
 
