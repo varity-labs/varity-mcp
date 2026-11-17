@@ -13,7 +13,7 @@ export function registerSetEnvTool(server: McpServer): void {
   server.registerTool(
     "varity_set_env",
     {
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       title: "Route Environment Configuration Safely",
       description:
         "Compatibility route for environment configuration. It never accepts values and directs private configuration to an approved secret-safe interface.",

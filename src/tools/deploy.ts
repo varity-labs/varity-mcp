@@ -8,7 +8,7 @@ import { lifecycleAcceptance } from "../utils/lifecycle-acceptance.js";
 
 /**
  * `varity_deploy` → `POST /api/deployments` through the one public-API client
- * (no `varitykit` subprocess). The body is the same public create contract
+ * (no CLI subprocess). The body is the same public create contract
  * the CLI sends (`app_name`, `repo_url` | `image`, `port`, `volume_*`); the
  * control plane owns framework detection, hosting, build and lifecycle. The
  * MCP only names the source: an explicit repo/image, else the project's
@@ -64,6 +64,21 @@ export async function deployAccepted(accepted: Awaited<ReturnType<typeof createD
   );
 }
 
+/**
+ * The gateway answers 422 `source_repository_unreadable` for a private or
+ * missing repository. The local MCP sends no git credential, so its served
+ * advice about "the supplied token" does not apply (E1 journey 1).
+ */
+function unreadableRepository(repoUrl: string | undefined): [string, string] {
+  const slug = repoUrl?.match(/github\.com[/:]([^/]+\/[^/]+?)(?:\.git)?\/?$/)?.[1] ?? "<owner>/<repo>";
+  return [
+    "Varity could not read this repository: it is private or unreachable. " +
+      "Varity cannot read private repositories from the MCP yet. No deployment or charge was created.",
+    `Make the repository public (gh repo edit ${slug} --visibility public --accept-visibility-change-consequences) ` +
+      "and call varity_deploy again, or deploy a prebuilt container image with the image argument.",
+  ];
+}
+
 export function registerDeployTool(server: McpServer): void {
   server.registerTool(
     "varity_deploy",
@@ -74,7 +89,10 @@ export function registerDeployTool(server: McpServer): void {
         "The control plane detects the framework, selects hosting, builds, and manages lifecycle state. " +
         "Use this when a developer wants to deploy, publish, ship, or make their app live. " +
         "If the developer wants to deploy a certified template rather than their own code, " +
-        "use varity_deploy_template instead. To stop a deployment and its billing, use varity_delete_deployment.",
+        "use varity_deploy_template instead. To ship new code for an app that is already deployed, push it and call " +
+        "varity_deploy again with the same app_name: the same owner and workload shape updates that app in place at " +
+        "the latest commit (varity_redeploy does not pick up new commits). " +
+        "To stop a deployment and its billing, use varity_delete_deployment.",
       inputSchema: {
         path: z
           .string()
@@ -96,7 +114,9 @@ export function registerDeployTool(server: McpServer): void {
           .string()
           .optional()
           .describe(
-            "Custom app name that controls the deployment URL: https://varity.app/{app_name}/. " +
+            "Custom app name that controls the deployment URL. A static site is served at " +
+            "https://varity.app/{app_name}/ and an app with a server at https://{app_name}.varity.app; " +
+            "the platform picks which, so read the live URL from varity_deploy_status. " +
             "Must be URL-safe (lowercase letters, numbers, hyphens). " +
             "If omitted, the repository or image name is used. " +
             "Use a different app_name to create named environments (staging, canary, etc.)."
@@ -130,9 +150,7 @@ export function registerDeployTool(server: McpServer): void {
             "Requires volume_size."
           ),
       },
-      annotations: {
-        destructiveHint: true, // Deploys real infrastructure
-      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
     async ({ path, repo_url, app_name, image, port, volume_size, volume_path }) => {
       if (repo_url && image) {
@@ -175,6 +193,9 @@ export function registerDeployTool(server: McpServer): void {
       try {
         return await deployAccepted(await createDeployment(request));
       } catch (err) {
+        if (err instanceof VarityPublicApiError && err.code === "source_repository_unreadable") {
+          return errorResponse(err.code, ...unreadableRepository(repoUrl));
+        }
         if (err instanceof VarityPublicApiError) {
           return errorResponse(err.code, err.message, err.action ?? "Check the request and retry.");
         }

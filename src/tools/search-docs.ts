@@ -110,9 +110,7 @@ export function registerSearchDocsTool(server: McpServer): void {
           .default(3)
           .describe("Maximum number of results to return (default: 3)"),
       },
-      annotations: {
-        readOnlyHint: true,
-      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     async ({ query, maxResults }) => {
       try {

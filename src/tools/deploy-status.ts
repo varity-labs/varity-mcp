@@ -163,9 +163,7 @@ export function registerDeployStatusTool(server: McpServer): void {
             "Maximum number of deployments to return (default: 10, max: 50)"
           ),
       },
-      annotations: {
-        readOnlyHint: true,
-      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     async ({ deployment_id, path, limit }) => {
       try {

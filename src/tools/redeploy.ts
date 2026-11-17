@@ -14,8 +14,8 @@ export async function redeployAccepted(
   return successResponse(
     { name, action: "redeploy", ...acceptance },
     acceptance.run_id
-      ? `Reapply accepted for "${name}" on the same app URL (run ${acceptance.run_id}, status ${acceptance.public_status ?? "unobserved"}). Track its terminal outcome with varity_deploy_status.`
-      : `The reapply request for "${name}" returned no run. The terminal outcome is not proven; inspect varity_deploy_status before retrying.`
+      ? `Restart of the last release accepted for "${name}" on the same app URL (run ${acceptance.run_id}, status ${acceptance.public_status ?? "unobserved"}). Track its terminal outcome with varity_deploy_status.`
+      : `The restart request for "${name}" returned no run. The terminal outcome is not proven; inspect varity_deploy_status before retrying.`
   );
 }
 
@@ -23,13 +23,14 @@ export function registerRedeployTool(server: McpServer): void {
   server.registerTool(
     "varity_redeploy",
     {
-      annotations: { destructiveHint: true },
-      title: "Reapply an Existing Deployment Configuration",
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+      title: "Restart an App's Last Release",
       description:
-        "Reapply the saved configuration for an app that is ALREADY deployed. Use this when a developer " +
-        "explicitly asks to reapply or redeploy that saved configuration. The app keeps the same deployment and URL. " +
-        "An unchanged configuration may be a no-op, so this tool must not " +
-        "be presented as a verified restart for a stuck app. Configure secrets through an approved secret-safe interface. " +
+        "Restart an app that is ALREADY deployed from its last successful release, at that release's saved commit " +
+        "and configuration. The app keeps the same deployment and URL. It does not pick up new commits: to ship new " +
+        "code, push it and call varity_deploy again with the same app_name. An app with no successful release cannot " +
+        "be restarted. Redeploy restarts dynamic and container apps only; for a static site, push the change and " +
+        "call varity_deploy again with the same app_name. Configure secrets through an approved secret-safe interface. " +
         "To create a NEW deployment instead, use varity_deploy.",
       inputSchema: {
         name: z
@@ -49,6 +50,16 @@ export function registerRedeployTool(server: McpServer): void {
             "DEPLOYMENT_NOT_FOUND",
             `No deployment found with name "${name}".`,
             `Check the exact name with varity_deploy_status or at ${INFRASTRUCTURE.DASHBOARD}.`
+          );
+        }
+        if (err instanceof VarityPublicApiError && (err.status === 409 || err.status === 501)) {
+          // A static site's release cannot be restarted: 409/501, retryable:false (E1 journey 3). A 409 can
+          // also mean another operation on the app is still running, so both remedies are named.
+          return errorResponse(
+            err.code,
+            `Redeploy of "${name}" was refused: ${err.message} Redeploy restarts dynamic and container apps only.`,
+            "For a static site, push the change and call varity_deploy again with the same app_name; it ships the new " +
+              "code at the same URL. If another operation on this app is still running, wait until varity_deploy_status shows it finished."
           );
         }
         if (err instanceof VarityPublicApiError) {

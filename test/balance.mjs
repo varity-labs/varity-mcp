@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 process.env.VARITY_GATEWAY_URL = "https://gw.test";
-process.env.VARITY_API_KEY = "test-deploy-key";
+process.env.VARITY_DEPLOY_KEY = "test-deploy-key";
 const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
 const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
 const { createVarityServer } = await import("../dist/server.js");

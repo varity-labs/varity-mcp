@@ -59,7 +59,7 @@ export function registerMigrateTool(server: McpServer): void {
           .default(true)
           .describe("Must remain true. URL-based migration is preview-only until transformed-source custody is explicit."),
       },
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     async ({ github_url, dry_run }) => {
       if (!isGitHubUrl(github_url)) {

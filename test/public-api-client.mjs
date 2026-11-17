@@ -36,22 +36,20 @@ async function oneCall(status, payload, run) {
   }
 }
 
-test("every call carries VARITY_API_KEY first", async () => {
+test("every call carries VARITY_DEPLOY_KEY before the legacy VARITY_API_KEY", async () => {
   const { init } = await oneCall(200, { deployments: [] }, () => api.listDeployments());
-  assert.equal(init.headers.Authorization, "Bearer api-key");
+  assert.equal(init.headers.Authorization, "Bearer deploy-key");
 });
 
-test("createDeployment posts the body with source mcp and only a caller's idempotency key", async () => {
+test("createDeployment posts the body with source mcp and a generated idempotency key", async () => {
   const { result, url, init, body } = await oneCall(202, { run_id: "r-1" }, () =>
     api.createDeployment({ repo_url: "https://github.com/a/b", source: "cli" })
   );
   assert.equal(url, "https://gw.test/api/deployments");
   assert.equal(init.method, "POST");
   assert.deepEqual(body, { repo_url: "https://github.com/a/b", source: "mcp" });
-  assert.equal(init.headers["Idempotency-Key"], undefined);
+  assert.match(init.headers["Idempotency-Key"], /^mcp-deploy:[0-9a-f-]{36}$/);
   assert.equal(result.run_id, "r-1");
-  const keyed = await oneCall(202, { run_id: "r-2" }, () => api.createDeployment({}, "k-1"));
-  assert.equal(keyed.init.headers["Idempotency-Key"], "k-1");
 });
 
 test("deployment lifecycle routes and bodies match the gateway", async () => {

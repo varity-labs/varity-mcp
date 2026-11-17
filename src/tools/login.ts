@@ -22,9 +22,9 @@ export function registerLoginTool(server: McpServer): void {
       title: "Set Up Varity Login",
       description:
         "Check whether a deploy key is already configured and open the developer portal settings page when login is needed. " +
-        "Credentials are never accepted as MCP tool input; enter the deploy key only in the hidden prompt from `varitykit auth login` in a trusted terminal.",
+        "Credentials are never accepted as MCP tool input; set VARITY_DEPLOY_KEY in the MCP server environment, or enter the deploy key only in the hidden prompt of `varitykit auth login` in a trusted terminal, which saves it to ~/.varitykit/config.json.",
       inputSchema: {},
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async () => {
       if (await isAuthenticated()) {
@@ -50,7 +50,7 @@ export function registerLoginTool(server: McpServer): void {
       }
 
       const nextStep =
-        "Open a trusted terminal and run `varitykit auth login`; paste the deploy key only into its hidden prompt, then run varity_doctor.";
+        "Set the deploy key as VARITY_DEPLOY_KEY in the MCP server environment, or open a trusted terminal, run `varitykit auth login` and paste it only into its hidden prompt; it saves the key to ~/.varitykit/config.json. Then run varity_doctor.";
       return successResponse(
         {
           authenticated: false,

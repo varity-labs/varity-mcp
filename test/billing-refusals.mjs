@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 process.env["VARITY_GATEWAY_URL"] = "https://gw.test";
-process.env["VARITY_API_KEY"] = "api-key";
+process.env["VARITY_DEPLOY_KEY"] = "api-key";
 
 /** The served `credit_policy` block, verbatim from varity-engineering#225 (2026-10-18, incl. the enterprise and static amendments). */
 const CREDIT_POLICY = {
@@ -128,7 +128,7 @@ test("an unreadable policy leaves billing errors as the server sent them", async
 test("a profile estimate is USD only, in text and data alike", async () => {
   const out = await costTool([200, { profile: "web-app", monthly_max_usd: 12.29, credit_policy: CREDIT_POLICY }], [500, {}], {});
   assert.equal(out.data.monthly_max_usd, 12.29);
-  assert.match(out.message, /up to \$12\.29\/mo \(USD\)/);
+  assert.match(out.message, /up to \$12\.29\/month \(monthly maximum, USD\)/);
   assert.doesNotMatch(JSON.stringify(out), /credit/i);
 });
 

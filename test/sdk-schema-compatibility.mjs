@@ -7,7 +7,7 @@ import { createVarityServer, strictToolInputs } from "../dist/server.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 process.env.VARITY_GATEWAY_URL = "https://gw.test";
-process.env.VARITY_API_KEY = "synthetic-compatibility-key";
+process.env.VARITY_DEPLOY_KEY = "synthetic-compatibility-key";
 
 async function clientFor(t, server = createVarityServer()) {
   const [serverSide, clientSide] = InMemoryTransport.createLinkedPair();

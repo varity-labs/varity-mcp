@@ -9,7 +9,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 process.env["VARITY_GATEWAY_URL"] = "https://gw.test";
-process.env["VARITY_API_KEY"] = "api-key";
+process.env["VARITY_DEPLOY_KEY"] = "api-key";
 
 const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
 const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
@@ -174,8 +174,8 @@ test("the cost calculator lists its profiles and estimates before sign-in", asyn
   const cost = tools.find((t) => t.name === "varity_cost_calculator");
   assert.match(JSON.stringify(cost), /static-site/);
 
-  const saved = process.env["VARITY_API_KEY"];
-  delete process.env["VARITY_API_KEY"];
+  const saved = process.env["VARITY_DEPLOY_KEY"];
+  delete process.env["VARITY_DEPLOY_KEY"];
   try {
     const { out, calls } = await call({
       "/api/pricing": [200, { profile: "static-site", currency: "USD", monthly_max_usd: 0, billing_model: "free_static" }],
@@ -185,7 +185,7 @@ test("the cost calculator lists its profiles and estimates before sign-in", asyn
     assert.equal(calls[0].url, "https://gw.test/api/pricing?profile=static");
     assert.equal(calls[0].init.headers.Authorization, undefined, "a pre-deploy estimate needs no key");
   } finally {
-    process.env["VARITY_API_KEY"] = saved;
+    process.env["VARITY_DEPLOY_KEY"] = saved;
   }
 
   const unknown = await call({
@@ -232,4 +232,121 @@ test("varity_login links the portal's Deploy keys tab, like every other key mess
     env: { PATH: process.env.PATH, HOME: home, CI: "true" },
   }).toString();
   assert.equal(JSON.parse(text).data.settings_url, "https://developer.store.varity.so/dashboard/settings?tab=api-keys");
+});
+
+test("varity_deploy app_name names both URL shapes the gateway serves", async () => {
+  // Gateway publicUrlForRecord (services/deployment-registry.ts): a static site is
+  // https://varity.app/<name>/, every app with a server is https://<name>.varity.app.
+  const client = await connect();
+  const { tools } = await client.listTools();
+  await client.close();
+  const appName = tools.find((t) => t.name === "varity_deploy").inputSchema.properties.app_name.description;
+  assert.match(appName, /https:\/\/varity\.app\/\{app_name\}\//);
+  assert.match(appName, /https:\/\/\{app_name\}\.varity\.app/);
+  assert.match(appName, /varity_deploy_status/);
+});
+
+test("the README license badge does not claim plain MIT", () => {
+  const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  assert.doesNotMatch(readme, /License: MIT|License-MIT/);
+});
+
+test("redeploy restarts the last release; deploying again with the same app_name ships new code", async () => {
+  // deploy-api restart reconstructs the active release verbatim (sealed commit_sha);
+  // a create with the same owner, name and workload shape advances that deployment
+  // at the resolved HEAD (evidence phase2/a-plugin/23-redeploy-vs-deploy-source.md).
+  const client = await connect();
+  const { tools } = await client.listTools();
+  const { messages } = await client.getPrompt({ name: "deploy", arguments: {} });
+  await client.close();
+  const describe = (name) => tools.find((t) => t.name === name).description;
+  assert.match(describe("varity_redeploy"), /last successful release/);
+  assert.match(describe("varity_redeploy"), /saved commit/);
+  assert.match(describe("varity_redeploy"), /does not pick up new commits/);
+  for (const text of [describe("varity_deploy"), messages[0].content.text]) {
+    assert.match(text, /same app_name/);
+    assert.match(text, /in place/);
+  }
+});
+
+// ── 7. E1 live journeys (2026-11-17, evidence distribution-reverify-20261116/e1) ──
+
+test("a private or unreachable repo names the working remedies, not 'the supplied token'", async () => {
+  // Live 422 from the gateway; the local MCP supplies no git token (E1 journey 1).
+  const { out } = await call({
+    "/api/deployments": [422, {
+      code: "source_repository_unreadable",
+      message: "The repository could not be read. Check that it exists and that the supplied token grants access to it.",
+      action: "Fix the request and retry. Deterministic rejections create no deployment or charge.",
+    }],
+  }, "varity_deploy", { repo_url: "https://github.com/acme/secret-app.git", app_name: "secret-app" });
+  assert.equal(out.error.code, "source_repository_unreadable");
+  assert.match(out.error.message, /private or unreachable/);
+  assert.match(out.error.message, /cannot read private repositories from the MCP yet/);
+  assert.doesNotMatch(out.error.message, /supplied token/);
+  assert.match(out.error.suggestion, /gh repo edit acme\/secret-app --visibility public/);
+  assert.match(out.error.suggestion, /container image/);
+});
+
+test("varity_create_repo still creates a private repository by default", async () => {
+  const client = await connect();
+  const { tools } = await client.listTools();
+  await client.close();
+  const visibility = tools.find((t) => t.name === "varity_create_repo").inputSchema.properties.visibility;
+  assert.equal(visibility.default, "private");
+});
+
+test("redeploy on a static app says what redeploy restarts and how to ship, never 'retry later'", async () => {
+  // Live: POST /api/deployments/<static app>/redeploy -> 409 retryable:false (E1 journey 3 step 8).
+  for (const [status, body] of [
+    [409, { code: "redeploy_failed", message: "Durable redeploy could not be accepted.", retryable: false }],
+    [409, { code: "restart_unavailable", message: "This deployment cannot be restarted from saved configuration.", action: "Redeploy re-applies the saved configuration when a restart is not possible.", retryable: false }],
+    [501, { code: "restart_unavailable", message: "A verified app restart is not available yet.", retryable: false }],
+  ]) {
+    const { out } = await call({ "/api/deployments/site-1/redeploy": [status, body] }, "varity_redeploy", { name: "site-1" });
+    assert.equal(out.error.code, body.code);
+    assert.match(out.error.message, /restarts dynamic and container apps only/);
+    assert.match(out.error.suggestion, /static site/);
+    assert.match(out.error.suggestion, /varity_deploy again with the same app_name/);
+    assert.doesNotMatch(`${out.error.message} ${out.error.suggestion}`, /retry/i);
+  }
+  const client = await connect();
+  const { tools } = await client.listTools();
+  await client.close();
+  const description = tools.find((t) => t.name === "varity_redeploy").description;
+  assert.match(description, /restarts dynamic and container apps only/);
+  assert.match(description, /static site/);
+});
+
+test("a retryable redeploy refusal keeps its retry guidance", async () => {
+  const { out } = await call({
+    "/api/deployments/api-1/redeploy": [503, { code: "restart_unavailable", message: "The restart could not be accepted right now.", action: "Retry in a moment.", retryable: true }],
+  }, "varity_redeploy", { name: "api-1" });
+  assert.equal(out.error.suggestion, "Retry in a moment.");
+});
+
+test("an unpriced template reads 'price unavailable' in list, info and deploy", async () => {
+  const template = { id: "adminer", name: "Adminer", private: false, requiredEnv: [] };
+  const list = await call({ "/api/templates": [200, { templates: [template], count: 1 }] }, "varity_list_templates");
+  assert.match(list.out.message, /, price unavailable\./);
+  const info = await call({ "/api/templates/adminer": [200, { template }] }, "varity_template_info", { template: "adminer" });
+  assert.match(info.out.message, /Pricing: price unavailable/);
+  const deployed = await call({
+    "/api/templates/adminer": [200, { template }],
+    "/api/templates/adminer/deploy": [202, { id: "d-1", run_id: "run-1" }],
+    "/api/deployments/runs/run-1": [200, { public_status: "deploying" }],
+  }, "varity_deploy_template", { template: "adminer" });
+  assert.match(deployed.out.message, /price unavailable/);
+  assert.doesNotMatch(deployed.out.message, /price price/);
+});
+
+test("delete warns the URL may serve cached content briefly", async () => {
+  // Live: status deleted and billing stopped while the URL still served 200 for up to ~40 s (E1 journey 3 step 9).
+  const accepted = await call({
+    "/api/deployments/app-1": [202, { status: "deleting", run_id: "run-1" }],
+    "/api/deployments/runs/run-1": [200, { public_status: "deleting" }],
+  }, "varity_delete_deployment", { deployment: "app-1" });
+  assert.match(accepted.out.message, /URL may serve cached content briefly/);
+  const deleted = await call({ "/api/deployments/app-2": [200, { deleted: true }] }, "varity_delete_deployment", { deployment: "app-2" });
+  assert.match(deleted.out.message, /URL may serve cached content briefly/);
 });

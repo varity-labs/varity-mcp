@@ -17,12 +17,14 @@ export async function deleteAccepted(
 ) {
   const acceptance = await lifecycleAcceptance(accepted);
   const deleted = accepted.deleted === true || acceptance.public_status === "deleted";
+  // Live: the URL kept serving for up to ~40 s after status deleted (E1 journey 3).
+  const cached = " The URL may serve cached content briefly after deletion.";
   return successResponse(
     { deployment, ...acceptance, deleted },
     deleted
-      ? `"${deployment}" is deleted.`
+      ? `"${deployment}" is deleted.${cached}`
       : acceptance.run_id
-        ? `Delete accepted for "${deployment}" (run ${acceptance.run_id}, status ${acceptance.public_status ?? "unobserved"}). Poll varity_deploy_status with "${deployment}" until status is deleted and billing.state is stopped; billing stop is not proven before then.`
+        ? `Delete accepted for "${deployment}" (run ${acceptance.run_id}, status ${acceptance.public_status ?? "unobserved"}). Poll varity_deploy_status with "${deployment}" until status is deleted and billing.state is stopped; billing stop is not proven before then.${cached}`
         : `The delete request for "${deployment}" returned no run. Deletion and billing stop are not proven; check varity_deploy_status before retrying.`
   );
 }
@@ -31,7 +33,7 @@ export function registerDeleteDeploymentTool(server: McpServer): void {
   server.registerTool(
     "varity_delete_deployment",
     {
-      annotations: { destructiveHint: true },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
       title: "Request Deletion of a Deployment",
       description:
         "Request deletion of an existing Varity deployment by id or app name. Returns as soon as the delete is accepted, " +

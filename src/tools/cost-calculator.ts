@@ -2,6 +2,7 @@ import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { getDeployment, getPublicProfilePricing, VarityPublicApiError } from "../utils/public-api.js";
+import { monthlyMaximum, usd } from "../utils/money.js";
 
 /**
  * varity_cost_calculator, THIN CLIENT.
@@ -52,7 +53,7 @@ export function registerCostCalculatorTool(server: McpServer): void {
         "`app_profile` for a pre-deploy estimate (no sign-in needed). " +
         // Mirrors gateway PROFILE_PRICING keys for discoverability; the served
         // list in a `profile_unknown` refusal stays the authority.
-        "Profiles: static-site (alias static), web-app, web-app-db, ai-agent-cpu, ai-agent-gpu; " +
+        "Profiles: static-site (alias static), web-app, web-app-db, ai-agent-cpu; " +
         "an unknown profile returns the current list. All amounts are USD.",
       inputSchema: {
         app_profile: z
@@ -62,7 +63,7 @@ export function registerCostCalculatorTool(server: McpServer): void {
           .regex(/^[a-z0-9][a-z0-9_-]*$/, "Invalid pricing profile key")
           .optional()
           .describe(
-            "Pricing profile: static-site (or static), web-app, web-app-db, ai-agent-cpu, ai-agent-gpu. Omit for the default (web-app)."
+            "Pricing profile: static-site (or static), web-app, web-app-db, ai-agent-cpu. Omit for the default (web-app)."
           ),
         subdomain: z
           .string()
@@ -71,9 +72,18 @@ export function registerCostCalculatorTool(server: McpServer): void {
             "A live deployment's subdomain; returns its current billing projection and overrides app_profile"
           ),
       },
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     async ({ app_profile, subdomain }) => {
+      // GPU containers are hidden on every customer surface (founder ruling
+      // 2026-10-27); GPU virtual machines remain, priced by their own quote.
+      if (!subdomain && app_profile === "ai-agent-gpu") {
+        return errorResponse(
+          "profile_unavailable",
+          "GPU containers are not offered, so the ai-agent-gpu profile has no estimate.",
+          "For a GPU virtual machine, list GPU profiles with varity_machines_list (include_profiles, gpu: true); varity_machines_create quotes the hourly price before creating it."
+        );
+      }
       let data: Record<string, unknown>;
       let source: string;
       try {
@@ -126,12 +136,13 @@ export function registerCostCalculatorTool(server: McpServer): void {
           "For a live deployment, confirm the app slug with varity_deploy_status."
         );
       }
-      const fmt = (n: number) => `$${Number(n).toLocaleString("en-US")}`;
       const estimateName = subdomain ?? data.profile ?? app_profile ?? "current default profile";
       const { unit, ...served } = projection;
       const amount = Object.values(served)[0] as number;
-      const upTo = "monthly_max_usd" in projection && amount > 0 ? "up to " : "";
-      const summary = `${String(estimateName)}: ${upTo}${fmt(amount)}/${unit === "month" ? "mo" : "hour"} (USD) estimate returned by the current Varity pricing interface.`;
+      const price = "monthly_max_usd" in projection
+        ? monthlyMaximum(amount)
+        : `${usd(amount)}/${unit} (USD)`;
+      const summary = `${String(estimateName)}: ${price} estimate returned by the current Varity pricing interface.`;
 
       return successResponse(
         {

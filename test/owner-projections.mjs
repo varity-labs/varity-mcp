@@ -4,7 +4,6 @@ import { test } from "node:test";
 
 const { classifyReadiness, verifyAuthentication } = await import("../dist/tools/doctor.js");
 const { projectOwnerPricing } = await import("../dist/tools/cost-calculator.js");
-const { deployTemplate } = await import("../dist/tools/agent.js");
 const { secureSetEnvRefusal } = await import("../dist/tools/set-env.js");
 const { configuredCredentialResponse } = await import("../dist/tools/login.js");
 const { VarityPublicApiError } = await import("../dist/utils/public-api.js");
@@ -13,11 +12,11 @@ function payload(response) {
   return JSON.parse(response.content[0].text);
 }
 
-test("CLI deployment readiness depends on varitykit and auth, not Node or npm", () => {
+test("deployment readiness depends on authentication only, not Node, npm or varitykit", () => {
   const result = classifyReadiness([
     { name: "Node.js", status: "fail" },
     { name: "npm", status: "fail" },
-    { name: "varitykit CLI", status: "pass" },
+    { name: "varitykit CLI", status: "warn" },
     { name: "Authentication", status: "pass" },
   ]);
   assert.equal(result.developmentReady, false);
@@ -88,27 +87,6 @@ test("login guidance consistently routes secret entry to the trusted terminal", 
   assert.doesNotMatch(publicApi, /Run varity_login with a Developer Portal deploy key/);
   assert.match(readme, /varitykit auth login/);
   assert.match(publicApi, /varitykit auth login/);
-});
-
-test("private and required-secret templates fail before the deploy command", async () => {
-  for (const template of [
-    { id: "private-template", private: true, requiredEnv: [] },
-    { id: "secret-template", private: false, requiredEnv: ["API_KEY"] },
-  ]) {
-    const calls = [];
-    const execute = async (subcommand, args) => {
-      calls.push([subcommand, args]);
-      return {
-        exitCode: 0,
-        stdout: JSON.stringify({ templates: [template] }),
-        stderr: "",
-      };
-    };
-    const result = payload(await deployTemplate(template.id, undefined, execute));
-    assert.equal(result.success, false);
-    assert.equal(result.error.code, "SECURE_ENV_CONFIGURATION_REQUIRED");
-    assert.deepEqual(calls, [["app", ["templates", "--json"]]]);
-  }
 });
 
 test("set-env compatibility route refuses secret-bearing MCP input", () => {

@@ -2,15 +2,44 @@
  * The one HTTP client for every Varity Cloud call the MCP makes.
  *
  * Every read and every lifecycle mutation (deployments and CPU machines) goes
- * through `publicApiRequest`, so auth (`VARITY_API_KEY ?? VARITY_DEPLOY_KEY`,
- * read by `getApiKey`), the timeout and error shape exist once. WHY: mutations used to shell to the `varitykit` CLI, which read a
- * different key and tagged every MCP deploy as `cli` (evidence p2-cli-mcp D10,
- * D11). The gateway attributes a create by its body `source` field
+ * through `publicApiRequest`, so auth (the deploy key resolved by
+ * `getApiKey`), the User-Agent, the timeout and error shape exist once. The
+ * gateway attributes a create by its body `source` field
  * (`deploymentOperationSurfaceForCreate`), so `createDeployment` sets
  * `source: "mcp"`.
  */
 import { randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
 import { getApiKey, INFRASTRUCTURE } from "./config.js";
+
+const PACKAGE_VERSION = (createRequire(import.meta.url)("../../package.json") as { version: string }).version;
+
+/**
+ * The MCP client's `initialize` identity, read per request. The stdio process
+ * runs one server, which sets this once; a later server in the same process
+ * replaces it.
+ */
+let clientInfo: () => { name?: string; version?: string } | undefined = () => undefined;
+
+export function setClientInfoProvider(provider: () => { name?: string; version?: string } | undefined): void {
+  clientInfo = provider;
+}
+
+/** A bounded, low-cardinality token: no spaces, parentheses, separators or private text. */
+function uaToken(value: string | undefined): string {
+  const token = (value ?? "").replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64);
+  return token || "unknown";
+}
+
+/**
+ * `varity-mcp/<version> (<client>/<client version>; transport=stdio)`. Attribution
+ * only: `source: "mcp"` on create stays canonical, and no key, path,
+ * repository or account value is ever part of it.
+ */
+export function userAgent(): string {
+  const client = clientInfo();
+  return `varity-mcp/${PACKAGE_VERSION} (${uaToken(client?.name)}/${uaToken(client?.version)}; transport=stdio)`;
+}
 
 export class VarityPublicApiError extends Error {
   constructor(
@@ -30,8 +59,8 @@ const BILLING_URL = `${INFRASTRUCTURE.DASHBOARD}/billing`;
 /** Where the portal's "Create deploy key" button lives; the portal calls these keys "deploy keys". */
 export const DEPLOY_KEY_URL = `${INFRASTRUCTURE.DASHBOARD}/settings?tab=api-keys`;
 const DEPLOY_KEY_ACTION =
-  `Create a new deploy key at ${DEPLOY_KEY_URL}, set it as VARITY_API_KEY in the MCP server environment ` +
-  "(or run `varitykit auth login` in a trusted terminal), then call varity_doctor.";
+  `Create a new deploy key at ${DEPLOY_KEY_URL}, set it as VARITY_DEPLOY_KEY in the MCP server environment ` +
+  "(or run `varitykit auth login` in a trusted terminal; it saves the key to ~/.varitykit/config.json), then call varity_doctor.";
 
 /**
  * MCP copy for billing refusals, keyed by the closed codes the owner serves in
@@ -154,7 +183,7 @@ async function authHeaders(): Promise<Record<string, string>> {
       "Not authenticated with Varity.",
       "NOT_AUTHENTICATED",
       401,
-      `Run varity_login, or create a deploy key at ${DEPLOY_KEY_URL} and set it as VARITY_API_KEY in the MCP server environment.`
+      `Run varity_login, or create a deploy key at ${DEPLOY_KEY_URL} and set it as VARITY_DEPLOY_KEY in the MCP server environment.`
     );
   }
   return {
@@ -180,6 +209,7 @@ async function sendRequest<T>(
   const headers: Record<string, string> = options.anonymous
     ? { Accept: "application/json" }
     : await authHeaders();
+  headers["User-Agent"] = userAgent();
   if (options.body !== undefined) headers["Content-Type"] = "application/json";
   if (options.idempotencyKey) headers["Idempotency-Key"] = options.idempotencyKey;
   const controller = new AbortController();
@@ -296,19 +326,40 @@ export interface PublicRunAcceptance {
 }
 
 /**
+ * One create through an `Idempotency-Key` generated per call (never derived
+ * from the request: REGRESSIONS-LEDGER R839). A 504
+ * `deploy_acceptance_unconfirmed` means the gateway cannot tell whether the
+ * create was accepted; exactly one resend with the same key returns the
+ * existing operation and never starts a second one (gateway #857); the served
+ * `idempotency_key` is used when present. Any other
+ * failure, or a second 504, is returned unchanged.
+ */
+async function idempotentCreate<T>(path: string, body: unknown, keyPrefix: string): Promise<T> {
+  const idempotencyKey = `${keyPrefix}:${randomUUID()}`;
+  try {
+    return await publicApiRequest<T>("POST", path, { body, idempotencyKey });
+  } catch (err) {
+    if (!(err instanceof VarityPublicApiError && err.status === 504 && err.code === "deploy_acceptance_unconfirmed")) {
+      throw err;
+    }
+    // The gateway names the key it holds the create under; it equals ours.
+    const served = err.served?.idempotency_key;
+    return publicApiRequest<T>("POST", path, {
+      body,
+      idempotencyKey: typeof served === "string" && served ? served : idempotencyKey,
+    });
+  }
+}
+
+/**
  * `POST /api/deployments`. The body is the public create contract (repo_url,
  * image, template_id, hosting, env, ...) passed through unchanged; `source`
- * is always `mcp` so the operation is attributed to this surface. An
- * `Idempotency-Key` is sent only when the caller passes one.
+ * is always `mcp` so the operation is attributed to this surface.
  */
-export async function createDeployment(
-  request: Record<string, unknown>,
-  idempotencyKey?: string
-): Promise<PublicRunAcceptance> {
-  return publicApiRequest<PublicRunAcceptance>("POST", "/api/deployments", {
-    body: { ...request, source: "mcp" },
-    idempotencyKey,
-  });
+export async function createDeployment(request: Record<string, unknown>): Promise<PublicRunAcceptance> {
+  return idempotentCreate<PublicRunAcceptance>(
+    "/api/deployments", { ...request, source: "mcp" }, "mcp-deploy"
+  );
 }
 
 /** `DELETE /api/deployments/:id` — 202 `{status:"deleting", run_id}` or 200 `{deleted:true}`. */
@@ -318,9 +369,33 @@ export async function deleteDeployment(
   return publicApiRequest("DELETE", deploymentPath(deployment));
 }
 
-/** `POST /api/deployments/:id/redeploy` — 202 `{run_id}`. */
+/** `POST /api/deployments/:id/redeploy` — 202 `{run_id}`; keyed like a create. */
 export async function redeploy(deployment: string): Promise<PublicRunAcceptance> {
-  return publicApiRequest<PublicRunAcceptance>("POST", deploymentPath(deployment, "/redeploy"));
+  return idempotentCreate<PublicRunAcceptance>(deploymentPath(deployment, "/redeploy"), undefined, "mcp-redeploy");
+}
+
+/** `GET /api/templates` — the gateway-owned certified template catalog. */
+export async function listTemplates<T>(): Promise<T[]> {
+  const data = await publicApiGet<{ templates?: T[] }>("/api/templates");
+  return Array.isArray(data.templates) ? data.templates : [];
+}
+
+/** `GET /api/templates/:id` — 404 `template_not_found` for an unknown or uncertified id. */
+export async function getTemplate<T>(id: string): Promise<T> {
+  const data = await publicApiGet<{ template?: T }>(`/api/templates/${encodeURIComponent(id)}`);
+  if (!data.template) {
+    throw new VarityPublicApiError("Template not found.", "template_not_found", 404);
+  }
+  return data.template;
+}
+
+/** `POST /api/templates/:id/deploy` — 202 acceptance with `source: "mcp"`. */
+export async function deployTemplate(id: string, name?: string): Promise<PublicRunAcceptance> {
+  return idempotentCreate<PublicRunAcceptance>(
+    `/api/templates/${encodeURIComponent(id)}/deploy`,
+    { ...(name ? { name } : {}), source: "mcp" },
+    "mcp-template-deploy"
+  );
 }
 
 /**

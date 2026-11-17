@@ -61,9 +61,7 @@ export function registerInstallDepsTool(server: McpServer): void {
             "Specific packages to install (e.g., ['axios', 'lodash']). If omitted, runs npm install for all dependencies."
           ),
       },
-      annotations: {
-        destructiveHint: true,
-      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     async ({ path, packages }) => {
       const cwd = path || process.cwd();

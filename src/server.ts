@@ -23,6 +23,7 @@ import { registerSetEnvTool } from "./tools/set-env.js";
 import { registerRedeployTool } from "./tools/redeploy.js";
 import { registerMachinesTools } from "./tools/machines.js";
 import { instrumentMcpServer } from "./telemetry.js";
+import { setClientInfoProvider } from "./utils/public-api.js";
 
 const require = createRequire(import.meta.url);
 const packageMetadata = require("../package.json") as { version?: unknown };
@@ -68,7 +69,7 @@ export function strictToolInputs(server: McpServer): void {
  *   - Discovery: search-docs, cost-calculator, doctor
  *   - Setup: install-deps, build, login
  *   - Deploy own code: deploy, deploy-status, deploy-logs, delete-deployment
- *   - Operate: secret-safe set-env compatibility route; redeploy (trackable configuration reapply; not verified restart)
+ *   - Operate: secret-safe set-env compatibility route; redeploy (restart of the last successful release at its saved commit)
  *   - CPU and GPU VMs: machines-list, machines-create (caller's SSH public key), machines-delete (waits for billing stop)
  *   - Deploy certified templates: list-templates, template-info, deploy-template
  *   - Local development: open-browser, dev-server
@@ -84,6 +85,8 @@ export function createVarityServer(): McpServer {
   // runs inside the same secret-safe MCP server span implementation.
   instrumentMcpServer(server);
   strictToolInputs(server);
+  // The public-API User-Agent names the client from `initialize`.
+  setClientInfoProvider(() => server.server.getClientVersion());
 
   // ── Resources (stable routes to live owners) ──
   registerResources(server);

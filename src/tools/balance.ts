@@ -23,7 +23,7 @@ export function registerBalanceTool(server: McpServer): void {
     title: "Account Balance",
     description: "Read your Varity balance in USD: available, authorization maximum, and owed. reserved_usd is the served authorization maximum, not a measure of funded backing. Amounts are exact decimal USD strings. Use before deploying or when asked how much balance remains. An unavailable read is never reported as zero.",
     inputSchema: {},
-    annotations: { readOnlyHint: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, async () => {
     try {
       const body = await publicApiGet<Record<string, unknown>>(BALANCE_PATH);

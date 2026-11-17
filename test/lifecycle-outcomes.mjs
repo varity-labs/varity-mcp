@@ -7,9 +7,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 process.env["VARITY_GATEWAY_URL"] = "https://gw.test";
-process.env["VARITY_API_KEY"] = "api-key";
+process.env["VARITY_DEPLOY_KEY"] = "api-key";
 
-const { lifecycleTracking } = await import("../dist/utils/cli-bridge.js");
 const { lifecycleAcceptance } = await import("../dist/utils/lifecycle-acceptance.js");
 const { deployAccepted, defaultAppName } = await import("../dist/tools/deploy.js");
 const { redeployAccepted } = await import("../dist/tools/redeploy.js");
@@ -31,17 +30,6 @@ function stubRunView(status, payload) {
 function payload(response) {
   return JSON.parse(response.content[0].text);
 }
-
-test("lifecycle tracking extracts only a valid durable run reference", () => {
-  assert.deepEqual(lifecycleTracking(`Accepted\nTrack it: varitykit app status ${RUN_ID}`), {
-    runId: RUN_ID,
-    statusCommand: `varitykit app status ${RUN_ID}`,
-  });
-  assert.deepEqual(lifecycleTracking("varitykit app status not-a-run"), {
-    runId: null,
-    statusCommand: null,
-  });
-});
 
 test("acceptance reads public_status and outcome from the run view", async () => {
   const outcome = { classification: "user", code: "build_failed" };
@@ -83,11 +71,7 @@ test("lifecycle adapters expose the owner's run status or an unproven outcome", 
     { name: "delete", invoke: (accepted) => deleteAccepted("demo", accepted) },
     {
       name: "template",
-      invoke: (accepted) => templateDeployAccepted(
-        { id: "demo", name: "Demo" },
-        "demo-app",
-        accepted.run_id ? `Accepted\nvaritykit app status ${accepted.run_id}` : "Accepted"
-      ),
+      invoke: (accepted) => templateDeployAccepted({ id: "demo", name: "Demo" }, "demo-app", accepted),
     },
   ];
   for (const scenario of cases) {
