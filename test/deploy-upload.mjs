@@ -228,16 +228,26 @@ test("a private repo while the upload route is off still explains, deploys nothi
 });
 
 test("J-14: once an upload worked, an explicit private repo_url offers the folder upload first, publishing last", async () => {
-  // E3 (journey 2.3.29): the offer reuses what the upload route last answered; earlier tests in this file turned it off.
+  // E3 (journey 2.3.29): the offer reuses what this server's upload route last answered.
   const { dir, cleanup } = project();
+  const stub = stubGateway({
+    [SOURCES]: [SLOT()], [PUT]: [SEALED],
+    [CREATE]: [ACCEPTED, [422, { code: "source_repository_unreadable", message: "supplied token cannot read" }]],
+  });
+  const [serverSide, clientSide] = InMemoryTransport.createLinkedPair();
+  await createVarityServer().connect(serverSide);
+  const client = new Client({ name: "u6-same-server", version: "1" });
+  await client.connect(clientSide);
+  let out;
   try {
-    assert.equal((await callTool({ [SOURCES]: [SLOT()], [PUT]: [SEALED], [CREATE]: [ACCEPTED] }, { path: dir })).out.success, true);
+    const first = JSON.parse((await client.callTool({ name: "varity_deploy", arguments: { path: dir } })).content[0].text);
+    assert.equal(first.success, true);
+    out = JSON.parse((await client.callTool({ name: "varity_deploy", arguments: { repo_url: "https://github.com/acme/secret-app" } })).content[0].text);
   } finally {
+    await client.close();
+    stub.restore();
     cleanup();
   }
-  const { out } = await callTool({
-    [CREATE]: [[422, { code: "source_repository_unreadable", message: "supplied token cannot read" }]],
-  }, { repo_url: "https://github.com/acme/secret-app" });
   assert.equal(out.error.code, "source_repository_unreadable");
   assert.match(out.error.message, /private or does not exist\. Nothing was deployed and nothing was charged\./);
   const suggestion = out.error.suggestion;

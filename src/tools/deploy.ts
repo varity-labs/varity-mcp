@@ -6,10 +6,10 @@ import {
   createUploadDeployment,
   createUploadSource,
   uploadSourceArchive,
+  CHAT_AND_BUILD_URL,
   VarityPublicApiError,
 } from "../utils/public-api.js";
 import { acceptanceSummary, lifecycleAcceptance } from "../utils/lifecycle-acceptance.js";
-import { INFRASTRUCTURE } from "../utils/endpoints.js";
 import type { PackedFolder } from "./pack.js";
 
 /**
@@ -55,20 +55,20 @@ export async function deployAccepted(accepted: Awaited<ReturnType<typeof createD
   );
 }
 
-/** Varity's no-GitHub path for a non-coder today: the Portal's Chat and Build (describe the app; Varity builds and publishes it). */
-export const CHAT_AND_BUILD_URL = `${INFRASTRUCTURE.DASHBOARD}/ai-gateway?tab=chat&mode=build`;
 const NO_FOLDER_YET = "Varity can't take a folder from this computer yet.";
 const NO_GITHUB_PATH =
   `The way to get a site online today without GitHub is Varity's Chat and Build: describe the app, and Varity builds it ` +
   `and publishes it to a live address. No GitHub needed: ${CHAT_AND_BUILD_URL}`;
 
 /**
- * What this process has seen the upload route answer (J-23/E3): "available"
- * once a source slot was created, "unavailable" once the route answered off
+ * What this server has seen the upload route answer (J-23/E3): "available"
+ * once an archive upload succeeded, "unavailable" once the route answered off
  * (404/405/501/`uploads_unavailable`). There is no side-effect-free probe, so
- * until an upload works no copy promises one.
+ * until an upload works no copy promises one. One per registered tool.
  */
-let uploadState: "unknown" | "available" | "unavailable" = "unknown";
+interface UploadState {
+  upload: "unknown" | "available" | "unavailable";
+}
 
 /**
  * The gateway answers 422 `source_repository_unreadable` for a private or
@@ -77,11 +77,11 @@ let uploadState: "unknown" | "available" | "unavailable" = "unknown";
  * local folder the upload leads only once this process has seen it work (U-6);
  * otherwise the no-GitHub path leads, then templates and images.
  */
-function unreadableRepository(repoUrl: string | undefined, canUpload: boolean): [string, string] {
+function unreadableRepository(repoUrl: string | undefined, canUpload: boolean, state: UploadState): [string, string] {
   const slug = repoUrl?.match(/github\.com[/:]([^/]+\/[^/]+?)(?:\.git)?\/?$/)?.[1] ?? "<owner>/<repo>";
   const publish =
     `Only if the user decides to publish the code can the repository be made public (gh repo edit ${slug} --visibility public --accept-visibility-change-consequences); ask first.`;
-  if (canUpload && uploadState === "available") {
+  if (canUpload && state.upload === "available") {
     return [
       "Varity could not read this repository: it is private or does not exist. Nothing was deployed and nothing was charged.",
       "Offer this first, in plain words: \"I'll upload your project folder to Varity instead; your code stays private.\" " +
@@ -91,13 +91,13 @@ function unreadableRepository(repoUrl: string | undefined, canUpload: boolean): 
     ];
   }
   const tryUpload =
-    canUpload && uploadState === "unknown"
+    canUpload && state.upload === "unknown"
       ? "If the user wants their own folder online, you may try varity_deploy with path set to the project folder and source \"upload\", " +
         "but do not promise it works or that the code stays private: if it answers UPLOAD_UNAVAILABLE, Varity can't take a folder from this computer yet. "
       : "";
   return [
     "Varity could not read this repository: it is private or does not exist. Nothing was deployed and nothing was charged.",
-    `Explain this plainly${canUpload && uploadState === "unavailable" ? ` (${NO_FOLDER_YET})` : ""}. ${NO_GITHUB_PATH} ` +
+    `Explain this plainly${canUpload && state.upload === "unavailable" ? ` (${NO_FOLDER_YET})` : ""}. ${NO_GITHUB_PATH} ` +
       tryUpload +
       "For developers, paths that keep the code private: a ready-made Varity template (varity_list_templates) " +
       "or a prebuilt container image (image argument). " +
@@ -130,12 +130,12 @@ const UPLOAD_UNAVAILABLE_ACTION =
   "Last, and only if the user decides to make the code public: push it to a public GitHub repository " +
   "(varity_create_repo, then make it public) and deploy its repo_url; ask first.";
 
-function uploadError(err: unknown, step: "upload" | "deploy") {
+function uploadError(err: unknown, step: "upload" | "deploy", state: UploadState) {
   if (!(err instanceof VarityPublicApiError)) {
     return errorResponse("UPLOAD_FAILED", "The folder upload failed, so nothing was deployed or charged.", "Retry the deploy.");
   }
   if ((step === "upload" && uploadUnavailable(err)) || err.code === "uploads_unavailable") {
-    uploadState = "unavailable";
+    state.upload = "unavailable";
     return errorResponse(
       "UPLOAD_UNAVAILABLE",
       "Deploying a folder straight from this computer is not switched on at Varity yet. " +
@@ -175,7 +175,8 @@ async function deployFolder(
   local: LocalSource,
   folder: string,
   request: Record<string, unknown>,
-  why: string
+  why: string,
+  state: UploadState
 ) {
   let packed: PackedFolder;
   try {
@@ -188,7 +189,6 @@ async function deployFolder(
   let sourceId: string;
   try {
     const slot = await createUploadSource();
-    uploadState = "available";
     if (packed.archive.length > slot.max_bytes) {
       return errorResponse(
         "source_too_large",
@@ -197,15 +197,16 @@ async function deployFolder(
       );
     }
     await uploadSourceArchive(slot, packed.archive);
+    state.upload = "available";
     sourceId = slot.source_id;
   } catch (err) {
-    return uploadError(err, "upload");
+    return uploadError(err, "upload", state);
   }
   let accepted: Awaited<ReturnType<typeof createUploadDeployment>>;
   try {
     accepted = await createUploadDeployment(request, sourceId);
   } catch (err) {
-    return uploadError(err, "deploy");
+    return uploadError(err, "deploy", state);
   }
   const acceptance = await lifecycleAcceptance(accepted);
   const secrets = packed.secretPaths;
@@ -242,6 +243,7 @@ const NEEDS_PATH =
   "Pass path as the absolute path of the project folder (the server's working directory is rarely the project), then deploy again.";
 
 export function registerDeployTool(server: McpServer, localSource?: LocalSource): void {
+  const uploadState: UploadState = { upload: "unknown" };
   const pathInput = {
     path: z
       .string()
@@ -356,7 +358,7 @@ export function registerDeployTool(server: McpServer, localSource?: LocalSource)
         folder = local;
         const upload = (why: string) =>
           local.explicit
-            ? deployFolder(localSource, local.folder, { app_name: app_name || defaultAppName(folderName(local.folder)), ...volume }, why)
+            ? deployFolder(localSource, local.folder, { app_name: app_name || defaultAppName(folderName(local.folder)), ...volume }, why, uploadState)
             : Promise.resolve(errorResponse("PROJECT_PATH_REQUIRED", `${why ? `${why} to upload it I need` : "Uploading needs"} the folder's exact location.`, NEEDS_PATH));
         if (source === "upload") return upload("");
         if (!local.repoUrl) return upload("This project has no GitHub repository, so");
@@ -384,10 +386,11 @@ export function registerDeployTool(server: McpServer, localSource?: LocalSource)
               localSource,
               folder.folder,
               { app_name: app_name || defaultAppName(repoUrl!), ...volume },
-              "Varity cannot read this project's GitHub repository (it is private), so"
+              "Varity cannot read this project's GitHub repository (it is private), so",
+              uploadState
             );
           }
-          return errorResponse(err.code, ...unreadableRepository(repoUrl, Boolean(localSource)));
+          return errorResponse(err.code, ...unreadableRepository(repoUrl, Boolean(localSource), uploadState));
         }
         if (err instanceof VarityPublicApiError) {
           return errorResponse(err.code, err.message, err.action ?? "Check the request and retry.");

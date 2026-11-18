@@ -130,7 +130,7 @@ The URL comes from `varity_deploy_status` and the monthly maximum from `varity_c
 | `varity_cost_calculator` | Project the live owner's monthly or hourly USD estimate without converting units; pre-deploy estimates need no sign-in |
 | `varity_balance` | Read your available balance, the amount set aside for your running apps (`reserved_usd`) and the amount owed; the message rounds to cents and the data keeps the exact decimal USD strings; unavailable reads never become zero |
 | `varity_doctor` | Check that your environment is ready to deploy |
-| `varity_login` | Connect Varity: opens a browser tab where you confirm (or shows a short code on a machine without a browser); no key to copy, no restart |
+| `varity_login` | Connect Varity: when browser sign-in is switched on, opens a browser tab where you confirm (or shows a short code on a machine without a browser); until then it tells you to add a deploy key to your editor's MCP settings and restart the editor |
 | `varity_logout` | Sign this computer out: revokes the saved sign-in on Varity, then removes it |
 | `varity_install_deps` | Install project dependencies |
 | `varity_build` | Build the project |
@@ -146,7 +146,7 @@ The URL comes from `varity_deploy_status` and the monthly maximum from `varity_c
 | `varity_domain_verify` | Check whether that DNS record is in place and the domain is live |
 | `varity_domain_remove` | Stop serving an app at its custom domain (it keeps its Varity address) |
 | `varity_redeploy` | Restart a deployed dynamic or container app from its last successful release at its saved commit; a static site cannot be restarted. To ship new commits, push and run `varity_deploy` again with the same app name |
-| `varity_machines_list` | List your CPU and GPU virtual machines (optionally the CPU or, with `gpu`, GPU VM profile catalog) |
+| `varity_machines_list` | List your CPU and GPU virtual machines that are still running or billing, one line each (`include_stopped` adds stopped ones; `limit`, default 20, up to 100), optionally with the CPU or, with `gpu`, GPU VM profile catalog |
 | `varity_machines_create` | Quote and create a CPU or (`gpu: true`) GPU virtual machine with your SSH public key |
 | `varity_machines_delete` | Delete a CPU or GPU virtual machine and confirm its billing stopped |
 | `varity_list_templates` | List certified gateway-owned Varity templates |
@@ -201,10 +201,12 @@ that require a remote MCP URL are not supported by this package.
 - **Node.js** >= 22.11 (the current supported LTS baseline; EOL Node 18/20 are unsupported)
 - **A Varity deploy key** for deploys and account reads. This is the way to
   connect today: create one at
-  https://developer.store.varity.so/dashboard/settings?tab=api-keys (the
-  Portal asks for a payment method before it issues a deploy key) and add it
-  as `VARITY_DEPLOY_KEY` in your editor's MCP settings for Varity. Keep the key
-  out of the chat.
+  https://developer.store.varity.so/dashboard/settings?tab=api-keys, add it
+  as `VARITY_DEPLOY_KEY` in your editor's MCP settings for Varity, then restart
+  your editor or AI assistant. Keep the key out of the chat. If the Portal asks
+  for a payment method before it creates the key, you can still put a site
+  online today without a card using Chat and Build:
+  https://developer.store.varity.so/dashboard/ai-gateway?tab=chat&mode=build
   Connecting through a browser sign-in (`varity_login` opens a browser tab, you
   confirm, and the sign-in is saved on this computer in
   `~/.varitykit/config.json`, readable only by you) is being switched on.

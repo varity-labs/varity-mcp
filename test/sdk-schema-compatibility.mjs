@@ -46,7 +46,9 @@ test("real SDK discovery retains scalar tool schemas and public machine results"
   const result = await client.callTool({ name: "varity_machines_list", arguments: { include_profiles: true } });
   const body = JSON.parse(result.content[0].text);
   assert.equal(body.success, true);
-  assert.equal(body.data.machines[0].machine_id, "machine-1");
+  // F4: the text has one short line per machine; the full record is in structured data.
+  assert.equal(body.data.machines[0], "unnamed (machine-1): billing active");
+  assert.equal(result.structuredContent.data.machines[0].machine_id, "machine-1");
   assert.equal(body.data.profiles.profiles[0].id, "profile-1");
   assert.deepEqual(calls.map(call => call.path), ["/api/machines", "/api/deployment-profiles"]);
 });

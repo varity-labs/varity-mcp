@@ -37,8 +37,8 @@ async function connect() {
 }
 
 /** `METHOD path` → [status, body]; anything else answers 404 not_found. */
-async function call(name, args, routes) {
-  const client = await connect();
+async function call(name, args, routes, shared) {
+  const client = shared ?? (await connect());
   const original = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
     const { pathname, search } = new URL(url);
@@ -47,10 +47,10 @@ async function call(name, args, routes) {
   };
   try {
     const result = await client.callTool({ name, arguments: args });
-    return { out: JSON.parse(result.content[0].text), size: result.content[0].text.length };
+    return { out: JSON.parse(result.content[0].text), size: Buffer.byteLength(result.content[0].text), structured: result.structuredContent };
   } finally {
     globalThis.fetch = original;
-    await client.close();
+    if (!shared) await client.close();
   }
 }
 
@@ -85,12 +85,12 @@ test("E3 (fresh process): a private repo does not lead with an upload nobody has
   assert.ok(at(s, "varity_list_templates") < at(s, "--visibility public"), s);
 });
 
+const UPLOAD_OFF = { [SOURCES]: [404, { code: "uploads_unavailable", message: "Deploying uploaded files is not available yet." }] };
+
 test("J-23: upload off → Chat and Build first, templates next, public GitHub last; never another host", async () => {
   const { dir, cleanup } = folder();
   try {
-    const { out } = await call("varity_deploy", { path: dir }, {
-      [SOURCES]: [404, { code: "uploads_unavailable", message: "Deploying uploaded files is not available yet." }],
-    });
+    const { out } = await call("varity_deploy", { path: dir }, UPLOAD_OFF);
     assert.equal(out.error.code, "UPLOAD_UNAVAILABLE");
     const s = out.error.suggestion;
     assert.match(s, new RegExp(NO_FOLDER_YET));
@@ -104,10 +104,19 @@ test("J-23: upload off → Chat and Build first, templates next, public GitHub l
   }
 });
 
-test("E3: after the upload route said it is off, a private repo never offers the upload", async () => {
-  const { out } = await call("varity_deploy", { repo_url: "https://github.com/acme/secret-app" }, {
-    [CREATE]: [422, { code: "source_repository_unreadable", message: "x" }],
-  });
+test("E3: after the upload route said it is off, a private repo never offers the upload (same server)", async () => {
+  const client = await connect();
+  const { dir, cleanup } = folder();
+  let out;
+  try {
+    assert.equal((await call("varity_deploy", { path: dir }, UPLOAD_OFF, client)).out.error.code, "UPLOAD_UNAVAILABLE");
+    ({ out } = await call("varity_deploy", { repo_url: "https://github.com/acme/secret-app" }, {
+      [CREATE]: [422, { code: "source_repository_unreadable", message: "x" }],
+    }, client));
+  } finally {
+    cleanup();
+    await client.close();
+  }
   const s = out.error.suggestion;
   assert.doesNotMatch(s, /source "upload"|upload your project folder/i, s);
   assert.match(s, new RegExp(NO_FOLDER_YET));
@@ -143,7 +152,8 @@ test("VM-LIST: by default only machines still billing are listed, with a count o
   const { out, size } = await call("varity_machines_list", {}, {
     "GET /api/machines": [200, { machines: FLEET, inventory_status: "complete" }],
   });
-  assert.deepEqual(out.data.machines.map((m) => m.machine_id), ["m-300", "m-301", "m-302"]);
+  assert.equal(out.data.machines.length, 3);
+  ["m-300", "m-301", "m-302"].forEach((id, i) => assert.match(out.data.machines[i], new RegExp(`^box-${id.slice(2)} \\(${id}\\): billing (active|pending)$`)));
   assert.equal(out.data.total_count, 303);
   assert.equal(out.data.not_listed_count, 300);
   assert.match(out.message, /^3 machine\(s\) running or billing\. 300 more with billing stopped are not listed; set include_stopped to list them\.$/);
@@ -195,4 +205,64 @@ test("J-22: the set_env restart hold uses the measured release time, not 'a few 
   }
   const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
   assert.doesNotMatch(readme, /maximum for a few minutes/);
+});
+
+test("F4: machines text is one short line per machine; full records only in structured data, bounded at limit 100", async () => {
+  const { out, size, structured } = await call("varity_machines_list", { include_stopped: true, limit: 100 }, {
+    "GET /api/machines": [200, { machines: FLEET, inventory_status: "complete" }],
+  });
+  assert.equal(out.data.machines.length, 100);
+  for (const line of out.data.machines) assert.equal(typeof line, "string");
+  assert.doesNotMatch(JSON.stringify(out), /xxxxxxxxxx/, "no full record in the text");
+  assert.ok(size < 12_000, `text ${size} bytes`);
+  assert.equal(structured.data.machines.length, 100);
+  assert.equal(structured.data.machines[0].hardware.memory_mb, 21504);
+});
+
+test("F1: the deploy-key path tells a user without a card about Chat and Build", async () => {
+  const { DEPLOY_KEY_ACTION } = await import("../dist/utils/public-api.js");
+  const { KEY_SIGN_IN_LINE } = await import("../dist/tools/login.js");
+  const line = `If the Portal asks for a payment method before it creates the key, you can still put a site online today without a card using Chat and Build: ${CHAT_AND_BUILD}`;
+  for (const text of [DEPLOY_KEY_ACTION, KEY_SIGN_IN_LINE]) assert.ok(text.includes(line), text);
+});
+
+test("A3: the upload answer belongs to one server: a new server starts unknown", async () => {
+  const { out } = await call("varity_deploy", { repo_url: "https://github.com/acme/secret-app" }, {
+    [CREATE]: [422, { code: "source_repository_unreadable", message: "x" }],
+  });
+  assert.match(out.error.suggestion, /you may try varity_deploy with path/);
+});
+
+test("A4: a created slot whose upload failed never makes the upload 'available'", async () => {
+  const client = await connect();
+  const { dir, cleanup } = folder();
+  const slot = { source_id: "src_1", upload_url: "/api/deployments/sources/src_1", upload_method: "PUT", upload_headers: {}, max_bytes: 52428800 };
+  let out;
+  try {
+    await call("varity_deploy", { path: dir }, { [SOURCES]: [201, slot], "PUT /api/deployments/sources/src_1": [503, { code: "unavailable" }] }, client);
+    ({ out } = await call("varity_deploy", { repo_url: "https://github.com/acme/secret-app" }, {
+      [CREATE]: [422, { code: "source_repository_unreadable", message: "x" }],
+    }, client));
+  } finally {
+    cleanup();
+    await client.close();
+  }
+  assert.doesNotMatch(out.error.suggestion, /I'll upload your project folder/);
+});
+
+test("A2: the deploy-key line says to restart the editor, and the action reuses that one line", async () => {
+  const { DEPLOY_KEY_ACTION } = await import("../dist/utils/public-api.js");
+  const { KEY_SIGN_IN_LINE } = await import("../dist/tools/login.js");
+  assert.match(KEY_SIGN_IN_LINE, /add it as VARITY_DEPLOY_KEY in your editor's MCP settings, then restart your editor or AI assistant\./);
+  assert.ok(DEPLOY_KEY_ACTION.includes(`"${KEY_SIGN_IN_LINE}"`), DEPLOY_KEY_ACTION);
+});
+
+test("A1/A7: no README line promises no key or no restart; the machines row names the new arguments", () => {
+  const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  assert.doesNotMatch(readme, /no key to copy|no restart|No key to copy/i);
+  const row = readme.split("\n").find((l) => l.startsWith("| `varity_machines_list`"));
+  assert.match(row, /include_stopped/);
+  assert.match(row, /limit/);
+  const login = readme.split("\n").find((l) => l.startsWith("| `varity_login`"));
+  assert.match(login, /deploy key/);
 });
