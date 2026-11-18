@@ -111,10 +111,11 @@ function uploadError(err: unknown, step: "upload" | "deploy") {
   if (!(err instanceof VarityPublicApiError)) {
     return errorResponse("UPLOAD_FAILED", "The folder upload failed, so nothing was deployed or charged.", "Retry the deploy.");
   }
-  if (step === "upload" && uploadUnavailable(err)) {
+  if ((step === "upload" && uploadUnavailable(err)) || err.code === "uploads_unavailable") {
     return errorResponse(
       "UPLOAD_UNAVAILABLE",
-      "Deploying a folder straight from this computer is not switched on at Varity yet. Nothing was uploaded, deployed or charged.",
+      "Deploying a folder straight from this computer is not switched on at Varity yet. " +
+        (step === "upload" ? "Nothing was uploaded, deployed or charged." : "Nothing was deployed or charged."),
       UPLOAD_UNAVAILABLE_ACTION
     );
   }
@@ -205,6 +206,11 @@ async function deployFolder(
     },
     `${notes.join(" ")} ${acceptanceSummary("Deploy", accepted.id, acceptance)}`
   );
+}
+
+/** The last segment of a local folder path, on any platform. */
+function folderName(folder: string): string {
+  return folder.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "app";
 }
 
 const NEEDS_PATH =
@@ -323,8 +329,8 @@ export function registerDeployTool(server: McpServer, localSource?: LocalSource)
         folder = local;
         const upload = (why: string) =>
           local.explicit
-            ? deployFolder(localSource, local.folder, { app_name: app_name || defaultAppName(local.folder), ...volume }, why)
-            : Promise.resolve(errorResponse("PROJECT_PATH_REQUIRED", `${why} Uploading the folder needs its exact location.`, NEEDS_PATH));
+            ? deployFolder(localSource, local.folder, { app_name: app_name || defaultAppName(folderName(local.folder)), ...volume }, why)
+            : Promise.resolve(errorResponse("PROJECT_PATH_REQUIRED", `${why ? `${why} to upload it I need` : "Uploading needs"} the folder's exact location.`, NEEDS_PATH));
         if (source === "upload") return upload("");
         if (!local.repoUrl) return upload("This project has no GitHub repository, so");
         repoUrl = local.repoUrl;

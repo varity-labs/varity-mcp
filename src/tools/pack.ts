@@ -129,6 +129,11 @@ export class PackRefused extends Error {
 
 const MB = 1024 * 1024;
 
+/** A path safe to show: control characters replaced. */
+function printable(path: string): string {
+  return path.replace(/[\u0000-\u001f\u007f-\u009f]/g, "?");
+}
+
 export async function packFolder(root: string): Promise<PackedFolder> {
   const files: ArchiveFile[] = [];
   const secretPaths: string[] = [];
@@ -151,9 +156,10 @@ export async function packFolder(root: string): Promise<PackedFolder> {
       const path = relativeDirectory ? `${relativeDirectory}/${entry.name}` : entry.name;
       const absolute = join(directory, entry.name);
       const isDirectory = entry.isDirectory();
-      if (isDirectory && entry.name === ".git") continue;
+      // A .git directory, or the .git file of a worktree or submodule: never source.
+      if (entry.name.toLowerCase() === ".git") continue;
       if (isSecretPath(path)) {
-        secretPaths.push(isDirectory ? `${path}/` : path);
+        secretPaths.push(printable(isDirectory ? `${path}/` : path));
         continue;
       }
       if (ignored(defaults, path, isDirectory) || ignored(rules, path, isDirectory)) {
@@ -172,7 +178,7 @@ export async function packFolder(root: string): Promise<PackedFolder> {
       if (isUnsafeName(path)) {
         throw new PackRefused(
           "UNSAFE_FILE_NAME",
-          `The file name "${path.replace(/[\u0000-\u001f\u007f]/g, "?")}" contains a character Varity cannot store, so nothing was uploaded.`,
+          `The file name "${printable(path)}" contains a character Varity cannot store, so nothing was uploaded.`,
           "Rename that file (no backslashes or control characters) and deploy again.",
         );
       }
@@ -183,8 +189,9 @@ export async function packFolder(root: string): Promise<PackedFolder> {
           "Add large generated or data folders to .gitignore, then deploy again.",
         );
       }
-      const data = await readFile(absolute);
-      uncompressedBytes += data.length;
+      // Size first, so one huge file is refused without being read into memory.
+      const stats = await lstat(absolute);
+      uncompressedBytes += stats.size;
       if (uncompressedBytes > SOURCE_CAPS.maxUncompressedBytes) {
         throw new PackRefused(
           "FOLDER_TOO_LARGE",
@@ -192,7 +199,7 @@ export async function packFolder(root: string): Promise<PackedFolder> {
           "Add large generated, media or data folders to .gitignore, then deploy again.",
         );
       }
-      files.push({ path, data, executable: ((await lstat(absolute)).mode & 0o111) !== 0 });
+      files.push({ path, data: await readFile(absolute), executable: (stats.mode & 0o111) !== 0 });
     }
   }
 
@@ -204,7 +211,7 @@ export async function packFolder(root: string): Promise<PackedFolder> {
       "Check that the path points at the project folder.",
     );
   }
-  const archive = await buildSourceArchive(files);
+  const { archive, tarBytes } = await buildSourceArchive(files);
   if (archive.length > SOURCE_CAPS.maxCompressedBytes) {
     throw new PackRefused(
       "FOLDER_TOO_LARGE",
@@ -212,7 +219,8 @@ export async function packFolder(root: string): Promise<PackedFolder> {
       "Add large generated, media or data folders to .gitignore, then deploy again.",
     );
   }
-  if (uncompressedBytes > SOURCE_CAPS.maxRatio * archive.length) {
+  // The server measures the whole tar stream (headers included) with one record of slack.
+  if (tarBytes > SOURCE_CAPS.maxRatio * archive.length + 20 * 512) {
     throw new PackRefused(
       "FOLDER_NOT_UPLOADABLE",
       "This folder holds files that compress unusually far (more than 100 to 1), which Varity refuses, so nothing was uploaded.",

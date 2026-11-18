@@ -57,7 +57,7 @@ export function isSecretPath(relativePath: string): boolean {
     base.startsWith("id_rsa") ||
     SECRET_EXTENSIONS.some((extension) => base.endsWith(extension)) ||
     SERVICE_ACCOUNT.test(base) ||
-    rooted.includes("/.config/gcloud/") ||
+    rooted.includes(".config/gcloud/") ||
     rooted.endsWith("/.docker/config.json") ||
     rooted.endsWith("/.config/gh/hosts.yml")
   );
@@ -66,7 +66,7 @@ export function isSecretPath(relativePath: string): boolean {
 /** A path the server refuses as unsafe whatever it holds (backslash or control character). */
 export function isUnsafeName(relativePath: string): boolean {
   // eslint-disable-next-line no-control-regex
-  return /[\\\u0000-\u001f\u007f]/.test(relativePath);
+  return /[\\\u0000-\u001f\u007f-\u009f]/.test(relativePath);
 }
 
 export interface ArchiveFile {
@@ -143,8 +143,8 @@ function* tarChunks(files: readonly ArchiveFile[]): Generator<Buffer> {
   yield Buffer.alloc(BLOCK * 2);
 }
 
-/** One gzip member holding the tar of `files`, sorted by path. */
-export async function buildSourceArchive(files: readonly ArchiveFile[]): Promise<Buffer> {
+/** One gzip member holding the tar of `files`, sorted by path; `tarBytes` is the uncompressed stream length. */
+export async function buildSourceArchive(files: readonly ArchiveFile[]): Promise<{ archive: Buffer; tarBytes: number }> {
   const sorted = [...files].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   const gzip = createGzip({ level: 9 });
   const out: Buffer[] = [];
@@ -153,10 +153,12 @@ export async function buildSourceArchive(files: readonly ArchiveFile[]): Promise
     gzip.on("end", resolve);
     gzip.on("error", reject);
   });
+  let tarBytes = 0;
   for (const chunk of tarChunks(sorted)) {
+    tarBytes += chunk.length;
     if (!gzip.write(chunk)) await new Promise((resolve) => gzip.once("drain", resolve));
   }
   gzip.end();
   await done;
-  return Buffer.concat(out);
+  return { archive: Buffer.concat(out), tarBytes };
 }

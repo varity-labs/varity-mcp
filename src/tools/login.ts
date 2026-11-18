@@ -195,14 +195,16 @@ function pendingResponse(current: Session) {
   );
 }
 
-function failureResponse(error: LoginError) {
-  return errorResponse(
-    error.code,
-    error.message,
-    error.code === "SIGN_IN_UNAVAILABLE"
-      ? `Try varity_login again in a few minutes. ${DEVELOPER_OPTION}`
-      : `Call varity_login to start a new browser sign-in. ${DEVELOPER_OPTION}`
-  );
+/** When browser sign-in is down, the deploy key is the way in for everyone (J-21), not a developer aside. */
+export const KEY_SIGN_IN_LINE =
+  "Browser sign-in isn't available right now. You can connect with a deploy key instead: " +
+  `create one at ${DEPLOY_KEY_URL} and add it as VARITY_DEPLOY_KEY in your editor's MCP settings. Never paste it into the chat.`;
+
+export function failureResponse(error: LoginError) {
+  if (error.code === "SIGN_IN_UNAVAILABLE") {
+    return errorResponse(error.code, KEY_SIGN_IN_LINE, `Tell the user exactly this: "${KEY_SIGN_IN_LINE}"`);
+  }
+  return errorResponse(error.code, error.message, `Call varity_login to start a new browser sign-in. ${DEVELOPER_OPTION}`);
 }
 
 /** Check an existing key, then start one sign-in and make it the process's session. */

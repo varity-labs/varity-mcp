@@ -22,7 +22,27 @@ export const RESTART_NOTE =
 export async function setEnv(
   read_: ProjectEnvReader, deployment: string, projectPath: string, envFile: string, keys: string[], confirm: boolean | undefined
 ) {
-  const read = await read_(projectPath, envFile, keys, deployment, confirm);
+  // Read the app first (J-19): a static site has no settings, so nothing is asked or sent.
+  try {
+    const app = await getDeployment(deployment);
+    if (app.runtime === "static") {
+      return errorResponse(
+        "STATIC_SITE_HAS_NO_SETTINGS",
+        `${deployment} is a static site: it is served as files, so it has no settings to change. Settings work on apps that run a server. Nothing was changed.`,
+        "Tell the user plainly. If the site needs a secret at build time, it cannot hold one safely as a static site; it would need to run as an app with a server."
+      );
+    }
+  } catch (err) {
+    if (err instanceof VarityPublicApiError && err.status === 404) {
+      return errorResponse(
+        "DEPLOYMENT_NOT_FOUND",
+        `No deployment found with name "${deployment}". Nothing was changed.`,
+        `Check the exact name with varity_deploy_status or at ${INFRASTRUCTURE.DASHBOARD}.`
+      );
+    }
+    // Any other read failure: the send path below still refuses safely.
+  }
+  const read = await read_(projectPath, envFile, keys, deployment, confirm, RESTART_NOTE);
   if (!read.ok) return read.response;
   return withoutValues(await sendEnv(deployment, read.env, keys), Object.values(read.env));
 }
@@ -68,7 +88,18 @@ async function sendEnv(deployment: string, env: Record<string, string>, keys: st
       );
     }
     if (err instanceof VarityPublicApiError) {
-      return errorResponse(err.code, err.message, err.action ?? "Check the deployment with varity_deploy_status, then retry.");
+      // Never pass the gateway's 4xx wording through (J-19): a plain cause and a next step that can succeed.
+      const retryable = err.served?.retryable === true;
+      const cause = err.status === 409
+        ? `Varity did not change the settings on ${deployment}: another change to this app is still running, or this app does not take settings.`
+        : `Varity did not accept the settings change for ${deployment}.`;
+      return errorResponse(
+        err.code,
+        `${cause} Nothing was changed.`,
+        retryable
+          ? "Wait a minute, then try once more."
+          : "Check the app with varity_deploy_status. If a change is still running, wait until it finishes before trying again; otherwise tell the user the settings could not be changed."
+      );
     }
     return errorResponse("ENV_UPDATE_FAILED", "The settings could not be saved.", "Check the deployment with varity_deploy_status, then retry.");
   }

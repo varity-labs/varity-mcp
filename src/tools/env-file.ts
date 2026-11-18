@@ -147,8 +147,10 @@ export async function trustedRoots(server: McpServer): Promise<string[]> {
  * Ask before sending: only the key names and the app are shown. Returns null
  * when the user confirmed, else the response to return (nothing was sent).
  */
-export async function confirmSend(server: McpServer, keys: readonly string[], target: string, confirm: boolean | undefined) {
-  const question = `Set ${keys.join(", ")} on ${target}? The app will restart.`;
+export async function confirmSend(
+  server: McpServer, keys: readonly string[], target: string, confirm: boolean | undefined, note = "The app will restart."
+) {
+  const question = `Set ${keys.join(", ")} on ${target}? ${note}`;
   if (server.server.getClientCapabilities()?.elicitation) {
     try {
       const answer = await server.server.elicitInput({
@@ -170,14 +172,14 @@ export async function confirmSend(server: McpServer, keys: readonly string[], ta
 
 /** Roots check, read and confirmation as one step; injected into the template tools so the remote graph never imports this module. */
 export type ProjectEnvReader = (
-  projectPath: string, envFile: string, keys: readonly string[], target: string, confirm: boolean | undefined
+  projectPath: string, envFile: string, keys: readonly string[], target: string, confirm: boolean | undefined, note?: string
 ) => Promise<EnvRead>;
 
 export function projectEnvReader(server: McpServer): ProjectEnvReader {
-  return async (projectPath, envFile, keys, target, confirm) => {
+  return async (projectPath, envFile, keys, target, confirm, note) => {
     const read = await readProjectEnv(projectPath, envFile, keys, await trustedRoots(server));
     if (!read.ok) return read;
-    const declined = await confirmSend(server, keys, target, confirm);
+    const declined = await confirmSend(server, keys, target, confirm, note);
     return declined ? { ok: false, response: declined } : read;
   };
 }

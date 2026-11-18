@@ -167,3 +167,26 @@ test("J-18: a run that never served says set-aside amounts are released, never t
   });
   assert.doesNotMatch(live.message, /released automatically/, "a live app's failed update keeps its running charge");
 });
+
+test("J-20: each failed state leads with plain words, never raw codes or 'URL not assigned yet'", async () => {
+  const states = [
+    [{ classification: "user_workload_failure", stage: "build", code: "build_failed", action_code: "check_logs" }, "The build failed, so the app is not online."],
+    [{ classification: "infrastructure_failure", code: "provider_unavailable", retryable: true }, "Varity had a problem starting this app, so the app is not online. This was on Varity's side, so trying again is fine."],
+    [{ classification: "expected_rejection", code: "configuration_rejected", action_code: "check_configuration" }, "Varity could not accept this deploy as it is set up, so the app is not online."],
+    [{ classification: "cancelled", code: "deployment_cancelled" }, "The latest deploy was cancelled, so the app is not online."],
+  ];
+  for (const [outcome, plain] of states) {
+    const row = { id: "op-z", operation_deployment_id: "op-z", status: "failed", run_id: "run-z", outcome };
+    const out = await call("varity_deploy_status", { deployment_id: "op-z" }, {
+      "/api/deployments/op-z": [200, { deployment: row }],
+      "/api/deployments/runs/run-z": [200, { public_status: "failed", outcome }],
+    });
+    assert.ok(out.message.startsWith(`Deployment op-z: ${plain}`), out.message);
+    assert.doesNotMatch(out.message, /URL not assigned yet|_rejection|_failure|_failed|check_|provider|try again in a few/);
+    assert.deepEqual(out.data.outcome, outcome);
+  }
+  const list = await call("varity_deploy_status", {}, {
+    "/api/deployments": [200, { deployments: [{ id: "op-z", app_name: "z", status: "failed", created_at: "2026-11-18T00:00:00Z", run_id: "run-z", outcome: states[0][0] }] }],
+  });
+  assert.match(list.message, /Most recent: z \(failed\)\. The build failed, so the app is not online\.$/);
+});

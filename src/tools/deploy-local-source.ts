@@ -1,6 +1,6 @@
 import { access, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, parse, resolve } from "node:path";
+import { join, parse, resolve, sep } from "node:path";
 import { PackRefused, packFolder } from "./pack.js";
 import { errorResponse } from "../utils/responses.js";
 import type { LocalSource } from "./deploy.js";
@@ -59,7 +59,8 @@ export const localDeploySource: LocalSource = {
     return { folder, repoUrl: await detectGitRemote(folder), explicit: Boolean(path) };
   },
   pack: (folder) => {
-    if (folder === resolve(homedir()) || folder === parse(folder).root) {
+    const home = resolve(homedir());
+    if (folder === home || folder === parse(folder).root || home.startsWith(folder + sep)) {
       throw new PackRefused(
         "NOT_A_PROJECT_FOLDER",
         `${folder} is a home or root folder, not a project, so nothing was uploaded.`,

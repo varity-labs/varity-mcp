@@ -42,6 +42,8 @@ function project(files) {
  * passes `confirm: true` unless the args say otherwise.
  */
 async function run(name, args, routes, { roots = [WORKSPACE], elicit } = {}) {
+  // set_env reads the app first (J-19); a running app unless the test says otherwise.
+  routes = { "GET /api/deployments/shop": [200, { deployment: { id: "shop", runtime: "dynamic", status: "live" } }], ...routes };
   const [serverSide, clientSide] = InMemoryTransport.createLinkedPair();
   await createVarityServer().connect(serverSide);
   const capabilities = { ...(roots ? { roots: {} } : {}), ...(elicit ? { elicitation: {} } : {}) };
@@ -161,7 +163,7 @@ test("example files give key names only, never values, and send nothing", async 
     const result = await run("varity_set_env", { deployment: "shop", path: dir, keys: ["API_KEY"], env_file: name }, {});
     assert.equal(result.out.error.code, "ENV_FILE_HAS_NO_VALUES", name);
     assert.match(result.out.error.message, /API_KEY/);
-    assert.equal(result.calls.length, 0);
+    assert.equal(result.calls.filter((call) => call.method !== "GET").length, 0);
     assertNoValues(result);
   }
 });
@@ -181,7 +183,7 @@ test("only .env files inside the project folder are a value source", async () =>
   for (const [args, code] of cases) {
     const result = await run("varity_set_env", { deployment: "shop", path: dir, keys: ["API_KEY"], ...args }, {});
     assert.equal(result.out.error.code, code, JSON.stringify(args));
-    assert.equal(result.calls.length, 0);
+    assert.equal(result.calls.filter((call) => call.method !== "GET").length, 0);
     assertNoValues(result);
   }
   const local = await run("varity_set_env", { deployment: "shop", path: dir, keys: ["API_KEY"], env_file: ".env.local" }, {
@@ -195,7 +197,7 @@ test("every requested key must exist; a missing file is a plain message", async 
   const missing = await run("varity_set_env", { deployment: "shop", path: dir, keys: ["API_KEY", "NOT_THERE"] }, {});
   assert.equal(missing.out.error.code, "ENV_KEYS_MISSING");
   assert.match(missing.out.error.message, /NOT_THERE/);
-  assert.equal(missing.calls.length, 0);
+  assert.equal(missing.calls.filter((call) => call.method !== "GET").length, 0);
   assertNoValues(missing);
   const none = await run("varity_set_env", { deployment: "shop", path: project({}), keys: ["API_KEY"] }, {});
   assert.equal(none.out.error.code, "ENV_FILE_NOT_FOUND");
@@ -249,7 +251,7 @@ test("a project folder outside the client's roots is refused; with no roots, onl
   for (const options of [{}, { roots: null }]) {
     const result = await run("varity_set_env", { deployment: "shop", path: outside, keys: ["API_KEY"] }, {}, options);
     assert.equal(result.out.error.code, "PROJECT_OUTSIDE_WORKSPACE", JSON.stringify(options));
-    assert.equal(result.calls.length, 0);
+    assert.equal(result.calls.filter((call) => call.method !== "GET").length, 0);
     assertNoValues(result);
   }
 });
@@ -261,8 +263,8 @@ test("the user confirms key names and the app before anything is sent", async ()
 
   const declined = await run("varity_set_env", args, routes, { elicit: { action: "decline" } });
   assert.equal(declined.out.error.code, "ENV_NOT_CONFIRMED");
-  assert.equal(declined.calls.length, 0, "decline: nothing sent");
-  assert.deepEqual(declined.asked, ["Set API_KEY, OTHER on shop? The app will restart."]);
+  assert.equal(declined.calls.filter((call) => call.method !== "GET").length, 0, "decline: nothing sent");
+  assert.deepEqual(declined.asked, ["Set API_KEY, OTHER on shop? Your app restarts to use the new settings; a restart sets aside another monthly maximum until it settles."]);
   assertNoValues(declined);
 
   const accepted = await run("varity_set_env", args, routes, { elicit: { action: "accept", content: { confirm: true } } });
@@ -272,7 +274,40 @@ test("the user confirms key names and the app before anything is sent", async ()
   const unconfirmed = await run("varity_set_env", { ...args, confirm: undefined }, routes);
   assert.equal(unconfirmed.out.data.confirmation_required, true);
   assert.equal(unconfirmed.out.data.sent, false);
-  assert.match(unconfirmed.out.message, /^Set API_KEY, OTHER on shop\? The app will restart\. Nothing has been sent yet\./);
-  assert.equal(unconfirmed.calls.length, 0, "no elicitation and no confirm: nothing sent");
+  assert.match(unconfirmed.out.message, /^Set API_KEY, OTHER on shop\? Your app restarts to use the new settings; a restart sets aside another monthly maximum until it settles\. Nothing has been sent yet\./);
+  assert.equal(unconfirmed.calls.filter((call) => call.method !== "GET").length, 0, "no elicitation and no confirm: nothing sent");
   assertNoValues(unconfirmed);
+});
+
+test("J-19: a static site is told plainly it has no settings; nothing is asked or sent", async () => {
+  const dir = project({ ".env": ENV_TEXT });
+  const result = await run("varity_set_env", { deployment: "shop", path: dir, keys: ["API_KEY"] }, {
+    "GET /api/deployments/shop": [200, { deployment: { id: "shop", runtime: "static", status: "live" } }],
+  }, { elicit: { action: "accept", content: { confirm: true } } });
+  assert.equal(result.out.error.code, "STATIC_SITE_HAS_NO_SETTINGS");
+  assert.match(result.out.error.message, /^shop is a static site: it is served as files, so it has no settings to change\. Settings work on apps that run a server\./);
+  assert.equal(result.asked.length, 0, "no confirm question");
+  assert.equal(result.calls.filter((call) => call.method === "PATCH").length, 0);
+  assertNoValues(result);
+});
+
+test("J-19: for a running app the confirm question carries the restart cost note", async () => {
+  const dir = project({ ".env": ENV_TEXT });
+  const result = await run("varity_set_env", { deployment: "shop", path: dir, keys: ["API_KEY"] }, {
+    "PATCH /api/deployments/shop/env": ACCEPTED,
+  }, { elicit: { action: "accept", content: { confirm: true } } });
+  assert.equal(result.out.success, true);
+  assert.equal(result.asked.length, 1);
+  assert.match(result.asked[0], /a restart sets aside another monthly maximum until it settles/);
+});
+
+test("J-19: a gateway 409 refusal is mapped to plain words with no 'retry later'", async () => {
+  const dir = project({ ".env": ENV_TEXT });
+  const result = await run("varity_set_env", { deployment: "shop", path: dir, keys: ["API_KEY"] }, {
+    "PATCH /api/deployments/shop/env": [409, { code: "env_update_failed", message: "Durable environment update was rejected.", action: "retry later", retryable: false }],
+  });
+  assert.equal(result.out.error.code, "env_update_failed");
+  assert.match(result.out.error.message, /did not change the settings on shop/);
+  assert.match(result.out.error.message, /Nothing was changed\./);
+  assert.doesNotMatch(JSON.stringify(result.out), /Durable environment update|retry later/i);
 });

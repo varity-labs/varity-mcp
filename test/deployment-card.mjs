@@ -212,10 +212,10 @@ test("card: Refresh re-renders the served failure reason from varity_show_deploy
   assert.deepEqual(JSON.parse(JSON.stringify(call.params)), { name: "varity_show_deployment", arguments: { deployment_id: "op_1" } });
   frame.dispatch({ jsonrpc: "2.0", id: call.id, result: { structuredContent: {
     id: "op_1", app_name: "shop", status: "failed", url: null, monthly_price_usd: "7.00", billing_model: "fixed_monthly",
-    failure: "latest run failed (expected_rejection, configuration_rejected; action check_configuration)",
+    failure: "Varity could not accept this deploy as it is set up, so the app is not online.",
   } } });
   await frame.flush();
-  assert.equal(frame.element("failure").textContent, "latest run failed (expected_rejection, configuration_rejected; action check_configuration)");
+  assert.equal(frame.element("failure").textContent, "Varity could not accept this deploy as it is set up, so the app is not online.");
   assert.equal(frame.element("failure").hidden, false);
 });
 
@@ -231,7 +231,7 @@ test("varity_show_deployment states the run view's failure reason like varity_de
     const client = await connect({ toolset: "remote", credentialProvider: async () => "k" });
     const result = await client.callTool({ name: "varity_show_deployment", arguments: { deployment_id: "shop" } });
     await client.close();
-    assert.equal(result.structuredContent.failure, "latest run failed (expected_rejection, configuration_rejected; action check_configuration)");
+    assert.equal(result.structuredContent.failure, "Varity could not accept this deploy as it is set up, so the app is not online.");
   } finally {
     globalThis.fetch = original;
   }

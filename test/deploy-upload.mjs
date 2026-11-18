@@ -350,7 +350,7 @@ test("deploying the folder again re-packs it and sends a new source_id", async (
 test("long and non-ASCII paths are carried exactly (PAX), executables keep their bit", async () => {
   const { buildSourceArchive } = await import("../dist/utils/source-archive.js");
   const long = `${"a".repeat(120)}/${"b".repeat(90)}/${"c".repeat(110)}.js`;
-  const archive = await buildSourceArchive([
+  const { archive } = await buildSourceArchive([
     { path: long, data: Buffer.from("x"), executable: false },
     { path: "café/menü.txt", data: Buffer.from("y"), executable: false },
     { path: "bin/run.sh", data: Buffer.from("#!/bin/sh\n"), executable: true },
@@ -369,5 +369,67 @@ test("IF-SECRET-PATHS: the shared table (env templates allowed)", async () => {
   }
   for (const path of [".env.example", ".env.sample", ".env.template", "src/env.ts", "README.md", "keyboard.js", "secret-santa.md"]) {
     assert.equal(isSecretPath(path), false, path);
+  }
+});
+
+test("review: a worktree or submodule .git file is never packed", async () => {
+  const { dir, cleanup } = project();
+  try {
+    writeFileSync(join(dir, ".git"), "gitdir: /home/someone/repo/.git/worktrees/x\n");
+    mkdirSync(join(dir, "sub"));
+    writeFileSync(join(dir, "sub", ".GIT"), "gitdir: ../.git/modules/sub\n");
+    writeFileSync(join(dir, "sub", "a.js"), "1\n");
+    const { out, calls } = await callTool({ [SOURCES]: [SLOT()], [PUT]: [SEALED], [CREATE]: [ACCEPTED] }, { path: dir });
+    assert.equal(out.success, true);
+    const names = members(route(calls, PUT)[0].raw).map((file) => file.name);
+    assert.ok(names.includes("sub/a.js"));
+    assert.ok(!names.some((name) => name.split("/").some((segment) => segment.toLowerCase() === ".git")), names.join(","));
+  } finally {
+    cleanup();
+  }
+});
+
+test("review: many empty files are refused locally on the server's tar-stream ratio", async () => {
+  const root = mkdtempSync(join(tmpdir(), "mcp-u6-ratio-"));
+  try {
+    for (let i = 0; i < 3000; i += 1) writeFileSync(join(root, `f${i}.txt`), "");
+    const { out, calls } = await callTool({ [SOURCES]: [SLOT()] }, { path: root, source: "upload" });
+    assert.equal(out.error.code, "FOLDER_NOT_UPLOADABLE");
+    assert.equal(calls.length, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("review: deploy-api's upload flag off at create time is explained plainly", async () => {
+  const { dir, cleanup } = project();
+  try {
+    const { out } = await callTool({
+      [SOURCES]: [SLOT()], [PUT]: [SEALED], [CREATE]: [[404, { code: "uploads_unavailable", message: "x" }]],
+    }, { path: dir });
+    assert.equal(out.error.code, "UPLOAD_UNAVAILABLE");
+    assert.match(out.error.message, /not switched on at Varity yet\. Nothing was deployed or charged\./);
+  } finally {
+    cleanup();
+  }
+});
+
+test("review: a folder above the home folder is never uploaded", async () => {
+  const { out, calls } = await callTool({ [SOURCES]: [SLOT()] }, { path: join(homedir(), ".."), source: "upload" });
+  assert.equal(out.error.code, "NOT_A_PROJECT_FOLDER");
+  assert.equal(calls.length, 0);
+});
+
+test("review: 408 and 429 upload refusals say wait and retry, and start no deploy", async () => {
+  const { dir, cleanup } = project();
+  try {
+    for (const refusal of [[408, { code: "upload_timeout", message: "The upload took too long." }], [429, { code: "upload_capacity", message: "Too many uploads right now." }]]) {
+      const { out, calls } = await callTool({ [SOURCES]: [SLOT()], [PUT]: [refusal] }, { path: dir });
+      assert.equal(out.error.code, refusal[1].code);
+      assert.match(out.error.suggestion, /Wait a minute/);
+      assert.equal(route(calls, CREATE).length, 0);
+    }
+  } finally {
+    cleanup();
   }
 });
