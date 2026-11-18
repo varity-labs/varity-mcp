@@ -20,13 +20,19 @@ interface ErrorResponse {
 
 type ToolResponse = SuccessResponse | ErrorResponse;
 
+/**
+ * `structuredData`, when given, is the same result with fuller data for
+ * `structuredContent` (the text stays compact); success and message are shared.
+ */
 export function successResponse(
   data: Record<string, unknown>,
-  message: string
+  message: string,
+  structuredData?: Record<string, unknown>
 ) {
   const response: ToolResponse = { success: true, data, message };
   return {
     content: [{ type: "text" as const, text: JSON.stringify(response, null, 2) }],
+    ...(structuredData ? { structuredContent: { success: true, data: structuredData, message } } : {}),
   };
 }
 

@@ -45,8 +45,15 @@ const MACHINES_LIST_DEFAULT = 20;
 const MACHINES_LIST_MAX = 100;
 const billingStateOf = (machine: Record<string, unknown>) =>
   (machine.billing as { state?: unknown } | null | undefined)?.state;
-const machineLine = (machine: Record<string, unknown>) =>
-  `${String(machine.name ?? "unnamed")} (${String(machine.machine_id ?? "unknown id")}): billing ${String(billingStateOf(machine) ?? "unobserved")}`;
+/** One short line per machine: name, id, billing state and, when served, the SSH command (R2-1). */
+function machineLine(machine: Record<string, unknown>): string {
+  const access = machine.access as { host?: unknown; port?: unknown; username?: unknown } | null | undefined;
+  const ssh =
+    access && typeof access.host === "string" && typeof access.username === "string" && typeof access.port === "number"
+      ? `, ssh ${access.username}@${access.host} -p ${access.port}`
+      : "";
+  return `${String(machine.name ?? "unnamed")} (${String(machine.machine_id ?? "unknown id")}): billing ${String(billingStateOf(machine) ?? "unobserved")}${ssh}`;
+}
 
 function apiError(err: unknown, fallbackCode: string, fallbackMessage: string) {
   if (err instanceof VarityPublicApiError) {
@@ -187,16 +194,13 @@ export function registerMachinesTools(server: McpServer): void {
           : `${listed.length} machine(s) running or billing.` +
             (wanted.length > listed.length ? ` ${wanted.length - listed.length} more running or billing are not listed; raise limit to see them.` : "") +
             (all.length > wanted.length ? ` ${all.length - wanted.length} more with billing stopped are not listed; set include_stopped to list them.` : "");
-        const counts = { total_count: all.length, not_listed_count: notListed };
+        const shared = { ...machines, total_count: all.length, not_listed_count: notListed, ...(profiles ? { profiles } : {}) };
         // F4: the text carries one short line per machine; full records go in structured data only.
-        const result = successResponse(
-          { ...machines, machines: listed.map(machineLine), ...counts, ...(profiles ? { profiles } : {}) },
-          summary + partial
+        return successResponse(
+          { ...shared, machines: listed.map(machineLine) },
+          summary + partial,
+          { ...shared, machines: listed }
         );
-        return {
-          ...result,
-          structuredContent: { success: true, data: { ...machines, machines: listed, ...counts }, message: summary + partial },
-        };
       } catch (err) {
         return apiError(err, "MACHINES_LIST_FAILED", "Could not list machines.");
       }

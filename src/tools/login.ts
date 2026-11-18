@@ -195,7 +195,6 @@ function pendingResponse(current: Session) {
   );
 }
 
-export { KEY_SIGN_IN_LINE };
 
 export function failureResponse(error: LoginError) {
   if (error.code === "SIGN_IN_UNAVAILABLE") {
