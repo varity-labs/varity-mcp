@@ -181,7 +181,7 @@ for (const [label, refusal] of [
       const { out, calls } = await callTool({ [SOURCES]: [refusal] }, { path: dir });
       assert.equal(out.success, false);
       assert.equal(out.error.code, "UPLOAD_UNAVAILABLE");
-      assert.match(out.error.message, /^Varity can't take a folder from this computer yet\. Nothing was uploaded, deployed or charged\./);
+      assert.match(out.error.message, /^Tell the user exactly this: "Varity can't take a folder from this computer yet\. Nothing was uploaded, deployed or charged\./);
       assert.match(out.error.suggestion, /varity_list_templates/);
       assert.match(out.error.suggestion, /ask first/);
       assert.deepEqual(calls.map((call) => call.route), [SOURCES], "no upload and no create");
@@ -425,7 +425,7 @@ test("review: deploy-api's upload flag off at create time is explained plainly",
       [SOURCES]: [SLOT()], [PUT]: [SEALED], [CREATE]: [[404, { code: "uploads_unavailable", message: "x" }]],
     }, { path: dir });
     assert.equal(out.error.code, "UPLOAD_UNAVAILABLE");
-    assert.match(out.error.message, /^Varity can't take a folder from this computer yet\. Nothing was deployed or charged\./);
+    assert.match(out.error.message, /^Tell the user exactly this: "Varity can't take a folder from this computer yet\. Nothing was deployed or charged\./);
   } finally {
     cleanup();
   }

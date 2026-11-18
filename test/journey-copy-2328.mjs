@@ -61,7 +61,7 @@ test("J-14: a private repository is explained plainly and offers the no-GitHub p
   });
   assert.equal(out.error.code, "source_repository_unreadable");
   assert.match(out.error.message, /private or does not exist/);
-  assert.match(out.error.message, /nothing was deployed and nothing was charged/i);
+  assert.match(out.error.message, /nothing was deployed or charged/i);
   const suggestion = out.error.suggestion;
   const template = suggestion.indexOf("varity_list_templates");
   const image = suggestion.indexOf("image argument");

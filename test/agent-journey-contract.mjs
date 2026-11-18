@@ -298,7 +298,7 @@ test("a private or unreachable repo names the working remedies, not 'the supplie
   }, "varity_deploy", { repo_url: "https://github.com/acme/secret-app.git", app_name: "secret-app" });
   assert.equal(out.error.code, "source_repository_unreadable");
   assert.match(out.error.message, /private or does not exist/);
-  assert.match(out.error.message, /Nothing was deployed and nothing was charged/);
+  assert.match(out.error.message, /Nothing was deployed or charged/);
   assert.doesNotMatch(out.error.message, /supplied token/);
   // J-23/E3 (journey 2.3.29): no upload promise before an upload worked; the no-GitHub path leads.
   assert.doesNotMatch(out.error.suggestion, /your code stays private/);

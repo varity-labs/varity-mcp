@@ -126,9 +126,7 @@ test("the remote server sets self-contained instructions within 512 characters",
     .map((name) => instructions.indexOf(name));
   assert.ok(order.every((index) => index >= 0), "names every step");
   assert.deepEqual([...order].sort((a, b) => a - b), order, "cost, deploy, status, URL, delete in that order");
-  const local = await connect(undefined);
-  assert.equal(local.getInstructions(), undefined, "stdio is unchanged");
-  await local.close();
+  // r3 (journey 2.3.29): stdio now carries the shared rules too (test/journey-copy-2329.mjs).
 });
 
 test("(3) two concurrent remote calls each send their own provider's credential", async () => {
