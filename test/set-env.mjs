@@ -213,7 +213,25 @@ test("the tool takes names, not values, in its arguments", async () => {
   await client.close();
   const tool = tools.find((t) => t.name === "varity_set_env");
   assert.deepEqual(Object.keys(tool.inputSchema.properties).sort(), ["confirm", "deployment", "env_file", "keys", "path"]);
-  assert.match(tool.description, /restarts the app/);
+  assert.match(tool.description, /the app restarts/);
+});
+
+test("PLUGIN-S4: the description asks consent for the names, the restart and the month-maximum hold before calling", async () => {
+  const [serverSide, clientSide] = InMemoryTransport.createLinkedPair();
+  await createVarityServer().connect(serverSide);
+  const client = new Client({ name: "set-env", version: "1" });
+  await client.connect(clientSide);
+  const { tools } = await client.listTools();
+  await client.close();
+  const tool = tools.find((t) => t.name === "varity_set_env");
+  const consent = tool.description.split(/(?<=\.) /).filter((sentence) => /confirm/.test(sentence));
+  assert.ok(consent.length > 0, tool.description);
+  for (const sentence of consent) {
+    assert.match(sentence, /names/, sentence);
+    assert.match(sentence, /restart/, sentence);
+    assert.match(sentence, /hold/, sentence);
+  }
+  assert.match(tool.inputSchema.properties.confirm.description, /hold/);
 });
 
 const TEMPLATE = {
