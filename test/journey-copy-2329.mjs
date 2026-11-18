@@ -309,10 +309,9 @@ test("r3/M1: server instructions: stdio routes the local folder to varity_deploy
     await client.close();
   }
   assert.equal(texts.stdio,
-    "To deploy the folder the user is working in, call varity_deploy with path set to the absolute project folder, " +
-    "then varity_deploy_status with the returned id until it is live. " +
-    `If varity_deploy answers UPLOAD_UNAVAILABLE, offer Varity's Chat and Build: ${CHAT_AND_BUILD} ` +
-    "Sign in with varity_login; never ask for a key in chat.");
+    "Varity deploys the folder the user is working in: call varity_deploy with path set to the absolute project folder. " +
+    "Varity packs it (honouring .gitignore, keeping secret files on this computer), keeps a private copy and builds it; " +
+    "then call varity_deploy_status with the returned id until it is live. Sign in with varity_login; never ask for a key in chat.");
   assert.match(texts.remote, /varity_deploy \(public repo_url or image\)/);
   assert.match(texts.remote, /Never ask the user for a key in chat\./);
   assert.ok(texts.remote.includes(`If the user has no public GitHub repository, offer Varity's Chat and Build first: ${CHAT_AND_BUILD}`), texts.remote);
