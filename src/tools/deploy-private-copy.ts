@@ -376,7 +376,9 @@ const LIVE_APP_KEPT = "The live app was not changed.";
 function ambiguous(err: unknown): boolean {
   if (!(err instanceof VarityPublicApiError)) return true;
   if (err.code === "VARITY_API_UNREACHABLE" || err.status === undefined) return true;
-  return err.status === 500 || err.status === 502 || err.status === 504 || (err.status === 503 && err.code === "deploy_service_unavailable");
+  // A 503 with no served code (an edge answer, `VARITY_API_ERROR`) is ambiguous too.
+  return err.status === 500 || err.status === 502 || err.status === 504 ||
+    (err.status === 503 && (err.code === "deploy_service_unavailable" || err.code === "VARITY_API_ERROR"));
 }
 
 function unconfirmed(err: unknown, appName: string): ToolResult {

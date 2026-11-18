@@ -256,8 +256,9 @@ test("T5: source-revision refusals keep the live app and never fall back to a cr
     ["503 then key reused", answer("idempotency_key_reused")],
     ["503 then update in progress", answer("update_in_progress")],
     ["network twice", "throw"],
+    ["edge 503 without a code, twice", [503, {}]],
   ]) {
-    const first = name === "network twice" ? "throw" : unavailable;
+    const first = name === "network twice" ? "throw" : name.startsWith("edge") ? [503, {}] : unavailable;
     const { isError, out, calls } = await deploy(base({ [REVISION]: [first, second] }));
     assert.equal(isError, true, name);
     assert.match(out.error.message, /whether the update started is unconfirmed/, name);
