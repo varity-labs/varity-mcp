@@ -10,6 +10,7 @@
 const { execSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 
 const DIST = path.join(__dirname, "..", "dist");
 if (!fs.existsSync(DIST)) {
@@ -64,22 +65,46 @@ console.log("[prepublish-guard] ✅ dist/ is clean (no forbidden positioning con
 // is published only with the live-acceptance receipt committed at acceptance/r1-live.json.
 const { FLAG, receiptProblem } = require("./r1-receipt.cjs");
 
-function promisesPrivateCopy(dir) {
+const ROOT = path.join(__dirname, "..");
+
+function distSays(dir, phrase) {
   return fs.readdirSync(dir, { withFileTypes: true }).some((entry) => {
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) return promisesPrivateCopy(full);
-    return /\.(js|cjs|mjs)$/.test(entry.name) && /private copy/i.test(fs.readFileSync(full, "utf8"));
+    if (entry.isDirectory()) return distSays(full, phrase);
+    return /\.(js|cjs|mjs)$/.test(entry.name) && phrase.test(fs.readFileSync(full, "utf8"));
   });
 }
 
-if (promisesPrivateCopy(DIST)) {
-  const problem = receiptProblem(path.join(__dirname, ".."));
-  if (problem) {
-    console.error(`\n[prepublish-guard] ❌ dist/ promises the private copy, but ${problem} — publish BLOCKED.`);
-    console.error(`Publish only after the gateway serves deploy keys in production (${FLAG}=true) and its live acceptance passed;`);
-    console.error("then commit that receipt (ARCHITECTURE.md ## Verification).\n");
-    process.exit(1);
-  }
-  console.log("[prepublish-guard] ✅ private-copy promise backed by acceptance/r1-live.json.");
+/**
+ * The package promises the private copy when dist/ or the README says "private copy", or
+ * when the built deploy copy exports a non-empty FOLDER_RULE (so a rewording stays gated).
+ */
+async function promisesPrivateCopy() {
+  const phrase = /private copy/i;
+  const readme = path.join(ROOT, "README.md");
+  if (distSays(DIST, phrase) || (fs.existsSync(readme) && phrase.test(fs.readFileSync(readme, "utf8")))) return true;
+  const copy = path.join(DIST, "tools", "deploy-copy.js");
+  if (!fs.existsSync(copy)) return false;
+  const { FOLDER_RULE } = await import(pathToFileURL(copy).href);
+  return typeof FOLDER_RULE === "string" && FOLDER_RULE.trim() !== "";
 }
-process.exit(0);
+
+async function main() {
+  if (await promisesPrivateCopy()) {
+    const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
+    const problem = receiptProblem(ROOT, pkg);
+    if (problem) {
+      console.error(`\n[prepublish-guard] ❌ the package promises the private copy, but ${problem} — publish BLOCKED.`);
+      console.error(`Publish only after the gateway serves deploy keys in production (${FLAG}=true) and its live acceptance passed;`);
+      console.error("then commit that receipt, acceptance/r1-live.json (ARCHITECTURE.md ## Verification).\n");
+      process.exit(1);
+    }
+    console.log("[prepublish-guard] ✅ private-copy promise backed by acceptance/r1-live.json.");
+  }
+  process.exit(0);
+}
+
+main().catch((err) => {
+  console.error(`[prepublish-guard] ❌ ${err?.message ?? err} — publish BLOCKED.`);
+  process.exit(1);
+});
