@@ -239,7 +239,7 @@ test("varity_login with no key and sign-in not reachable names the Deploy keys t
   const out = JSON.parse(text);
   assert.equal(out.error.code, "SIGN_IN_UNAVAILABLE");
   // J-21: the key path for everyone, in plain words; no wait-and-retry, no developer framing.
-  assert.equal(out.error.message, "Browser sign-in isn't available right now. You can connect with a deploy key instead: create one at https://developer.store.varity.so/dashboard/settings?tab=api-keys and add it as VARITY_DEPLOY_KEY in your editor's MCP settings. Never paste it into the chat.");
+  assert.equal(out.error.message, "Browser sign-in isn't available right now. You can connect with a deploy key instead: create one at https://developer.store.varity.so/dashboard/settings?tab=api-keys and add it as VARITY_DEPLOY_KEY in your editor's MCP settings. Keep the key out of the chat.");
   assert.doesNotMatch(`${out.error.message} ${out.error.suggestion}`, /few minutes|for CI|developers/i);
 });
 

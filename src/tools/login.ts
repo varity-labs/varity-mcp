@@ -198,7 +198,7 @@ function pendingResponse(current: Session) {
 /** When browser sign-in is down, the deploy key is the way in for everyone (J-21), not a developer aside. */
 export const KEY_SIGN_IN_LINE =
   "Browser sign-in isn't available right now. You can connect with a deploy key instead: " +
-  `create one at ${DEPLOY_KEY_URL} and add it as VARITY_DEPLOY_KEY in your editor's MCP settings. Never paste it into the chat.`;
+  `create one at ${DEPLOY_KEY_URL} and add it as VARITY_DEPLOY_KEY in your editor's MCP settings. Keep the key out of the chat.`;
 
 export function failureResponse(error: LoginError) {
   if (error.code === "SIGN_IN_UNAVAILABLE") {
