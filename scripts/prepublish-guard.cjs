@@ -70,7 +70,10 @@ const PHRASE = /private copy/i;
 /** The delete tool's cleanup sentence: it names an existing copy and promises none. */
 const CLEANUP = "If Varity saved a private copy of a folder for this app, that copy is deleted too.";
 
-/** The initializer text of `export const <name> = ...;` in a built module, or null. */
+/**
+ * The initializer text of `export const <name> = ...;` in a built module, or null. Relies on
+ * tsc emitting each top-level constant as `export const X = …;` followed by a newline.
+ */
 function declaration(file, name) {
   const match = new RegExp(`export const ${name} =([\\s\\S]*?);\\n`).exec(fs.readFileSync(file, "utf8"));
   return match ? match[1] : null;
@@ -80,14 +83,15 @@ function declaration(file, name) {
  * The package promises the private copy through what it tells a model or a reader, read
  * statically (no dist code runs in this hook): a non-empty FOLDER_RULE (so a rewording stays
  * gated), stdio SERVER_RULES that say "private copy", or a README that says it outside the
- * delete tool's cleanup sentence. Fail closed: a missing deploy copy module, or a FOLDER_RULE
- * that is not one plain string, counts as a promise.
+ * delete tool's cleanup sentence. Fail closed: a missing deploy copy module, a FOLDER_RULE
+ * export that cannot be found (renamed, moved or unexported), or one that is not a plain string
+ * counts as a promise. A version that drops the promise declares `export const FOLDER_RULE = "";`.
  */
 function promisesPrivateCopy() {
   const copy = path.join(DIST, "tools", "deploy-copy.js");
   if (!fs.existsSync(copy)) return true;
   const rule = declaration(copy, "FOLDER_RULE");
-  if (rule !== null && (!/^\s*"(?:[^"\\]|\\.)*"\s*$/.test(rule) || rule.trim() !== '""')) return true;
+  if (rule === null || !/^\s*"(?:[^"\\]|\\.)*"\s*$/.test(rule) || rule.trim() !== '""') return true;
   const rules = path.join(DIST, "toolsets", "instructions.js");
   if (fs.existsSync(rules) && PHRASE.test(declaration(rules, "SERVER_RULES") ?? "")) return true;
   const readme = path.join(ROOT, "README.md");

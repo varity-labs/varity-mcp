@@ -29,7 +29,7 @@ const RECEIPT = {
   evidence: { path: "acceptance/r1-live-evidence.txt", sha256: createHash("sha256").update(EVIDENCE).digest("hex") },
 };
 const PROMISE = 'export const FOLDER_RULE = "a folder is saved as a private copy Varity keeps";\n';
-const NO_PROMISE = 'export const RULE = "a folder is deployed";\n';
+const NO_PROMISE = 'export const FOLDER_RULE = "";\n';
 
 /** A scratch package root: package.json (2.3.30), dist/tools/deploy-copy.js, README, acceptance/. */
 function scratch(root, { promise, dist, readme, receipt, evidence = EVIDENCE, files = {} }) {
@@ -195,5 +195,16 @@ test("ST30-4: fail closed: a dist without the deploy copy module, or a FOLDER_RU
     const { status, output } = guard(options);
     assert.notEqual(status, 0, JSON.stringify(options));
     assert.match(output, /acceptance\/r1-live\.json|BLOCKED/, output);
+  }
+});
+
+test("SP31-1: fail closed: a dist whose FOLDER_RULE export is gone (renamed, moved or unexported) is gated", () => {
+  for (const dist of [
+    'export const FOLDER_TEXT = "a folder is kept by Varity and built.";\n',
+    'const FOLDER_RULE = "a folder is kept by Varity and built.";\n',
+  ]) {
+    const { status, output } = guard({ dist });
+    assert.notEqual(status, 0, dist);
+    assert.match(output, /acceptance\/r1-live\.json/, output);
   }
 });
