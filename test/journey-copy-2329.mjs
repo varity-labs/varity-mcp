@@ -335,7 +335,7 @@ test("P1 T3: the error message itself (not only the suggestion) leads with Chat 
     `Varity can't read this project's code on GitHub: it is private or does not exist. Nothing was deployed or charged. The way to get it online today without GitHub is Varity's Chat and Build: describe the app, and Varity builds it and publishes it to a live address: ${CHAT_AND_BUILD}`);
 });
 
-test("r3/M1: server instructions: stdio routes the local folder to varity_deploy and UPLOAD_UNAVAILABLE to Chat and Build; hosted keeps the repo order; both within 512 characters, no other-host rule", async () => {
+test("r3/M1: server instructions: stdio routes the local folder to varity_deploy and UPLOAD_UNAVAILABLE to Chat and Build; hosted keeps the repo order; both within 512 characters, no other-host rule, no sign-in promise", async () => {
   const texts = {};
   for (const [name, options] of [["stdio", undefined], ["remote", { toolset: "remote", credentialProvider: async () => "k" }]]) {
     const [serverSide, clientSide] = InMemoryTransport.createLinkedPair();
@@ -358,8 +358,8 @@ test("r3/M1: server instructions: stdio routes the local folder to varity_deploy
   for (const [name, text] of Object.entries(texts)) {
     assert.ok(text.length <= 512, `${name}: ${text.length} characters`);
     assert.doesNotMatch(text, /never suggest|hosting service/i, name);
-    // Listings audit F6: browser sign-in is not live (varity_login answers SIGN_IN_UNAVAILABLE), so no "sign in" promise.
-    assert.doesNotMatch(text, /\bsign in\b/i, name);
+    // Listings audit F6: browser sign-in is not live (varity_login answers SIGN_IN_UNAVAILABLE), so no "sign in", "sign-in" or "signin" promise.
+    assert.doesNotMatch(text, /\bsign[- ]?in\b/i, name);
   }
 });
 
