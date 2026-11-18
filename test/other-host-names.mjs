@@ -7,7 +7,8 @@
  * Vercel Migration" onto Varity.
  */
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
@@ -81,4 +82,51 @@ test("the allowlist is real: varity_migrate is the one tool that names Vercel", 
   const migrate = s.tools.find((t) => t.name === ALLOWLIST_TOOL);
   assert.ok(migrate, "varity_migrate is registered on stdio");
   assert.match(JSON.stringify(migrate), /Vercel/);
+});
+
+/**
+ * SP-8: the source scan above reads every string in src; this one reads what the model actually
+ * receives back, across the folder-deploy and delete result paths, so a result assembled at run time
+ * is guarded too.
+ */
+test("results: folder-deploy and delete answers name no other host and carry no never-suggest rule", async () => {
+  const root = mkdtempSync(join(tmpdir(), "host-scan-"));
+  const dir = join(root, "my-site");
+  mkdirSync(dir);
+  writeFileSync(join(dir, "index.html"), "<h1>x</h1>\n");
+  const repo = { id: 42, owner: "varity-hosted", name: "1a2b3c4d5e6f7a8b-my-site", full_name: "varity-hosted/1a2b3c4d5e6f7a8b-my-site", default_branch: "main", private: true };
+  const off = [404, { code: "uploads_unavailable", message: "Not available yet." }];
+  const scenarios = [
+    ["varity_deploy", { path: dir }, { "POST /api/deployments/sources": off }],
+    ["varity_deploy", { path: dir }, { "POST /api/deployments/sources": off, "POST /api/github/hosted-repositories": [201, { repository: repo }],
+      "POST /api/github/changes": [201, { commit_sha: "a".repeat(40) }], "POST /api/deployments": [202, { id: "d-1", run_id: "r-1" }] }],
+    ["varity_deploy", { path: dir }, { "POST /api/deployments/sources": off, "POST /api/github/hosted-repositories": [201, { repository: repo }],
+      "POST /api/github/changes": [504, { code: "gateway_timeout", message: "Timed out." }] }],
+    ["varity_deploy", { repo_url: "https://github.com/acme/secret-app" }, { "POST /api/deployments": [422, { code: "source_repository_unreadable", message: "x" }] }],
+    ["varity_delete_deployment", { deployment: "my-site" }, {
+      "GET /api/deployments/my-site": [200, { deployment: { id: "d-1", app_name: "my-site", source: { repository_url: `https://github.com/${repo.full_name}` } } }],
+      "GET /api/github/hosted-repositories": [503, { code: "github_unavailable", message: "Try again." }],
+      "DELETE /api/deployments/my-site": [202, { status: "deleting", run_id: "r-2" }] }],
+  ];
+  const [serverSide, clientSide] = InMemoryTransport.createLinkedPair();
+  await createVarityServer().connect(serverSide);
+  const client = new Client({ name: "host-scan-results", version: "1" });
+  await client.connect(clientSide);
+  const original = globalThis.fetch;
+  try {
+    for (const [name, args, routes] of scenarios) {
+      globalThis.fetch = async (url, init) => {
+        const [status, body] = routes[`${init?.method ?? "GET"} ${new URL(url).pathname}`] ?? [404, { code: "not_found", message: "Not found" }];
+        return { ok: status >= 200 && status < 300, status, headers: { get: () => null }, json: async () => body };
+      };
+      const result = await client.callTool({ name, arguments: args });
+      const text = JSON.stringify(result);
+      assert.doesNotMatch(text, OTHER_HOSTS, `${name} ${JSON.stringify(args)}`);
+      assert.doesNotMatch(text, NEVER_RULE, `${name} ${JSON.stringify(args)}`);
+    }
+  } finally {
+    globalThis.fetch = original;
+    await client.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });

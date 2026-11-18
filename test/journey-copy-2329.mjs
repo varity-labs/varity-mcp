@@ -75,6 +75,41 @@ test("U-ADV: varity_deploy never promises a folder upload or private code before
   assert.match(tool.description, new RegExp(NO_FOLDER_YET.replace(/[.?*+^$()|[\]\\]/g, "\\$&")), tool.description);
 });
 
+/**
+ * SP-2 (R1 review spec-95e8809): "private copy" is a promise that is true only while the gateway's
+ * hosted-repository route serves deploy keys. The copy is tied to that state by a release gate, not by
+ * its wording: a version whose model-visible text or README claims the private copy is published only
+ * after that route is live in production with its flag on and its live acceptance passed. So any
+ * "private copy" claim (tool text, stdio instructions, README) needs that gate recorded in
+ * ARCHITECTURE.md's release sequence; without it the claim is an unreleased promise and this fails.
+ */
+const PRIVATE_COPY = /private copy/i;
+const PRIVATE_COPY_GATE =
+  "A version whose tool text, instructions or README promises the private copy is published only after the " +
+  "gateway's hosted-repository route serves deploy keys in production (`VARITY_HOSTED_REPOS_DEPLOY_KEYS_ENABLED=true`) " +
+  "and its live acceptance has passed";
+
+test("U-ADV/SP-2: a private-copy promise ships only behind the recorded release gate", async () => {
+  const [serverSide, clientSide] = InMemoryTransport.createLinkedPair();
+  await createVarityServer().connect(serverSide);
+  const client = new Client({ name: "u-adv", version: "1" });
+  await client.connect(clientSide);
+  const tool = (await client.listTools()).tools.find((t) => t.name === "varity_deploy");
+  const instructions = client.getInstructions() ?? "";
+  await client.close();
+  const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  const claims = [
+    ["varity_deploy description", tool.description],
+    ["varity_deploy path", tool.inputSchema.properties.path.description],
+    ["varity_deploy source", tool.inputSchema.properties.source.description],
+    ["stdio instructions", instructions],
+    ["README", readme],
+  ].filter(([, text]) => PRIVATE_COPY.test(text)).map(([where]) => where);
+  if (claims.length === 0) return;
+  const verification = readFileSync(new URL("../ARCHITECTURE.md", import.meta.url), "utf8").split("## Verification")[1] ?? "";
+  assert.ok(verification.includes(PRIVATE_COPY_GATE), `private copy promised in ${claims.join(", ")} without the release gate in ARCHITECTURE.md ## Verification`);
+});
+
 test("E3 (fresh process): a private repo does not lead with an upload nobody has seen work", async () => {
   const { out } = await call("varity_deploy", { repo_url: "https://github.com/acme/secret-app" }, {
     [CREATE]: [422, { code: "source_repository_unreadable", message: "x" }],

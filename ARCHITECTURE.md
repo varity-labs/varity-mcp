@@ -253,6 +253,8 @@ environment enables audits. The runtime test verifies the MCP
 initialize response reports the exact package version and that retired network
 transport arguments fail closed.
 
+Release gate for the private copy (R1): A version whose tool text, instructions or README promises the private copy is published only after the gateway's hosted-repository route serves deploy keys in production (`VARITY_HOSTED_REPOS_DEPLOY_KEYS_ENABLED=true`) and its live acceptance has passed: deploy a small folder with a real deploy key, a cross-owner request answers 403, then delete the deployment and observe the copy deleted. Until then `deployPrivateCopy` answers null and the folder deploy answers `UPLOAD_UNAVAILABLE`, which contradicts the promise. `test/journey-copy-2329.mjs` (U-ADV/SP-2) refuses any "private copy" claim while this paragraph is absent.
+
 Publication is a hand publish by the release owner; no workflow publishes the
 package, so a tag push publishes nothing. From a fresh clone checked out at the
 exact release commit: `node scripts/check-release-custody.cjs`, then
