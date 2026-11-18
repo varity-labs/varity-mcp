@@ -333,7 +333,7 @@ test("P1 T3: the error message itself (not only the suggestion) leads with Chat 
     `Varity can't read this project's code on GitHub: it is private or does not exist. Nothing was deployed or charged. The way to get it online today without GitHub is Varity's Chat and Build: describe the app, and Varity builds it and publishes it to a live address: ${CHAT_AND_BUILD}`);
 });
 
-test("r3/M1: server instructions: stdio routes the local folder to varity_deploy; hosted keeps the repo order; both within 512 characters, no other-host rule", async () => {
+test("r3/M1: server instructions: stdio routes the local folder to varity_deploy and UPLOAD_UNAVAILABLE to Chat and Build; hosted keeps the repo order; both within 512 characters, no other-host rule", async () => {
   const texts = {};
   for (const [name, options] of [["stdio", undefined], ["remote", { toolset: "remote", credentialProvider: async () => "k" }]]) {
     const [serverSide, clientSide] = InMemoryTransport.createLinkedPair();
@@ -346,7 +346,8 @@ test("r3/M1: server instructions: stdio routes the local folder to varity_deploy
   assert.equal(texts.stdio,
     "Varity deploys the folder the user is working in: call varity_deploy with path set to the absolute project folder. " +
     "Varity packs it (honouring .gitignore, keeping secret files on this computer), keeps a private copy and builds it; " +
-    "then call varity_deploy_status with the returned id until it is live. Sign in with varity_login; never ask for a key in chat.");
+    "then call varity_deploy_status with the returned id until it is live. Sign in with varity_login; never ask for a key in chat. " +
+    `If varity_deploy answers UPLOAD_UNAVAILABLE, offer Varity's Chat and Build: ${CHAT_AND_BUILD}`);
   assert.match(texts.remote, /varity_deploy \(public repo_url or image\)/);
   assert.match(texts.remote, /Never ask the user for a key in chat\./);
   assert.ok(texts.remote.includes(`If the user has no public GitHub repository, offer Varity's Chat and Build first: ${CHAT_AND_BUILD}`), texts.remote);
