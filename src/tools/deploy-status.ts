@@ -122,8 +122,7 @@ function timeOf(value: unknown): number | null {
 
 /**
  * While a run is deploying: its stage, elapsed time and what happens next
- * (J-18) from the run's `progress` block (`stage`, `attempt`,
- * `failover.count`). Before any attempt `progress` is absent, and only the
+ * (J-18) from the run's `progress` block (`stage`, `attempt`). Before any attempt `progress` is absent, and only the
  * elapsed time is said. Absent fields are simply not mentioned.
  */
 export function deployingProgress(run: RunView, now: number = Date.now()): string | null {
@@ -132,9 +131,6 @@ export function deployingProgress(run: RunView, now: number = Date.now()): strin
   const elapsed = started !== null ? `${plainDuration(now - started)} so far` : null;
   const attempt = typeof run.attempt === "number" && run.attempt >= 1 ? `attempt ${run.attempt}` : null;
   let text = "";
-  if (typeof run.failover_count === "number" && run.failover_count > 0) {
-    text += "That server didn't respond, so Varity is trying another one. ";
-  }
   if (words && attempt) text += `Now ${words.now} (${[attempt, elapsed].filter(Boolean).join(", ")}).`;
   else if (words) text += `Now ${words.now}${elapsed ? `, ${elapsed}` : ""}.`;
   else if (elapsed || attempt) text += `${[elapsed, attempt].filter(Boolean).join(", ")}.`;
@@ -228,9 +224,8 @@ export interface RunView {
   stage?: string | null;
   accepted_at?: string | null;
   execution_deadline_at?: string | null;
-  /** From `progress`: which try this run is on, and how many servers it has moved past. */
+  /** From `progress`: which try this run is on. */
   attempt?: number | null;
-  failover_count?: number | null;
 }
 
 /**
@@ -246,7 +241,6 @@ export async function readRun(runId: string | null): Promise<RunView> {
     const record = (value: unknown) => (value && typeof value === "object" ? value as Record<string, unknown> : {});
     const count = (value: unknown) => (Number.isInteger(value) && (value as number) >= 0 ? value as number : null);
     const progress = record(run.progress);
-    const failover = record(progress.failover);
     return {
       status: text(run.public_status),
       outcome: run.outcome ?? null,
@@ -256,7 +250,6 @@ export async function readRun(runId: string | null): Promise<RunView> {
       accepted_at: text(run.accepted_at),
       execution_deadline_at: text(run.execution_deadline_at),
       attempt: count(progress.attempt),
-      failover_count: count(failover.count),
     };
   } catch {
     return { status: null, outcome: null };

@@ -289,8 +289,9 @@ test("a private or unreachable repo names the working remedies, not 'the supplie
   }, "varity_deploy", { repo_url: "https://github.com/acme/secret-app.git", app_name: "secret-app" });
   assert.equal(out.error.code, "source_repository_unreadable");
   assert.match(out.error.message, /private or does not exist/);
-  assert.match(out.error.message, /can only build from public repositories today/);
+  assert.match(out.error.message, /Nothing was deployed and nothing was charged/);
   assert.doesNotMatch(out.error.message, /supplied token/);
+  assert.match(out.error.suggestion, /upload your project folder to Varity instead; your code stays private/);
   assert.match(out.error.suggestion, /gh repo edit acme\/secret-app --visibility public/);
   assert.match(out.error.suggestion, /container image/);
 });

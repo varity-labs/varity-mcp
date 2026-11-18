@@ -1,12 +1,14 @@
 import { access, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { homedir } from "node:os";
+import { join, parse, resolve } from "node:path";
+import { PackRefused, packFolder } from "./pack.js";
 import { errorResponse } from "../utils/responses.js";
 import type { LocalSource } from "./deploy.js";
 
 /**
- * The stdio deploy source: a project directory's Git `origin` remote. Reads
- * the invoking user's filesystem, so only the local toolset injects it into
- * `registerDeployTool`.
+ * The stdio deploy source: a project directory, its Git `origin` remote, and
+ * the folder packer for an upload. Reads the invoking user's filesystem, so
+ * only the local toolset injects it into `registerDeployTool`.
  */
 
 /** The `origin` remote of `<project>/.git/config`, as an https URL the backend can clone. */
@@ -37,24 +39,33 @@ export async function detectGitRemote(projectPath: string): Promise<string | nul
   return url.replace(/\.git$/, "");
 }
 
-export const localDeploySource: LocalSource = async (path) => {
-  const cwd = path || process.cwd();
-  try {
-    await access(cwd);
-  } catch {
-    return errorResponse(
-      "PATH_NOT_FOUND",
-      `Project directory does not exist: ${cwd}`,
-      "Check the path and ensure the project directory exists."
-    );
-  }
-  const repoUrl = await detectGitRemote(cwd);
-  if (!repoUrl) {
-    return errorResponse(
-      "NO_DEPLOY_SOURCE",
-      `No deploy source found for ${cwd}: it has no Git origin remote.`,
-      "Varity builds in the cloud from a source it can reach. Push the project with varity_create_repo and pass its repo_url, or pass a prebuilt image."
-    );
-  }
-  return { repoUrl };
+/**
+ * Resolves the project folder and its `origin` remote (null when it has none).
+ * An upload needs an explicit path: the server's working directory is rarely
+ * the project, and the home directory or filesystem root is never one.
+ */
+export const localDeploySource: LocalSource = {
+  async resolve(path) {
+    const folder = resolve(path || process.cwd());
+    try {
+      await access(folder);
+    } catch {
+      return errorResponse(
+        "PATH_NOT_FOUND",
+        `Project directory does not exist: ${folder}`,
+        "Check the path and ensure the project directory exists."
+      );
+    }
+    return { folder, repoUrl: await detectGitRemote(folder), explicit: Boolean(path) };
+  },
+  pack: (folder) => {
+    if (folder === resolve(homedir()) || folder === parse(folder).root) {
+      throw new PackRefused(
+        "NOT_A_PROJECT_FOLDER",
+        `${folder} is a home or root folder, not a project, so nothing was uploaded.`,
+        "Pass the absolute path of the project folder itself."
+      );
+    }
+    return packFolder(folder);
+  },
 };
