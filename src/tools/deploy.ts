@@ -10,7 +10,7 @@ import {
 } from "../utils/public-api.js";
 import { acceptanceSummary, lifecycleAcceptance } from "../utils/lifecycle-acceptance.js";
 import type { CollectedFolder, PackedFolder } from "./pack.js";
-import { deployPrivateCopy, type FolderDeploy } from "./deploy-private-copy.js";
+import { checkStatusAction, deployPrivateCopy, startUnconfirmed, type FolderDeploy } from "./deploy-private-copy.js";
 import {
   ARCHIVE_REFUSALS,
   deployDescription,
@@ -130,7 +130,7 @@ function folderUnavailable(step: "upload" | "deploy") {
   );
 }
 
-function uploadError(err: unknown, step: "upload" | "deploy", state: UploadState) {
+function uploadError(err: unknown, step: "upload" | "deploy", state: UploadState, appName: string) {
   if (!(err instanceof VarityPublicApiError)) {
     return errorResponse("UPLOAD_FAILED", "The folder upload failed, so nothing was deployed or charged.", "Retry the deploy.");
   }
@@ -155,6 +155,9 @@ function uploadError(err: unknown, step: "upload" | "deploy", state: UploadState
         ? "Move that file out of the project folder or add it to .gitignore (give the app its settings with varity_set_env), then deploy again."
         : "Fix the named file or add it to .gitignore, then deploy again."
     );
+  }
+  if (step === "deploy" && startUnconfirmed(err)) {
+    return errorResponse(err.code, "The folder was uploaded; whether the deploy started is unconfirmed.", checkStatusAction(appName));
   }
   if (err.status === 408 || err.status === 429 || err.status === 503) {
     return errorResponse(err.code, `${err.message} Nothing was deployed or charged.`, "Wait a minute, then deploy again.");
@@ -210,7 +213,7 @@ async function deployFolder(local: LocalSource, folder: string, deploy: FolderDe
 async function uploadFolder(packed: PackedFolder, deploy: FolderDeploy, state: UploadState): Promise<UploadOutcome> {
   // `uploadError` marks the route off; that answer is the "off" outcome.
   const failed = (err: unknown, step: "upload" | "deploy"): UploadOutcome => {
-    const answer = uploadError(err, step, state);
+    const answer = uploadError(err, step, state, deploy.appName);
     return state.upload === "unavailable" ? { kind: "off", answer } : { kind: "done", result: answer };
   };
   let sourceId: string;

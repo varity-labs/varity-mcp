@@ -453,3 +453,16 @@ test("review: 408 and 429 upload refusals say wait and retry, and start no deplo
     cleanup();
   }
 });
+
+test("SPN-2: an uploaded folder whose create is unconfirmed says the start is unconfirmed, never 'not started'", async () => {
+  const { dir, cleanup } = project();
+  try {
+    const unconfirmed = [504, { code: "deploy_acceptance_unconfirmed", message: "Varity could not confirm the deploy was accepted." }];
+    const { out } = await callTool({ [SOURCES]: [SLOT()], [PUT]: [SEALED], [CREATE]: [unconfirmed] }, { path: dir });
+    assert.equal(out.error.code, "deploy_acceptance_unconfirmed");
+    assert.equal(out.error.message, "The folder was uploaded; whether the deploy started is unconfirmed.");
+    assert.equal(out.error.suggestion, 'Check varity_deploy_status with "my-site" before deploying again.');
+  } finally {
+    cleanup();
+  }
+});

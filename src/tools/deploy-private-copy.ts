@@ -5,7 +5,7 @@ import {
   createDeployment,
   createHostedRepository,
   hostedRouteUnavailable,
-  timeoutBefore,
+  PUBLIC_API_GET_TIMEOUT_MS,
   VarityPublicApiError,
   type HostedChange,
   type HostedChangeFile,
@@ -134,6 +134,25 @@ function refused(err: VarityPublicApiError, files: HostedChangeFile[]) {
   return errorResponse(err.code, `${err.message} ${NOTHING}`, AGAIN);
 }
 
+/** A request's timeout: the default, cut to what is left before `deadlineAt` (ms since epoch). */
+function timeoutBefore(deadlineAt: number): number {
+  return Math.min(PUBLIC_API_GET_TIMEOUT_MS, deadlineAt - Date.now());
+}
+
+/**
+ * The create's start cannot be confirmed: the request never got an answer (a
+ * client-side abort at the deadline reads as unreachable), or the gateway's
+ * own 504 `deploy_acceptance_unconfirmed` outlived the confirming resend.
+ */
+export function startUnconfirmed(err: VarityPublicApiError): boolean {
+  return err.code === "VARITY_API_UNREACHABLE" || (err.status === 504 && err.code === "deploy_acceptance_unconfirmed");
+}
+
+/** What to do when the start is unconfirmed: read the status before a second deploy. */
+export function checkStatusAction(appName: string): string {
+  return `Check varity_deploy_status with "${appName}" before deploying again.`;
+}
+
 /**
  * What a failed commit allows (VERIFY-R1 E9), from the served code only:
  * - "resend": nothing landed, so the same key is sent once more. A network
@@ -239,11 +258,14 @@ export async function deployPrivateCopy(collected: CollectedFolder, deploy: Fold
   try {
     accepted = await createDeployment(
       { app_name: deploy.appName, ...deploy.volume, repo_url: `https://github.com/${repo.full_name}`, commit: head },
-      { deadlineAt: deploy.startedAt + limits.hardDeadlineMs }
+      { timeoutMs: timeoutBefore(deploy.startedAt + limits.hardDeadlineMs) }
     );
   } catch (err) {
     const lead = "Varity saved this folder, but the deploy was not started: ";
     if (err instanceof VarityPublicApiError) {
+      if (startUnconfirmed(err)) {
+        return errorResponse(err.code, "Varity saved this folder; whether the deploy started is unconfirmed.", checkStatusAction(deploy.appName));
+      }
       if (err.status === 429 || err.status === 503) return busy(err, lead);
       return errorResponse(err.code, `${lead}${err.message}`, err.action ?? AGAIN);
     }

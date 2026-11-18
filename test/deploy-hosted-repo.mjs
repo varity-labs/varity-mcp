@@ -395,6 +395,22 @@ test("SP-3: a 429 or 503 on the final create returns the served Retry-After as a
   }
 });
 
+test("SPN-2: a create whose start is unconfirmed (unreachable, or acceptance unconfirmed) says so and points at varity_deploy_status", async () => {
+  const unconfirmed = [504, { code: "deploy_acceptance_unconfirmed", message: "Varity could not confirm the deploy was accepted." }];
+  for (const answer of ["throw", unconfirmed]) {
+    const { dir, cleanup } = project();
+    try {
+      const { isError, out } = await deploy({ path: dir }, { ...base, [CREATE]: [answer] });
+      assert.equal(isError, true);
+      assert.equal(out.error.message, "Varity saved this folder; whether the deploy started is unconfirmed.", JSON.stringify(answer));
+      assert.equal(out.error.suggestion, 'Check varity_deploy_status with "my-site" before deploying again.');
+      assert.doesNotMatch(JSON.stringify(out), /not started/);
+    } finally {
+      cleanup();
+    }
+  }
+});
+
 test("SP-6: a folder over the unit budget is refused in neutral words, not blamed on binary files", async () => {
   // 471 text files and 29 images: 10 commits of 50 files, so 2 + 3 x 10 + 29 = 61 units. The 29 images
   // alone are well under the 45 that fit a small folder; it is the number of saves that overflows.

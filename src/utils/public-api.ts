@@ -489,29 +489,24 @@ export interface PublicRunAcceptance {
  * `idempotency_key` is used when present. Any other
  * failure, or a second 504, is returned unchanged.
  */
-/** A request's timeout: the default, cut to what is left before `deadlineAt` (ms since epoch). */
-export function timeoutBefore(deadlineAt: number | undefined): number {
-  return deadlineAt === undefined
-    ? PUBLIC_API_GET_TIMEOUT_MS
-    : Math.min(PUBLIC_API_GET_TIMEOUT_MS, deadlineAt - Date.now());
-}
-
-async function idempotentCreate<T>(path: string, body: unknown, keyPrefix: string, deadlineAt?: number): Promise<T> {
+/** `timeoutMs`, when given, bounds the whole create: the confirming resend gets only what is left. */
+async function idempotentCreate<T>(path: string, body: unknown, keyPrefix: string, timeoutMs?: number): Promise<T> {
   const idempotencyKey = `${keyPrefix}:${randomUUID()}`;
+  const startedAt = Date.now();
   try {
-    return await publicApiRequest<T>("POST", path, { body, idempotencyKey, timeoutMs: timeoutBefore(deadlineAt) });
+    return await publicApiRequest<T>("POST", path, { body, idempotencyKey, timeoutMs });
   } catch (err) {
     if (!(err instanceof VarityPublicApiError && err.status === 504 && err.code === "deploy_acceptance_unconfirmed")) {
       throw err;
     }
-    // No time left for the confirming resend: the caller's deadline wins.
-    if (timeoutBefore(deadlineAt) <= 0) throw err;
+    const left = timeoutMs === undefined ? undefined : timeoutMs - (Date.now() - startedAt);
+    if (left !== undefined && left <= 0) throw err;
     // The gateway names the key it holds the create under; it equals ours.
     const served = err.served?.idempotency_key;
     return publicApiRequest<T>("POST", path, {
       body,
       idempotencyKey: typeof served === "string" && served ? served : idempotencyKey,
-      timeoutMs: timeoutBefore(deadlineAt),
+      timeoutMs: left,
     });
   }
 }
@@ -523,10 +518,10 @@ async function idempotentCreate<T>(path: string, body: unknown, keyPrefix: strin
  */
 export async function createDeployment(
   request: Record<string, unknown>,
-  options: { deadlineAt?: number } = {}
+  options: { timeoutMs?: number } = {}
 ): Promise<PublicRunAcceptance> {
   return idempotentCreate<PublicRunAcceptance>(
-    "/api/deployments", { ...request, source: "mcp" }, "mcp-deploy", options.deadlineAt
+    "/api/deployments", { ...request, source: "mcp" }, "mcp-deploy", options.timeoutMs
   );
 }
 

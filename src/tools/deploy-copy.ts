@@ -51,8 +51,9 @@ export const ARCHIVE_REFUSALS: Readonly<Record<string, string>> = {
 export const NEEDS_PATH =
   "Pass path as the absolute path of the project folder (the server's working directory is rarely the project), then deploy again.";
 
-/** What happens to a folder (PLAN-R1 M5); true only behind the release gate in ARCHITECTURE.md ## Verification. */
+/** What happens to a folder (PLAN-R1 M5), as a clause and as a sentence; true only behind the release gate in ARCHITECTURE.md ## Verification. */
 const FOLDER_RULE = "a folder without a readable GitHub repository is saved as a private copy Varity keeps (deleted with the deployment) and built.";
+const FOLDER_RULE_SENTENCE = "A folder without a readable GitHub repository is saved as a private copy Varity keeps (deleted with the deployment) and built.";
 
 export const PATH_DESCRIPTION =
   "Absolute path to the project directory (e.g. '/home/user/my-app'). " +
@@ -69,7 +70,7 @@ export const SOURCE_DESCRIPTION =
 export function deployDescription(local: boolean): string {
   return (
     "Submit a Git repository, a local project folder, or a prebuilt container image to Varity's deployment owner. " +
-    (local ? `${FOLDER_RULE[0]!.toUpperCase()}${FOLDER_RULE.slice(1)} If it answers UPLOAD_UNAVAILABLE, ${NO_FOLDER_YET} ` : "") +
+    (local ? `${FOLDER_RULE_SENTENCE} If it answers UPLOAD_UNAVAILABLE, ${NO_FOLDER_YET} ` : "") +
     "The control plane detects the framework, selects hosting, builds, and manages lifecycle state. " +
     "Use this when a developer wants to deploy, publish, ship, or make their app live. " +
     "If the developer wants to deploy a certified template rather than their own code, " +
