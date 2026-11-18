@@ -8,7 +8,7 @@ import { ENV_KEY, projectEnvReader, type ProjectEnvReader } from "./env-file.js"
 
 /** Said before and after every env change: it restarts the app (V9-1/V9-3). */
 export const RESTART_NOTE =
-  "Your app restarts to use the new settings; a restart sets aside another monthly maximum until it settles.";
+  "Your app restarts to use the new settings. Restarting holds one more month's maximum for a few minutes, then releases it.";
 
 /**
  * `varity_set_env` (stdio only): reads the named settings from the project's
@@ -115,7 +115,7 @@ export function registerSetEnvTool(server: McpServer): void {
         "Set environment variables (settings such as API keys) on a deployed app from the project's own .env file. " +
         "Pass the app, the project folder and the setting NAMES; the values are read from the file on this computer and " +
         "never go through chat. Never ask the user to type a value into chat: ask them to put it in .env. " +
-        "This restarts the app, and a restart sets aside another monthly maximum until it settles, so tell the user before calling. " +
+        "This restarts the app, and restarting holds one more month's maximum for a few minutes, then releases it, so tell the user before calling. " +
         "The user is asked to confirm the names and the restart before anything is sent. " +
         "Call it once; do not repeat it on a timeout (check varity_deploy_status instead).",
       inputSchema: {

@@ -50,7 +50,7 @@ export async function deployAccepted(accepted: Awaited<ReturnType<typeof createD
       app_name: accepted.app_name ?? null,
       ...acceptance,
     },
-    acceptanceSummary("Deploy", accepted.id, acceptance)
+    `Building now; usually live in under a minute. ${acceptanceSummary("Deploy", accepted.id, acceptance)}`
   );
 }
 
@@ -204,7 +204,7 @@ async function deployFolder(
       secret_files_not_uploaded: secrets,
       ...acceptance,
     },
-    `${notes.join(" ")} ${acceptanceSummary("Deploy", accepted.id, acceptance)}`
+    `${notes.join(" ")} Building now; usually live in under a minute. ${acceptanceSummary("Deploy", accepted.id, acceptance)}`
   );
 }
 

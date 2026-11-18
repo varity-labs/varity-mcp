@@ -203,7 +203,7 @@ test("errors name tools the agent can call, never raw HTTP routes", async () => 
   const { out } = await call({
     "/api/deployments/site/logs": [409, {
       code: "runtime_not_started",
-      message: "This is a static site: it has no runtime logs.",
+      message: "No runtime logs: this deployment did not start a runtime.",
       action: "Read run_id from GET /api/deployments/{id}, then GET /api/deployments/runs/{run_id}.",
     }],
   }, "varity_deploy_logs", { deployment: "site" });

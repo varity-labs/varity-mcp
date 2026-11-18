@@ -11,6 +11,7 @@ import {
   type PublicDeployment,
 } from "../utils/public-api.js";
 import { redactPublicText } from "../utils/redact.js";
+import { usd } from "../utils/money.js";
 
 interface DeploymentRecord {
   /** The canonical id: the durable operation id `varity_deploy` returned, stable for the whole life. */
@@ -374,6 +375,14 @@ export function registerDeployStatusTool(server: McpServer, options: { probe: bo
           } else if (!failure && run.status === "live" && deployment.status === "live") {
             const took = timeToLive(run);
             if (took) message += `. ${took}`;
+          }
+          const billing = deployment.billing ?? null;
+          const monthly = billing?.fixed_monthly_cost_usd;
+          if (!failure && deployment.status === "live" && (typeof monthly === "string" || typeof monthly === "number") && Number.isFinite(Number(monthly))) {
+            message += `${message.endsWith(".") ? "" : "."} It costs ${usd(Number(monthly))}/month.`;
+          }
+          if (deployment.status === "deleted" && billing?.state === "stopped") {
+            message += `${message.endsWith(".") ? "" : "."} Billing has stopped.`;
           }
           return successResponse(
             {

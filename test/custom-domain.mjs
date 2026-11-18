@@ -58,7 +58,8 @@ test("add a subdomain: one PUT and the exact CNAME line", async () => {
   assert.deepEqual(calls.map((c) => [c.method, c.path, c.body]), [["PUT", "/api/deployments/shop/domain", { hostname: "app.example.com" }]]);
   assert.equal(out.success, true);
   assert.equal(out.data.dns_instructions, 'At the company where the domain is registered, add a CNAME record with Host "app" and Value "c-7f3a.varity.app" for app.example.com.');
-  assert.match(out.message, /varity_domain_verify/);
+  assert.match(out.message, /Once the record is added, I'll check it for you/);
+  assert.doesNotMatch(out.message, /run varity_domain_verify/);
 });
 
 test("add an apex: the A record and the TXT ownership record", async () => {
