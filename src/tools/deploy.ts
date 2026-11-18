@@ -8,9 +8,9 @@ import {
   uploadSourceArchive,
   VarityPublicApiError,
 } from "../utils/public-api.js";
-import { acceptanceSummary, lifecycleAcceptance } from "../utils/lifecycle-acceptance.js";
+import { acceptanceSummary, checkStatusAction, lifecycleAcceptance, startUnconfirmed } from "../utils/lifecycle-acceptance.js";
 import type { CollectedFolder, PackedFolder } from "./pack.js";
-import { checkStatusAction, deployPrivateCopy, startUnconfirmed, type FolderDeploy } from "./deploy-private-copy.js";
+import { deployPrivateCopy, type FolderDeploy } from "./deploy-private-copy.js";
 import {
   ARCHIVE_REFUSALS,
   deployDescription,

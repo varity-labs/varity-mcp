@@ -11,7 +11,7 @@ import {
   type HostedChangeFile,
   type HostedRepository,
 } from "../utils/public-api.js";
-import { acceptanceSummary, lifecycleAcceptance } from "../utils/lifecycle-acceptance.js";
+import { acceptanceSummary, checkStatusAction, lifecycleAcceptance, startUnconfirmed } from "../utils/lifecycle-acceptance.js";
 import type { CollectedFolder } from "./pack.js";
 
 /**
@@ -137,20 +137,6 @@ function refused(err: VarityPublicApiError, files: HostedChangeFile[]) {
 /** A request's timeout: the default, cut to what is left before `deadlineAt` (ms since epoch). */
 function timeoutBefore(deadlineAt: number): number {
   return Math.min(PUBLIC_API_GET_TIMEOUT_MS, deadlineAt - Date.now());
-}
-
-/**
- * The create's start cannot be confirmed: the request never got an answer (a
- * client-side abort at the deadline reads as unreachable), or the gateway's
- * own 504 `deploy_acceptance_unconfirmed` outlived the confirming resend.
- */
-export function startUnconfirmed(err: VarityPublicApiError): boolean {
-  return err.code === "VARITY_API_UNREACHABLE" || (err.status === 504 && err.code === "deploy_acceptance_unconfirmed");
-}
-
-/** What to do when the start is unconfirmed: read the status before a second deploy. */
-export function checkStatusAction(appName: string): string {
-  return `Check varity_deploy_status with "${appName}" before deploying again.`;
 }
 
 /**
