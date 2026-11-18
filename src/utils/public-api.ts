@@ -95,10 +95,15 @@ export class VarityPublicApiError extends Error {
 const BILLING_URL = `${INFRASTRUCTURE.DASHBOARD}/billing`;
 /** Where the portal's "Create deploy key" button lives; the portal calls these keys "deploy keys". */
 export const DEPLOY_KEY_URL = `${INFRASTRUCTURE.DASHBOARD}/settings?tab=api-keys`;
-/** The one sign-in remedy: no key (doctor), a rejected key and an unauthenticated call all say it. */
+/**
+ * The one sign-in remedy: no key (doctor), a rejected key and an unauthenticated
+ * call all say it. Browser sign-in leads, in the words the agent says to the
+ * user; the developer option (an environment key) comes second.
+ */
 export const DEPLOY_KEY_ACTION =
-  `Create a deploy key at ${DEPLOY_KEY_URL}, set it as VARITY_DEPLOY_KEY in the MCP server environment ` +
-  "(or run `varitykit auth login` in a trusted terminal; it saves the key to ~/.varitykit/config.json), then call varity_doctor.";
+  "Call varity_login and tell the user: \"I'll open a browser tab: confirm there to connect Varity.\" " +
+  "No key is needed and nothing needs restarting. " +
+  `For CI or scripts, developers can instead create a deploy key at ${DEPLOY_KEY_URL} and set it as VARITY_DEPLOY_KEY in the MCP server environment.`;
 /** A hosted call signs in through the host's connector, not a local key. */
 const REMOTE_SIGN_IN_ACTION = "Reconnect the Varity connector in this app to sign in again, then retry.";
 

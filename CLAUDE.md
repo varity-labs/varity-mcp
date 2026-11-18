@@ -32,9 +32,10 @@ refs, CI receipts, and fresh live evidence own those facts.
   pricing reads use the one owner-scoped public Varity client in
   `src/utils/public-api.ts`.
 - Only the migration preview runs the `varitykit` CLI, through
-  `src/utils/cli-bridge.ts`. Sign-in reads the deploy key from
-  `VARITY_DEPLOY_KEY`, the file `varitykit auth login` writes, or the legacy
-  `VARITY_API_KEY` (`src/utils/config.ts`); it runs no CLI.
+  `src/utils/cli-bridge.ts`. `varity_login` signs in through the browser
+  (or a device code) and saves the deploy key to `~/.varitykit/config.json`;
+  the key is read from `VARITY_DEPLOY_KEY`, that file, or the legacy
+  `VARITY_API_KEY` (`src/utils/config.ts`); sign-in runs no CLI.
 - Several developer tools operate directly on the MCP host's filesystem or
   processes; in stdio mode this is the invoking user's machine.
 - The MCP never calls provider, static-storage, db-proxy, credential-proxy, or

@@ -27,11 +27,11 @@ const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
 const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
 const { createVarityServer } = await import("../dist/server.js");
 
-const LOCAL_26 = [
+const LOCAL_27 = [
   "varity_agent_info", "varity_balance", "varity_build", "varity_cost_calculator", "varity_create_repo",
   "varity_delete_deployment", "varity_deploy", "varity_deploy_agent", "varity_deploy_logs", "varity_deploy_status",
   "varity_deploy_template", "varity_dev_server", "varity_doctor", "varity_install_deps", "varity_list_agents",
-  "varity_list_templates", "varity_login", "varity_machines_create", "varity_machines_delete", "varity_machines_list",
+  "varity_list_templates", "varity_login", "varity_logout", "varity_machines_create", "varity_machines_delete", "varity_machines_list",
   "varity_migrate", "varity_open_browser", "varity_redeploy", "varity_search_docs", "varity_set_env",
   "varity_template_info",
 ];
@@ -78,12 +78,12 @@ function stubFetch(respond) {
   return { seen, restore: () => { globalThis.fetch = original; } };
 }
 
-test("(1) the default factory still lists the same 26 local tools", async () => {
+test("(1) the default factory still lists the same 27 local tools (A5 adds varity_logout)", async () => {
   for (const options of [undefined, { toolset: "local" }]) {
     const client = await connect(options);
     const { tools } = await client.listTools();
     await client.close();
-    assert.deepEqual(tools.map((tool) => tool.name).sort(), LOCAL_26);
+    assert.deepEqual(tools.map((tool) => tool.name).sort(), LOCAL_27);
   }
 });
 

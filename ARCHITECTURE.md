@@ -67,7 +67,7 @@ lifecycle state.
 |---|---|---|---|
 | Entrypoint | stdio only; stdout contains JSON-RPC only; unknown/retired transport flags fail closed | `src/index.ts` | `test/runtime-version.mjs`, `test/logger-stdio-channel.mjs`, runtime matrix |
 | MCP composition | `createVarityServer(options)`: `toolset: "local"` (default) is the complete stdio surface; `"remote"` is the hosted surface. Every tool callback runs in its server's call context (credential provider, transport, client identity) through `AsyncLocalStorage`, so concurrent servers in one process never share a credential | `src/server.ts` | `test/tool-annotations.mjs`, `test/remote-toolset.mjs` plus package startup tests |
-| Toolsets | `local`: all 26 tools, the compatibility resource and prompts. `remote`: exactly 12 tools (search_docs, cost_calculator, balance, list_templates, template_info, deploy_template, deploy, deploy_status, deploy_logs, redeploy, delete_deployment, show_deployment), the deployment card resource and self-contained `instructions` (at most 512 characters); no filesystem, process, credential or machine tool; `varity_deploy` takes `repo_url` or `image` only (no `path`; `files` waits for the upload interface); `varity_deploy_status` runs no server-side HTTP probe of deployment URLs (the hosted server would fetch arbitrary URLs), so remotely liveness is the served status | `src/toolsets/local.ts`, `src/toolsets/remote.ts` | `test/remote-toolset.mjs`; `npm run check:architecture` refuses a static module graph from `src/toolsets/remote.ts` reaching `node:fs`, `node:child_process`, `node:os` or the CLI bridge (`test/architecture-remote-graph.mjs`). This guards what remote tools can call; the `./server` export still loads the local modules through `src/server.ts` without registering them |
+| Toolsets | `local`: all 27 tools, the compatibility resource and prompts. `remote`: exactly 12 tools (search_docs, cost_calculator, balance, list_templates, template_info, deploy_template, deploy, deploy_status, deploy_logs, redeploy, delete_deployment, show_deployment), the deployment card resource and self-contained `instructions` (at most 512 characters); no filesystem, process, credential or machine tool; `varity_deploy` takes `repo_url` or `image` only (no `path`; `files` waits for the upload interface); `varity_deploy_status` runs no server-side HTTP probe of deployment URLs (the hosted server would fetch arbitrary URLs), so remotely liveness is the served status | `src/toolsets/local.ts`, `src/toolsets/remote.ts` | `test/remote-toolset.mjs`; `npm run check:architecture` refuses a static module graph from `src/toolsets/remote.ts` reaching `node:fs`, `node:child_process`, `node:os` or the CLI bridge (`test/architecture-remote-graph.mjs`). This guards what remote tools can call; the `./server` export still loads the local modules through `src/server.ts` without registering them |
 | Deployment card | `ui://varity/deployment-card.html`, `text/html;profile=mcp-app`, empty CSP origin lists; attached only to the read-only `varity_show_deployment`; shows the served price, status steps, URL and failure reason; Refresh calls `varity_show_deployment` again, Open sends only an http(s) URL to the host's `ui/open-link`; accepts messages only from its parent frame and pins the host origin from the `ui/initialize` answer; never deploys and has no billing link | `src/apps/`, `src/tools/show-deployment.ts` | `test/deployment-card.mjs` |
 | Tools | Zod-validated input and shared structured responses; no provider or orchestration policy | `src/tools/` | per-adapter and regression tests under `test/` |
 | Compatibility resource | `varity://deploy/reference` remains stable but routes mutable facts to live docs/tools | `src/resources/index.ts` | cleanup contract and architecture checks |
@@ -105,7 +105,48 @@ deploy key resolved by `src/utils/config.ts`: env `VARITY_DEPLOY_KEY`, then the
 CLI sign-in file `~/.varitykit/config.json` (`deploy_key`, then `api_key`), then
 the legacy env `VARITY_API_KEY`, which the public AI Gateway docs use for the
 inference key. `varity_doctor` reports which source supplied the key, never the
-key.
+key; for the sign-in file it says "signed in (source: sign-in file)".
+
+**Browser sign-in (PLAN N3, IF-OAUTH).** `varity_login` is the public client
+`varity-mcp-local` of the Varity authorization server (issuer
+`https://varity.app`, endpoints `/api/oauth/*`, owned by credential-proxy behind
+the gateway); `src/utils/oauth-login.ts` speaks the protocol and
+`src/tools/login.ts` owns the session. It first requires RFC 8414 metadata
+naming exactly that issuer with PKCE `S256`, and, because the gateway serves
+that metadata statically, a grant-less `POST /api/oauth/token` answered with an
+RFC 6749 error (400/401) rather than 404; otherwise it stops with a plain
+"isn't available right now, so nothing was changed" and opens nothing. The
+browser opens without a shell (`rundll32 url.dll,FileProtocolHandler` on
+Windows, `open`, `xdg-open`). Concurrent calls share one start. By
+default it runs authorization code + PKCE S256 through a **single-use loopback
+listener** on `127.0.0.1:<random port>/callback`: the only network listener this
+process ever opens, alive only during a sign-in (at most the server's 600 s
+request lifetime), unref'd, ignoring callbacks with another `state`, closed
+after the first matching answer, and checking `iss` (RFC 9207). Headless (SSH,
+CI, Linux without a display) it uses the RFC 8628 device flow, polling at the
+served interval (+5 s on `slow_down`; transient 429/5xx keep polling). One
+in-process sign-in exists at a time: a call waits at most 120 s (progress
+notifications when the client sends a progress token) and then answers
+`pending`; the next call resumes the same sign-in. The token endpoint returns
+an ordinary `vk_` deploy key and `key_id`; it is saved the moment it arrives,
+so the running process uses it at once with no restart, and never appears in
+a tool result. A browser-minted key it replaces is revoked with itself as the
+bearer; a minted key that cannot be saved is revoked. `varity_logout` calls
+`POST /api/keys/current/revoke` with the saved key and deletes it locally only
+after a 2xx, or after a 401/403 that the API confirms (the key no longer
+works); any other outcome (404 while sign-out is not live, 5xx, no answer)
+keeps the key and says so. It also ends any in-flight sign-in, and names a key
+that still connects the computer (environment, or the legacy `api_key`).
+Environment keys and `api_key` are never written or revoked.
+
+**One writer.** `updateSignIn` in `src/utils/config.ts` is the only code that
+writes `~/.varitykit/config.json`: it merges `deploy_key`/`deploy_key_id` into
+the existing fields, writes a new file created 0600 with `O_CREAT|O_EXCL`,
+fsyncs it and renames it over the old one in a 0700 directory, then fsyncs the
+directory. It refuses (leaving the file untouched) a file it cannot parse as a
+JSON object and a symlinked file or directory. It never writes the legacy
+`api_key`, which stays read only. There is no cross-process lock: a concurrent
+varitykit write can win, but the rename means neither leaves a torn file.
 
 **stdout is the JSON-RPC channel.** Diagnostics go to stderr through the
 central logger or `console.error`. A single unrelated stdout byte can corrupt
@@ -120,7 +161,7 @@ verification, rate limits and its release. The remote toolset registers no
 filesystem, process or credential tool, and its copy names no local setup,
 billing link or purchase step. The retired in-package HTTP mode, OAuth
 proxying, in-memory sessions, the runtime container and GHCR release aliases
-stay absent; adding a network listener to this process remains a
+stay absent; apart from the sign-in loopback listener above, adding a network listener to this process remains a
 cross-repository security/topology change.
 
 `varity_create_repo` never accepts a credential as MCP input. It reads
@@ -141,7 +182,8 @@ The MCP owns no durable deployment, release, pricing, or billing state.
 
 | State | Location | Custody |
 |---|---|---|
-| Deploy key/config | environment or `~/.varitykit/config.json` | host-local secret; never return or log |
+| Deploy key/config | environment or `~/.varitykit/config.json` | host-local secret; never return or log; the file is written only by `updateSignIn` (0600, atomic) |
+| In-flight sign-in | process memory (`src/tools/login.ts`) | one at a time: PKCE verifier, state or device code and the loopback listener; never returned except the user code and sign-in URL; gone when it completes, expires (600 s) or the process exits |
 | Call context (remote) | `AsyncLocalStorage` per tool call | the hosted mount's credential provider and client identity for one call only; nothing is stored between calls |
 | GitHub credential | process environment or GitHub CLI | read for one operation; never place in MCP input, Git argv, or `.git/config` |
 | Docs sections | process memory | expires after five minutes; refresh failure returns no stale authority |
