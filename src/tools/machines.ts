@@ -40,6 +40,11 @@ const profileCatalogPath = (gpu?: boolean) =>
   `/api/deployment-profiles?workload=${gpu ? "gpu" : "cpu"}&execution_class=${executionClass(gpu)}`;
 const PRIVATE_KEY_MARKER = /PRIVATE KEY|BEGIN OPENSSH|BEGIN RSA|BEGIN EC/i;
 const DELETE_POLL_INTERVAL_MS = 10_000;
+/** A list of every machine ever made outgrew what an assistant can read (VM-LIST: 306 machines, 615 KB). */
+const MACHINES_LIST_DEFAULT = 20;
+const MACHINES_LIST_MAX = 100;
+const billingStateOf = (machine: Record<string, unknown>) =>
+  (machine.billing as { state?: unknown } | null | undefined)?.state;
 
 function apiError(err: unknown, fallbackCode: string, fallbackMessage: string) {
   if (err instanceof VarityPublicApiError) {
@@ -147,22 +152,48 @@ export function registerMachinesTools(server: McpServer): void {
         "List the developer's Varity CPU and GPU virtual machines with their state, SSH access and billing. " +
         "Set include_profiles to also get the machine profiles and OS images (profile_id, os_image) " +
         "that varity_machines_create accepts: CPU profiles by default, GPU VM profiles (with GPU model, " +
-        "VRAM, hourly price and default_os_image) when gpu is true.",
+        "VRAM, hourly price and default_os_image) when gpu is true. " +
+        "By default only machines still running or billing are listed; set include_stopped to list machines " +
+        "whose billing has stopped too, at most limit of them.",
       inputSchema: {
         include_profiles: z.boolean().optional().describe("Also return the machine profile catalog."),
         gpu: z.boolean().optional().describe("With include_profiles, return GPU VM profiles instead of CPU ones."),
+        include_stopped: z.boolean().optional().describe("Also list machines whose billing has stopped (deleted machines)."),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(MACHINES_LIST_MAX)
+          .optional()
+          .describe(`Most machines to list (default ${MACHINES_LIST_DEFAULT}, up to ${MACHINES_LIST_MAX}).`),
       },
     },
-    async ({ include_profiles, gpu }) => {
+    async ({ include_profiles, gpu, include_stopped, limit }) => {
       try {
         const machines = await listMachines();
         const profiles = include_profiles
           ? await publicApiGet<Record<string, unknown>>(profileCatalogPath(gpu))
           : undefined;
+        const all = machines.machines;
+        const wanted = include_stopped ? all : all.filter((m) => billingStateOf(m) !== "stopped");
+        const listed = wanted.slice(0, limit ?? MACHINES_LIST_DEFAULT);
+        const notListed = all.length - listed.length;
+        const partial = machines.inventory_status === "partial" ? " Inventory partial; some machines could not be read." : "";
+        const summary = include_stopped
+          ? `${listed.length} of ${all.length} machine(s) listed.` +
+            (notListed > 0 ? ` ${notListed} more are not listed; raise limit (up to ${MACHINES_LIST_MAX}) to see more.` : "")
+          : `${listed.length} machine(s) running or billing.` +
+            (wanted.length > listed.length ? ` ${wanted.length - listed.length} more running or billing are not listed; raise limit to see them.` : "") +
+            (all.length > wanted.length ? ` ${all.length - wanted.length} more with billing stopped are not listed; set include_stopped to list them.` : "");
         return successResponse(
-          { ...machines, ...(profiles ? { profiles } : {}) },
-          `${machines.machines.length} machine(s)` +
-            (machines.inventory_status === "partial" ? " (inventory partial; some machines could not be read)." : ".")
+          {
+            ...machines,
+            machines: listed,
+            total_count: all.length,
+            not_listed_count: notListed,
+            ...(profiles ? { profiles } : {}),
+          },
+          summary + partial
         );
       } catch (err) {
         return apiError(err, "MACHINES_LIST_FAILED", "Could not list machines.");

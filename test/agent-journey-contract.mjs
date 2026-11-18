@@ -218,7 +218,7 @@ test("a rejected key says 'deploy key' and where to create one", async () => {
     "/api/deployments": [401, { code: "invalid_api_key", message: "The API key is invalid or revoked.", action: "Create a new API key in the Developer Portal and retry." }],
   }, "varity_deploy_status");
   assert.equal(out.error.code, "invalid_api_key");
-  assert.match(out.error.suggestion, /deploy key at https:\/\/developer\.store\.varity\.so\/dashboard\/settings\?tab=api-keys/);
+  assert.match(out.error.suggestion, /deploy key instead: create one at https:\/\/developer\.store\.varity\.so\/dashboard\/settings\?tab=api-keys/);
   assert.doesNotMatch(`${out.error.message} ${out.error.suggestion}`, /API key/);
 });
 
@@ -300,7 +300,9 @@ test("a private or unreachable repo names the working remedies, not 'the supplie
   assert.match(out.error.message, /private or does not exist/);
   assert.match(out.error.message, /Nothing was deployed and nothing was charged/);
   assert.doesNotMatch(out.error.message, /supplied token/);
-  assert.match(out.error.suggestion, /upload your project folder to Varity instead; your code stays private/);
+  // J-23/E3 (journey 2.3.29): no upload promise before an upload worked; the no-GitHub path leads.
+  assert.doesNotMatch(out.error.suggestion, /your code stays private/);
+  assert.match(out.error.suggestion, /Chat and Build/);
   assert.match(out.error.suggestion, /gh repo edit acme\/secret-app --visibility public/);
   assert.match(out.error.suggestion, /container image/);
 });
@@ -430,7 +432,7 @@ test("J-4: a rejected key on the estimate gets the deploy-key remedy, never an a
   }, "varity_cost_calculator", { app_profile: "static-site" });
   assert.equal(out.success, false);
   assert.equal(out.error.code, "invalid_api_key");
-  assert.match(out.error.suggestion, /deploy key at https:\/\/developer\.store\.varity\.so\/dashboard\/settings\?tab=api-keys/);
+  assert.match(out.error.suggestion, /deploy key instead: create one at https:\/\/developer\.store\.varity\.so\/dashboard\/settings\?tab=api-keys/);
   assert.equal(calls.length, 1, "no second, anonymous request");
   assert.equal(calls[0].init.headers.Authorization, "Bearer api-key");
 });

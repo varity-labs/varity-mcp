@@ -199,13 +199,16 @@ that require a remote MCP URL are not supported by this package.
 ## Prerequisites
 
 - **Node.js** >= 22.11 (the current supported LTS baseline; EOL Node 18/20 are unsupported)
-- **A Varity sign-in** for deploys and account reads. Ask your AI assistant to
-  connect Varity: `varity_login` opens a browser tab, you confirm, and the
-  sign-in is saved on this computer (`~/.varitykit/config.json`, readable only
-  by you). No key to copy and no restart. Never put a key in chat.
-  For CI or scripts, create a deploy key at
-  https://developer.store.varity.so/dashboard/settings?tab=api-keys and set it
-  as `VARITY_DEPLOY_KEY` in the MCP server environment.
+- **A Varity deploy key** for deploys and account reads. This is the way to
+  connect today: create one at
+  https://developer.store.varity.so/dashboard/settings?tab=api-keys (the
+  Portal asks for a payment method before it issues a deploy key) and add it
+  as `VARITY_DEPLOY_KEY` in your editor's MCP settings for Varity. Keep the key
+  out of the chat.
+  Connecting through a browser sign-in (`varity_login` opens a browser tab, you
+  confirm, and the sign-in is saved on this computer in
+  `~/.varitykit/config.json`, readable only by you) is being switched on.
+  Until it is, `varity_login` says so and points you to the deploy key.
   The key is read in this order: `VARITY_DEPLOY_KEY`, then the sign-in file
   `~/.varitykit/config.json`, then the legacy `VARITY_API_KEY`.
   `varity_doctor` reports which source supplied it.

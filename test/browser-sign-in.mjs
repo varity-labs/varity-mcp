@@ -332,8 +332,9 @@ test("varity_logout keeps the key when the revoke outcome is unknown or the key 
 // ── wording (non-coder lens, journey row J-15) ──────────────────────────────
 
 test("every key remedy leads with the browser sign-in; no paste prompt or terminal step anywhere", async () => {
-  assert.match(DEPLOY_KEY_ACTION, /^Call varity_login and tell the user: "I'll open a browser tab: confirm there to connect Varity\."/);
-  assert.ok(DEPLOY_KEY_ACTION.indexOf("VARITY_DEPLOY_KEY") > DEPLOY_KEY_ACTION.indexOf("browser tab"), "developer option second");
+  // T2 (journey 2.3.29): browser sign-in first, the deploy key when it answers SIGN_IN_UNAVAILABLE.
+  assert.match(DEPLOY_KEY_ACTION, /^Call varity_login to connect\. If browser sign-in is switched on, it opens a browser tab/);
+  assert.ok(DEPLOY_KEY_ACTION.indexOf("VARITY_DEPLOY_KEY") > DEPLOY_KEY_ACTION.indexOf("browser tab"), "deploy key second");
   const { createVarityServer } = await import("../dist/server.js");
   const [serverSide, clientSide] = InMemoryTransport.createLinkedPair();
   await createVarityServer().connect(serverSide);

@@ -102,13 +102,14 @@ export const BILLING_URL = `${INFRASTRUCTURE.DASHBOARD}/billing`;
 export const DEPLOY_KEY_URL = `${INFRASTRUCTURE.DASHBOARD}/settings?tab=api-keys`;
 /**
  * The one sign-in remedy: no key (doctor), a rejected key and an unauthenticated
- * call all say it. Browser sign-in leads, in the words the agent says to the
- * user; the developer option (an environment key) comes second.
+ * call all say it. It is true whether or not browser sign-in is switched on:
+ * varity_login opens the browser when it is, and answers SIGN_IN_UNAVAILABLE
+ * when it is not, and then the deploy key is the way in (J-21, T2).
  */
 export const DEPLOY_KEY_ACTION =
-  "Call varity_login and tell the user: \"I'll open a browser tab: confirm there to connect Varity.\" " +
-  "No key is needed and nothing needs restarting. " +
-  `For CI or scripts, developers can instead create a deploy key at ${DEPLOY_KEY_URL} and set it as VARITY_DEPLOY_KEY in the MCP server environment.`;
+  "Call varity_login to connect. If browser sign-in is switched on, it opens a browser tab and the user confirms there. " +
+  "If it answers SIGN_IN_UNAVAILABLE, tell the user: \"Browser sign-in isn't available right now. You can connect with a deploy key instead: " +
+  `create one at ${DEPLOY_KEY_URL} and add it as VARITY_DEPLOY_KEY in your editor's MCP settings. Keep the key out of the chat.\"`;
 /** A hosted call signs in through the host's connector, not a local key. */
 const REMOTE_SIGN_IN_ACTION = "Reconnect the Varity connector in this app to sign in again, then retry.";
 

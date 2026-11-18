@@ -227,7 +227,14 @@ test("a private repo while the upload route is off still explains, deploys nothi
   }
 });
 
-test("J-14: an explicit private repo_url offers the folder upload first, publishing last", async () => {
+test("J-14: once an upload worked, an explicit private repo_url offers the folder upload first, publishing last", async () => {
+  // E3 (journey 2.3.29): the offer reuses what the upload route last answered; earlier tests in this file turned it off.
+  const { dir, cleanup } = project();
+  try {
+    assert.equal((await callTool({ [SOURCES]: [SLOT()], [PUT]: [SEALED], [CREATE]: [ACCEPTED] }, { path: dir })).out.success, true);
+  } finally {
+    cleanup();
+  }
   const { out } = await callTool({
     [CREATE]: [[422, { code: "source_repository_unreadable", message: "supplied token cannot read" }]],
   }, { repo_url: "https://github.com/acme/secret-app" });

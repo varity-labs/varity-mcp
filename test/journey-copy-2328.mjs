@@ -55,7 +55,7 @@ test("J-13: deleting and deleted never say 'URL not assigned yet'", async () => 
   }
 });
 
-test("J-14: a private repository is explained plainly and offers the folder upload, then private paths, before 'make it public'", async () => {
+test("J-14: a private repository is explained plainly and offers the no-GitHub path, then private paths, before 'make it public'", async () => {
   const out = await call("varity_deploy", { repo_url: "https://github.com/acme/secret-app" }, {
     "/api/deployments": [422, { code: "source_repository_unreadable", message: "supplied token cannot read" }],
   });
@@ -68,9 +68,10 @@ test("J-14: a private repository is explained plainly and offers the folder uplo
   const publish = suggestion.indexOf("--visibility public");
   assert.ok(template >= 0 && image >= 0 && publish > template && publish > image, suggestion);
   assert.match(suggestion, /ask first/);
-  // U-6 replaces the interim copy: uploading the folder (private) is offered first.
-  const upload = suggestion.indexOf("upload your project folder");
-  assert.ok(upload >= 0 && upload < template, suggestion);
+  // J-23/E3 (journey 2.3.29): no upload has worked in this process, so Chat and Build leads, never an upload promise.
+  const chat = suggestion.indexOf("Chat and Build");
+  assert.ok(chat >= 0 && chat < template, suggestion);
+  assert.doesNotMatch(suggestion, /your code stays private/);
 });
 
 test("J-17: the live message states how long it took", async () => {

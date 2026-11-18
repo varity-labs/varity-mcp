@@ -48,7 +48,7 @@ test("J-16: the message says cents in plain words; exact values stay in data", a
     currency: "USD", available_usd: "100.00", reserved_usd: "45.06", debt_usd: "0.00",
     source: "varity_public_api:/api/credits/balance",
   });
-  assert.equal(output.message, "Available $100.00, set aside for your running apps $45.06 (released within a few minutes after an app stops), owed $0.00 (USD).");
+  assert.equal(output.message, "Available $100.00, set aside for your running apps $45.06 (released when billing next settles, usually within 20 minutes after an app stops), owed $0.00 (USD).");
   assert.doesNotMatch(output.message, /authorization maximum/);
   assert.match(definition.description, /set aside for the user's running apps/);
 });
@@ -58,7 +58,7 @@ test("exact USD preserves sub-cent amounts and balances beyond floating-point in
   assert.equal(output.data.available_usd, "0.00000001");
   assert.equal(output.data.reserved_usd, "90071992.54740993");
   assert.equal(output.data.debt_usd, "92233720368.54775807");
-  assert.equal(output.message, "Available <$0.01, set aside for your running apps $90,071,992.55 (released within a few minutes after an app stops), owed $92,233,720,368.55 (USD).");
+  assert.equal(output.message, "Available <$0.01, set aside for your running apps $90,071,992.55 (released when billing next settles, usually within 20 minutes after an app stops), owed $92,233,720,368.55 (USD).");
 });
 
 test("a measured zero is distinct from missing, malformed and unavailable money", async () => {
