@@ -340,9 +340,12 @@ export interface PublicApiRequestOptions {
   raw?: { data: Uint8Array; contentType: string };
   /** Overrides `PUBLIC_API_GET_TIMEOUT_MS` (an upload of a large archive). */
   timeoutMs?: number;
-  /** Extra request headers (an approval id). */
+  /** Extra request headers (an approval id); never the key, idempotency or content headers. */
   headers?: Record<string, string>;
 }
+
+/** Headers this client owns; an extra header with one of these names is dropped. */
+const RESERVED_HEADERS = new Set(["authorization", "idempotency-key", "content-type", "accept", "user-agent"]);
 
 type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -359,7 +362,9 @@ async function sendRequest<T>(
   if (options.body !== undefined) headers["Content-Type"] = "application/json";
   if (options.raw) headers["Content-Type"] = options.raw.contentType;
   if (options.idempotencyKey) headers["Idempotency-Key"] = options.idempotencyKey;
-  Object.assign(headers, options.headers);
+  for (const [name, value] of Object.entries(options.headers ?? {})) {
+    if (!RESERVED_HEADERS.has(name.toLowerCase())) headers[name] = value;
+  }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? PUBLIC_API_GET_TIMEOUT_MS);
   try {
@@ -484,19 +489,29 @@ export interface PublicRunAcceptance {
  * `idempotency_key` is used when present. Any other
  * failure, or a second 504, is returned unchanged.
  */
-async function idempotentCreate<T>(path: string, body: unknown, keyPrefix: string): Promise<T> {
+/** A request's timeout: the default, cut to what is left before `deadlineAt` (ms since epoch). */
+export function timeoutBefore(deadlineAt: number | undefined): number {
+  return deadlineAt === undefined
+    ? PUBLIC_API_GET_TIMEOUT_MS
+    : Math.min(PUBLIC_API_GET_TIMEOUT_MS, deadlineAt - Date.now());
+}
+
+async function idempotentCreate<T>(path: string, body: unknown, keyPrefix: string, deadlineAt?: number): Promise<T> {
   const idempotencyKey = `${keyPrefix}:${randomUUID()}`;
   try {
-    return await publicApiRequest<T>("POST", path, { body, idempotencyKey });
+    return await publicApiRequest<T>("POST", path, { body, idempotencyKey, timeoutMs: timeoutBefore(deadlineAt) });
   } catch (err) {
     if (!(err instanceof VarityPublicApiError && err.status === 504 && err.code === "deploy_acceptance_unconfirmed")) {
       throw err;
     }
+    // No time left for the confirming resend: the caller's deadline wins.
+    if (timeoutBefore(deadlineAt) <= 0) throw err;
     // The gateway names the key it holds the create under; it equals ours.
     const served = err.served?.idempotency_key;
     return publicApiRequest<T>("POST", path, {
       body,
       idempotencyKey: typeof served === "string" && served ? served : idempotencyKey,
+      timeoutMs: timeoutBefore(deadlineAt),
     });
   }
 }
@@ -506,9 +521,12 @@ async function idempotentCreate<T>(path: string, body: unknown, keyPrefix: strin
  * image, template_id, hosting, env, ...) passed through unchanged; `source`
  * is always `mcp` so the operation is attributed to this surface.
  */
-export async function createDeployment(request: Record<string, unknown>): Promise<PublicRunAcceptance> {
+export async function createDeployment(
+  request: Record<string, unknown>,
+  options: { deadlineAt?: number } = {}
+): Promise<PublicRunAcceptance> {
   return idempotentCreate<PublicRunAcceptance>(
-    "/api/deployments", { ...request, source: "mcp" }, "mcp-deploy"
+    "/api/deployments", { ...request, source: "mcp" }, "mcp-deploy", options.deadlineAt
   );
 }
 
@@ -615,8 +633,12 @@ export interface HostedChange {
 }
 
 /** `POST /api/github/changes` (Idempotency-Key) — 201 `{branch, commit_sha, base_sha}`. Never retried here. */
-export async function commitHostedChange(change: HostedChange, idempotencyKey: string): Promise<{ commit_sha: string }> {
-  const data = await publicApiRequest<{ commit_sha?: unknown }>("POST", "/api/github/changes", { body: change, idempotencyKey });
+export async function commitHostedChange(
+  change: HostedChange,
+  idempotencyKey: string,
+  timeoutMs?: number
+): Promise<{ commit_sha: string }> {
+  const data = await publicApiRequest<{ commit_sha?: unknown }>("POST", "/api/github/changes", { body: change, idempotencyKey, timeoutMs });
   if (typeof data.commit_sha !== "string" || !/^[0-9a-f]{40}$/.test(data.commit_sha)) {
     throw new VarityPublicApiError(
       "Varity answered the save in a form this MCP version does not understand.",
@@ -631,6 +653,14 @@ export async function commitHostedChange(change: HostedChange, idempotencyKey: s
 export interface HostedRepositoryListing {
   repositories: Array<{ id: number; name: string; full_name: string; created_by?: string }>;
   truncated?: boolean;
+}
+
+/**
+ * The gateway has no private-copy route for this key: 404 (an older gateway,
+ * or the deploy-key flag off) or the single 403 `repo_authority_required`.
+ */
+export function hostedRouteUnavailable(err: unknown): boolean {
+  return err instanceof VarityPublicApiError && (err.status === 404 || (err.status === 403 && err.code === "repo_authority_required"));
 }
 
 /** `GET /api/github/hosted-repositories` — the caller's own private copies. */

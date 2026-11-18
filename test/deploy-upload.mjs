@@ -407,13 +407,14 @@ test("review: a worktree or submodule .git file is never packed", async () => {
   }
 });
 
-test("review: many empty files are refused locally on the server's tar-stream ratio (and over the private-copy cap)", async () => {
+test("review: many empty files are refused locally on the server's tar-stream ratio", async () => {
   const root = mkdtempSync(join(tmpdir(), "mcp-u6-ratio-"));
   try {
     for (let i = 0; i < 3000; i += 1) writeFileSync(join(root, `f${i}.txt`), "");
     const { out, calls } = await callTool({ [SOURCES]: [SLOT()] }, { path: root, source: "upload" });
-    // R1 M3: a folder the upload cannot take is offered the private copy, whose caps refuse it before any call.
-    assert.equal(out.error.code, "FOLDER_TOO_LARGE_FOR_VARITY");
+    // SP-5 (PLAN-R1 M3): while the upload route is not known to be off, a folder it cannot take gets the
+    // upload's own refusal; the private copy is only the path once the upload route answered off.
+    assert.equal(out.error.code, "FOLDER_NOT_UPLOADABLE");
     assert.equal(calls.length, 0);
   } finally {
     rmSync(root, { recursive: true, force: true });

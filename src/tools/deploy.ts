@@ -6,12 +6,23 @@ import {
   createUploadDeployment,
   createUploadSource,
   uploadSourceArchive,
-  CHAT_AND_BUILD_URL,
   VarityPublicApiError,
 } from "../utils/public-api.js";
 import { acceptanceSummary, lifecycleAcceptance } from "../utils/lifecycle-acceptance.js";
 import type { CollectedFolder, PackedFolder } from "./pack.js";
-import { deployPrivateCopy } from "./deploy-private-copy.js";
+import { deployPrivateCopy, type FolderDeploy } from "./deploy-private-copy.js";
+import {
+  ARCHIVE_REFUSALS,
+  deployDescription,
+  NEEDS_PATH,
+  NO_FOLDER_YET,
+  NO_GITHUB_PATH,
+  PATH_DESCRIPTION,
+  repoUrlHint,
+  sayExactly,
+  SOURCE_DESCRIPTION,
+  UPLOAD_UNAVAILABLE_ACTION,
+} from "./deploy-copy.js";
 
 /**
  * `varity_deploy` → `POST /api/deployments` through the one public-API client
@@ -56,26 +67,6 @@ export async function deployAccepted(accepted: Awaited<ReturnType<typeof createD
       ...acceptance,
     },
     `Building now; usually live in under a minute. ${acceptanceSummary("Deploy", accepted.id, acceptance)}`
-  );
-}
-
-const NO_FOLDER_YET = "Varity can't take a folder from this computer yet.";
-const NO_GITHUB_PATH =
-  `The way to get a site online today without GitHub is Varity's Chat and Build: describe the app, and Varity builds it ` +
-  `and publishes it to a live address. No GitHub needed: ${CHAT_AND_BUILD_URL}`;
-const CHAT_AND_BUILD_LINE =
-  "The way to get it online today without GitHub is Varity's Chat and Build: describe the app, and Varity builds it " +
-  `and publishes it to a live address: ${CHAT_AND_BUILD_URL}`;
-/**
- * The error message itself (P1 T3, r3): one quoted paragraph to say verbatim
- * (the pattern that held for sign-in), then the developer options, public
- * GitHub only if asked.
- */
-function sayExactly(paragraph: string): string {
-  return (
-    `Tell the user exactly this: "${paragraph} ${CHAT_AND_BUILD_LINE}" ` +
-    "For developers, a ready-made Varity template or a prebuilt container image also works. " +
-    "Only if the user asks: make the code public on GitHub and deploy it from there."
   );
 }
 
@@ -124,30 +115,11 @@ function unreadableRepository(repoUrl: string | undefined, canUpload: boolean, s
   ];
 }
 
-/** Validator reasons the gateway serves in `field` on 422 `source_archive_refused`, in plain words. */
-const ARCHIVE_REFUSALS: Readonly<Record<string, string>> = {
-  secret_path: "it contains a file that looks like a secret (a key, credential or .env file)",
-  unsafe_path: "a file path points outside the project folder",
-  unsupported_entry: "it contains something other than plain files",
-  too_many_entries: "it has too many files",
-  too_large_uncompressed: "its files are too large in total",
-  ratio_exceeded: "its files compress unusually far",
-  duplicate_path: "it lists the same path twice",
-  empty_archive: "it contains no files",
-  unsupported_format: "the archive format was not accepted",
-};
-
 /** The gateway route (U-5) or the deploy-api flag is off: nothing was uploaded. */
 function uploadUnavailable(err: VarityPublicApiError): boolean {
   if (err.code === "source_not_found") return false;
   return err.status === 404 || err.status === 405 || err.status === 501 || err.code === "uploads_unavailable";
 }
-
-const UPLOAD_UNAVAILABLE_ACTION =
-  `Tell the user plainly: "${NO_FOLDER_YET} ${NO_GITHUB_PATH}" ` +
-  "For developers: a ready-made Varity template (varity_list_templates) or a prebuilt container image (image argument). " +
-  "Last, and only if the user decides to make the code public: push it to a public GitHub repository " +
-  "(varity_create_repo, then make it public) and deploy its repo_url; ask first.";
 
 /** No route takes a folder from this computer: the no-GitHub copy (Chat and Build first). */
 function folderUnavailable(step: "upload" | "deploy") {
@@ -200,76 +172,76 @@ function packRefusal(err: unknown, folder: string) {
   return errorResponse("PACK_FAILED", `Could not read the project folder ${folder}, so nothing was uploaded.`, "Check the path and file permissions.");
 }
 
+/** The upload's answer: a final result, or the route answered off (its no-folder answer kept). */
+type UploadOutcome =
+  | { kind: "done"; result: ReturnType<typeof errorResponse> | ReturnType<typeof successResponse> }
+  | { kind: "off"; answer: ReturnType<typeof errorResponse> };
+
 /**
- * PLAN-R1 M3 order: collect; try the upload (U-6) unless this server saw it
- * off; once it is off, or the folder cannot be packed for it, save a private
- * copy (its own caps); if that route is off too, the upload's own answer.
+ * PLAN-R1 M3 order, three branches:
+ * 1. this server has not seen the upload route off: pack and upload (U-6); a
+ *    folder the upload cannot take gets the upload's own refusal; only a
+ *    route that answers off moves on to the private copy;
+ * 2. the upload route is off: save a private copy (its own caps);
+ * 3. that route is off too: the upload's no-folder answer.
  */
-async function deployFolder(
-  local: LocalSource,
-  folder: string,
-  request: Record<string, unknown>,
-  why: string,
-  state: UploadState,
-  startedAt: number
-) {
+async function deployFolder(local: LocalSource, folder: string, deploy: FolderDeploy, state: UploadState) {
   let collected: CollectedFolder;
   try {
     collected = await local.collect(folder);
   } catch (err) {
     return packRefusal(err, folder);
   }
-  // `uploadFolder` sets the state when the route answers off.
-  const off = () => state.upload === "unavailable";
-  let answer: ReturnType<typeof errorResponse> | undefined;
-  if (!off()) {
-    let packed: PackedFolder | undefined;
+  let offAnswer: ReturnType<typeof errorResponse> | undefined;
+  if (state.upload !== "unavailable") {
+    let packed: PackedFolder;
     try {
       packed = await local.pack(collected);
     } catch (err) {
-      answer = packRefusal(err, folder);
+      return packRefusal(err, folder);
     }
-    if (packed) {
-      const uploaded = await uploadFolder(packed, request, why, state);
-      if (!off()) return uploaded;
-      answer = uploaded as ReturnType<typeof errorResponse>;
-    }
+    const upload = await uploadFolder(packed, deploy, state);
+    if (upload.kind === "done") return upload.result;
+    offAnswer = upload.answer;
   }
-  return (await deployPrivateCopy(collected, request, why, startedAt)) ?? answer ?? folderUnavailable("upload");
+  return (await deployPrivateCopy(collected, deploy)) ?? offAnswer ?? folderUnavailable("upload");
 }
 
-async function uploadFolder(
-  packed: PackedFolder,
-  request: Record<string, unknown>,
-  why: string,
-  state: UploadState
-) {
+async function uploadFolder(packed: PackedFolder, deploy: FolderDeploy, state: UploadState): Promise<UploadOutcome> {
+  // `uploadError` marks the route off; that answer is the "off" outcome.
+  const failed = (err: unknown, step: "upload" | "deploy"): UploadOutcome => {
+    const answer = uploadError(err, step, state);
+    return state.upload === "unavailable" ? { kind: "off", answer } : { kind: "done", result: answer };
+  };
   let sourceId: string;
   try {
     const slot = await createUploadSource();
     if (packed.archive.length > slot.max_bytes) {
-      return errorResponse(
-        "source_too_large",
-        `The packed folder is ${(packed.archive.length / 1024 / 1024).toFixed(1)} MB, over this account's ${Math.floor(slot.max_bytes / 1024 / 1024)} MB upload limit. Nothing was uploaded, deployed or charged.`,
-        "Add large generated, media or data folders to .gitignore, then deploy again."
-      );
+      return {
+        kind: "done",
+        result: errorResponse(
+          "source_too_large",
+          `The packed folder is ${(packed.archive.length / 1024 / 1024).toFixed(1)} MB, over this account's ${Math.floor(slot.max_bytes / 1024 / 1024)} MB upload limit. Nothing was uploaded, deployed or charged.`,
+          "Add large generated, media or data folders to .gitignore, then deploy again."
+        ),
+      };
     }
     await uploadSourceArchive(slot, packed.archive);
     state.upload = "available";
     sourceId = slot.source_id;
   } catch (err) {
-    return uploadError(err, "upload", state);
+    return failed(err, "upload");
   }
   let accepted: Awaited<ReturnType<typeof createUploadDeployment>>;
   try {
-    accepted = await createUploadDeployment(request, sourceId);
+    accepted = await createUploadDeployment({ app_name: deploy.appName, ...deploy.volume }, sourceId);
   } catch (err) {
-    return uploadError(err, "deploy", state);
+    return failed(err, "deploy");
   }
   const acceptance = await lifecycleAcceptance(accepted);
   const secrets = packed.secretPaths;
   const notes = [
-    `${why ? `${why} ` : ""}I uploaded this folder to Varity (${packed.fileCount} files); your code stays private and nothing was published to GitHub.`,
+    `${deploy.why ? `${deploy.why} ` : ""}I uploaded this folder to Varity (${packed.fileCount} files); your code stays private and nothing was published to GitHub.`,
     packed.excludedCount > 0
       ? `Left out ${packed.excludedCount} ignored items (dependencies, build output and anything in .gitignore).`
       : "",
@@ -277,7 +249,7 @@ async function uploadFolder(
       ? `Kept these secret files on this computer and did not upload them: ${secrets.join(", ")}. Give the app its settings with varity_set_env.`
       : "",
   ].filter(Boolean);
-  return successResponse(
+  const result = successResponse(
     {
       accepted: true,
       id: accepted.id ?? null,
@@ -290,6 +262,7 @@ async function uploadFolder(
     },
     `${notes.join(" ")} Building now; usually live in under a minute. ${acceptanceSummary("Deploy", accepted.id, acceptance)}`
   );
+  return { kind: "done", result };
 }
 
 /** The last segment of a local folder path, on any platform. */
@@ -297,58 +270,24 @@ function folderName(folder: string): string {
   return folder.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "app";
 }
 
-const NEEDS_PATH =
-  "Pass path as the absolute path of the project folder (the server's working directory is rarely the project), then deploy again.";
-
 export function registerDeployTool(server: McpServer, localSource?: LocalSource): void {
   const uploadState: UploadState = { upload: "unknown" };
   const pathInput = {
-    path: z
-      .string()
-      .optional()
-      .describe(
-        "Absolute path to the project directory (e.g. '/home/user/my-app'). " +
-        "Used to read the Git `origin` remote when repo_url and image are omitted; " +
-        "a folder without a readable GitHub repository is saved as a private copy Varity keeps (deleted with the deployment) and built. " +
-        "If omitted, the MCP server's working directory is used (which is rarely the correct project root)."
-      ),
-    source: z
-      .enum(["upload"])
-      .optional()
-      .describe(
-        "Set to \"upload\" to try sending the project folder at path straight to Varity. " +
-        "Tried automatically when the folder has no Git origin remote or its repository is private. " +
-        "If Varity cannot take the folder yet, nothing is sent or charged and the answer says so."
-      ),
+    path: z.string().optional().describe(PATH_DESCRIPTION),
+    source: z.enum(["upload"]).optional().describe(SOURCE_DESCRIPTION),
   };
-  const repoUrlHint = localSource
-    ? "If omitted, auto-detected from .git/config. Use the repo_url returned by varity_create_repo as the value here."
-    : "Pass repo_url or image.";
   server.registerTool(
     "varity_deploy",
     {
       title: "Deploy to Production",
-      description:
-        "Submit a Git repository, a local project folder, or a prebuilt container image to Varity's deployment owner. " +
-        (localSource
-          ? "A folder without a readable GitHub repository is saved as a private copy Varity keeps (deleted with the deployment) and built. " +
-            `If it answers UPLOAD_UNAVAILABLE, ${NO_FOLDER_YET} `
-          : "") +
-        "The control plane detects the framework, selects hosting, builds, and manages lifecycle state. " +
-        "Use this when a developer wants to deploy, publish, ship, or make their app live. " +
-        "If the developer wants to deploy a certified template rather than their own code, " +
-        "use varity_deploy_template instead. To ship new code for an app that is already deployed, push it and call " +
-        "varity_deploy again with the same app_name: the same owner and workload shape updates that app in place at " +
-        "the latest commit (varity_redeploy does not pick up new commits). " +
-        (localSource ? "For a folder, call varity_deploy again with the same path and app_name: it sends the folder again and updates that app in place. " : "") +
-        "To stop a deployment and its billing, use varity_delete_deployment.",
+      description: deployDescription(Boolean(localSource)),
       inputSchema: {
         ...(localSource ? pathInput : {}),
         repo_url: z
           .string()
           .optional()
           .describe(
-            "GitHub repository URL for the app (e.g. 'https://github.com/user/my-app'). " + repoUrlHint
+            "GitHub repository URL for the app (e.g. 'https://github.com/user/my-app'). " + repoUrlHint(Boolean(localSource))
           ),
         app_name: z
           .string()
@@ -417,7 +356,7 @@ export function registerDeployTool(server: McpServer, localSource?: LocalSource)
         folder = local;
         const upload = (why: string) =>
           local.explicit
-            ? deployFolder(localSource, local.folder, { app_name: app_name || defaultAppName(folderName(local.folder)), ...volume }, why, uploadState, startedAt)
+            ? deployFolder(localSource, local.folder, { appName: app_name || defaultAppName(folderName(local.folder)), volume, why, startedAt }, uploadState)
             : Promise.resolve(errorResponse("PROJECT_PATH_REQUIRED", `${why ? `${why} to upload it I need` : "Uploading needs"} the folder's exact location.`, NEEDS_PATH));
         if (source === "upload") return upload("");
         if (!local.repoUrl) return upload("This project has no GitHub repository, so");
@@ -444,10 +383,13 @@ export function registerDeployTool(server: McpServer, localSource?: LocalSource)
             return deployFolder(
               localSource,
               folder.folder,
-              { app_name: app_name || defaultAppName(repoUrl!), ...volume },
-              "Varity cannot read this project's GitHub repository (it is private), so",
-              uploadState,
-              startedAt
+              {
+                appName: app_name || defaultAppName(repoUrl!),
+                volume,
+                why: "Varity cannot read this project's GitHub repository (it is private), so",
+                startedAt,
+              },
+              uploadState
             );
           }
           return errorResponse(err.code, ...unreadableRepository(repoUrl, Boolean(localSource), uploadState));

@@ -4,7 +4,10 @@ import {
   commitHostedChange,
   createDeployment,
   createHostedRepository,
+  hostedRouteUnavailable,
+  timeoutBefore,
   VarityPublicApiError,
+  type HostedChange,
   type HostedChangeFile,
   type HostedRepository,
 } from "../utils/public-api.js";
@@ -37,7 +40,22 @@ export const PRIVATE_COPY_LIMITS = {
   commitDeadlineMs: 170_000,
   /** No deploy starts after this. */
   deployDeadlineMs: 200_000,
+  /** No request runs past this: each one's timeout is cut to what is left (claude.ai's 240 s, less a margin). */
+  hardDeadlineMs: 230_000,
+  /** Shown when a 429/503 carries no Retry-After. */
+  defaultRetryAfterSeconds: 60,
 } as const;
+
+/** One folder deploy: what `varity_deploy` asked for, why the folder is sent, and when the call began. */
+export interface FolderDeploy {
+  appName: string;
+  /** `volume_size_gb` / `volume_path` when the caller set them. */
+  volume: Record<string, unknown>;
+  /** The lead-in sentence ("This project has no GitHub repository, so"), or "". */
+  why: string;
+  /** `Date.now()` when the tool call began; every deadline counts from it. */
+  startedAt: number;
+}
 
 const NOTHING = "Nothing was deployed or charged.";
 const AGAIN = "Call varity_deploy again with the same path.";
@@ -94,11 +112,11 @@ function incomplete() {
 }
 
 /** 429/503: the served Retry-After as a Varity action. */
-function busy(err: VarityPublicApiError) {
+function busy(err: VarityPublicApiError, lead = "") {
   return errorResponse(
     err.code,
-    `${err.message} ${NOTHING}`,
-    `Call varity_deploy again with the same path after ${err.retryAfterSeconds ?? 60} seconds.`
+    `${lead}${err.message} ${NOTHING}`,
+    `Call varity_deploy again with the same path after ${err.retryAfterSeconds ?? PRIVATE_COPY_LIMITS.defaultRetryAfterSeconds} seconds.`
   );
 }
 
@@ -116,53 +134,81 @@ function refused(err: VarityPublicApiError, files: HostedChangeFile[]) {
   return errorResponse(err.code, `${err.message} ${NOTHING}`, AGAIN);
 }
 
-/** A 504 the gateway says wrote something, or any answer after a resend that could follow a partial write. */
-const LANDED = /\blanded\b|ran out of time after/i;
-const unlanded = (err: VarityPublicApiError) =>
-  err.code === "VARITY_API_UNREACHABLE" || (err.status === 504 && !LANDED.test(err.message));
+/**
+ * What a failed commit allows (VERIFY-R1 E9), from the served code only:
+ * - "resend": nothing landed, so the same key is sent once more. A network
+ *   failure, or the gateway's `github_deadline_exceeded`: its only 504 that
+ *   wrote something is the pull-request step (github-changes.ts
+ *   `landedPastDeadline`), which `open_pr: false` never reaches.
+ * - "incomplete": a write may be partial, so nothing more is sent: any other
+ *   504, and a fenced `branch_exists`/`head_moved` (only a resend meets one).
+ * - "refused": the gateway's own refusal.
+ */
+function classify(err: unknown): "resend" | "incomplete" | "refused" {
+  if (!(err instanceof VarityPublicApiError)) return "incomplete";
+  if (err.code === "VARITY_API_UNREACHABLE" || (err.status === 504 && err.code === "github_deadline_exceeded")) return "resend";
+  if (err.status === 504 || err.code === "branch_exists" || err.code === "head_moved") return "incomplete";
+  return "refused";
+}
+
+/**
+ * One commit, with at most one resend of the same key. Answers the new head
+ * sha, or the result that ends the deploy. No attempt starts without time
+ * left before the hard deadline, and none runs past it.
+ */
+async function commitOnce(change: HostedChange, key: string, startedAt: number): Promise<string | ToolResult> {
+  const deadlineAt = startedAt + PRIVATE_COPY_LIMITS.hardDeadlineMs;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const timeoutMs = timeoutBefore(deadlineAt);
+    if (timeoutMs <= 0) return incomplete();
+    try {
+      return (await commitHostedChange(change, key, timeoutMs)).commit_sha;
+    } catch (err) {
+      const next = classify(err);
+      if (next === "refused") return refused(err as VarityPublicApiError, change.files);
+      if (next === "incomplete") return incomplete();
+    }
+  }
+  return incomplete();
+}
 
 /** `varity/mcp-20261118T061756Z-a1b2c3`: a new branch per run. */
 function runBranch(): string {
-  const utc = new Date(Date.now()).toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
+  const utc = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
   return `varity/mcp-${utc}-${randomBytes(3).toString("hex")}`;
 }
 
 /**
  * Deploys `collected` as a private copy. Answers null when the hosted route is
- * unavailable (404, or 403 `repo_authority_required` on create): nothing was
- * created, and the caller gives its existing no-folder copy.
+ * unavailable (`hostedRouteUnavailable` on create): nothing was created, and
+ * the caller gives its existing no-folder copy.
  */
-export async function deployPrivateCopy(
-  collected: CollectedFolder,
-  request: Record<string, unknown>,
-  why: string,
-  startedAt: number
-): Promise<ToolResult | null> {
-  const L = PRIVATE_COPY_LIMITS;
-  if (collected.files.length > L.maxFiles) {
-    return tooLarge(`This folder has ${collected.files.length} files to save; Varity keeps at most ${L.maxFiles} for a folder deploy.`);
+export async function deployPrivateCopy(collected: CollectedFolder, deploy: FolderDeploy): Promise<ToolResult | null> {
+  const limits = PRIVATE_COPY_LIMITS;
+  if (collected.files.length > limits.maxFiles) {
+    return tooLarge(`This folder has ${collected.files.length} files to save; Varity keeps at most ${limits.maxFiles} for a folder deploy.`);
   }
-  const big = collected.files.find((file) => file.data.length > L.maxFileBytes);
+  const big = collected.files.find((file) => file.data.length > limits.maxFileBytes);
   if (big) {
-    return tooLarge(`${big.path} is ${(big.data.length / MB).toFixed(1)} MB; Varity keeps files of at most ${L.maxFileBytes / MB} MB for a folder deploy.`);
+    return tooLarge(`${big.path} is ${(big.data.length / MB).toFixed(1)} MB; Varity keeps files of at most ${limits.maxFileBytes / MB} MB for a folder deploy.`);
   }
-  if (collected.uncompressedBytes > L.maxTotalBytes) {
-    return tooLarge(`This folder holds ${(collected.uncompressedBytes / MB).toFixed(1)} MB of files; Varity keeps at most ${L.maxTotalBytes / MB} MB for a folder deploy.`);
+  if (collected.uncompressedBytes > limits.maxTotalBytes) {
+    return tooLarge(`This folder holds ${(collected.uncompressedBytes / MB).toFixed(1)} MB of files; Varity keeps at most ${limits.maxTotalBytes / MB} MB for a folder deploy.`);
   }
   const encoded = collected.files.map((file) => encode(file.path, file.data));
   const commits = chunk(encoded);
   const binary = encoded.filter((file) => file.encoding === "base64").length;
-  const units = 2 + 3 * commits.length + binary;
-  if (units > L.maxUnits) {
-    return tooLarge(`This folder has ${binary} binary files (images, fonts, media), more than Varity saves in one folder deploy.`);
+  // The estimate grows with the number of saves and with binary files, so the text blames neither.
+  if (2 + 3 * commits.length + binary > limits.maxUnits) {
+    return tooLarge("This folder needs more saves than one folder deploy allows.");
   }
 
   let repo: HostedRepository;
   try {
-    repo = await createHostedRepository(String(request.app_name));
+    repo = await createHostedRepository(deploy.appName);
   } catch (err) {
     if (!(err instanceof VarityPublicApiError)) return errorResponse("FOLDER_SAVE_FAILED", `Varity could not start saving this folder. ${NOTHING}`, AGAIN);
-    if (err.status === 404 || (err.status === 403 && err.code === "repo_authority_required")) return null;
+    if (hostedRouteUnavailable(err)) return null;
     if (err.code === "hosted_repository_name_in_use") {
       return errorResponse(err.code, `${err.message} ${NOTHING}`, "Call varity_deploy again with a different app_name.");
     }
@@ -173,47 +219,33 @@ export async function deployPrivateCopy(
   const branch = runBranch();
   let head: string | undefined;
   for (const [i, files] of commits.entries()) {
-    if (Date.now() - startedAt > L.commitDeadlineMs) return incomplete();
-    const change = {
+    if (Date.now() - deploy.startedAt > limits.commitDeadlineMs) return incomplete();
+    const change: HostedChange = {
       repo: { owner: repo.owner, name: repo.name },
       base_ref: repo.default_branch || "main",
       branch,
       ...(head ? { expected_head_sha: head } : {}),
       message: commits.length > 1 ? `Save folder from Varity MCP (${i + 1}/${commits.length})` : "Save folder from Varity MCP",
       files,
-      open_pr: false as const,
+      open_pr: false,
     };
-    const key = `mcp-change:${run}:${i}`;
-    try {
-      head = (await commitHostedChange(change, key)).commit_sha;
-    } catch (err) {
-      if (!(err instanceof VarityPublicApiError)) return incomplete();
-      if (!unlanded(err)) return err.status === 504 ? incomplete() : refused(err, files);
-      // Nothing landed: one resend of the same key replays or completes it.
-      try {
-        head = (await commitHostedChange(change, key)).commit_sha;
-      } catch (again) {
-        if (
-          !(again instanceof VarityPublicApiError) ||
-          unlanded(again) ||
-          again.status === 504 ||
-          again.code === "branch_exists" ||
-          again.code === "head_moved"
-        ) {
-          return incomplete();
-        }
-        return refused(again, files);
-      }
-    }
+    const committed = await commitOnce(change, `mcp-change:${run}:${i}`, deploy.startedAt);
+    if (typeof committed !== "string") return committed;
+    head = committed;
   }
-  if (Date.now() - startedAt > L.deployDeadlineMs) return incomplete();
+  if (Date.now() - deploy.startedAt > limits.deployDeadlineMs) return incomplete();
 
   let accepted: Awaited<ReturnType<typeof createDeployment>>;
   try {
-    accepted = await createDeployment({ ...request, repo_url: `https://github.com/${repo.full_name}`, commit: head });
+    accepted = await createDeployment(
+      { app_name: deploy.appName, ...deploy.volume, repo_url: `https://github.com/${repo.full_name}`, commit: head },
+      { deadlineAt: deploy.startedAt + limits.hardDeadlineMs }
+    );
   } catch (err) {
+    const lead = "Varity saved this folder, but the deploy was not started: ";
     if (err instanceof VarityPublicApiError) {
-      return errorResponse(err.code, `Varity saved this folder, but the deploy was not started: ${err.message}`, err.action ?? AGAIN);
+      if (err.status === 429 || err.status === 503) return busy(err, lead);
+      return errorResponse(err.code, `${lead}${err.message}`, err.action ?? AGAIN);
     }
     return errorResponse("DEPLOY_FAILED", "Varity saved this folder, but the deploy was not started.", AGAIN);
   }
@@ -235,7 +267,7 @@ export async function deployPrivateCopy(
       secret_files_not_saved: secrets,
       ...acceptance,
     },
-    `${why ? `${why} ` : ""}Varity saved a private copy of this folder (${parts.join("; ")}) and is building it. ` +
+    `${deploy.why ? `${deploy.why} ` : ""}Varity saved a private copy of this folder (${parts.join("; ")}) and is building it. ` +
       (secrets.length > 0 ? "Give the app its settings with varity_set_env. " : "") +
       acceptanceSummary("Deploy", accepted.id, acceptance)
   );

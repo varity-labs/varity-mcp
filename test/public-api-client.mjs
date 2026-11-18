@@ -102,3 +102,17 @@ test("an unreachable gateway is reported as unreachable, never as success", asyn
     globalThis.fetch = original;
   }
 });
+
+test("ST-8: extra headers never replace the key or the idempotency key", async () => {
+  const { init } = await oneCall(200, {}, () =>
+    api.publicApiRequest("POST", "/api/x", {
+      body: {},
+      idempotencyKey: "mcp-test:1",
+      headers: { Authorization: "Bearer someone-else", authorization: "Bearer x", "Idempotency-Key": "other", "X-Varity-Approval-Id": "apr_1" },
+    })
+  );
+  assert.deepEqual(Object.keys(init.headers).filter((k) => /^(authorization|idempotency-key)$/i.test(k)), ["Authorization", "Idempotency-Key"]);
+  assert.equal(init.headers.Authorization, "Bearer deploy-key");
+  assert.equal(init.headers["Idempotency-Key"], "mcp-test:1");
+  assert.equal(init.headers["X-Varity-Approval-Id"], "apr_1");
+});

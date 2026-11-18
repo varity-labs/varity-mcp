@@ -81,8 +81,29 @@ async function connect() {
   return client;
 }
 
-async function deploy(args, routes, { client: shared, clock } = {}) {
-  const client = shared ?? (await connect());
+/**
+ * SP-5: the private copy is the path once this server saw the upload route answer off; until then a
+ * folder the upload cannot pack (the highly compressible fixtures below) gets the upload's refusal. So
+ * the cap and chunk cases run on a server that already saw the route off.
+ */
+async function uploadOffClient() {
+  const client = await connect();
+  const { dir, cleanup } = project();
+  try {
+    const stub = stubGateway({ [SOURCES]: [UPLOAD_OFF] });
+    try {
+      await client.callTool({ name: "varity_deploy", arguments: { path: dir } });
+    } finally {
+      stub.restore();
+    }
+  } finally {
+    cleanup();
+  }
+  return client;
+}
+
+async function deploy(args, routes, { client: shared, clock, uploadOff } = {}) {
+  const client = shared ?? (uploadOff ? await uploadOffClient() : await connect());
   const stub = stubGateway(routes, { clock });
   try {
     const result = await client.callTool({ name: "varity_deploy", arguments: args });
@@ -175,7 +196,7 @@ test("chunks: at most 50 files, 1,000,000 bytes and 20 base64 files per commit; 
   for (const [name, files, sizes] of cases) {
     const { dir, cleanup } = project(files);
     try {
-      const { isError, out, calls } = await deploy({ path: dir }, base);
+      const { isError, out, calls } = await deploy({ path: dir }, base, { uploadOff: true });
       assert.equal(isError, false, `${name}: ${JSON.stringify(out)}`);
       const changes = of(calls, CHANGES);
       assert.deepEqual(changes.map((c) => c.body.files.length), sizes, name);
@@ -203,7 +224,7 @@ test("caps and the unit budget refuse before any hosted call: 500 files, 5 MB, 1
   for (const [name, files] of cases) {
     const { dir, cleanup } = project(files);
     try {
-      const { isError, out, calls } = await deploy({ path: dir }, base);
+      const { isError, out, calls } = await deploy({ path: dir }, base, { uploadOff: true });
       assert.equal(isError, true, name);
       assert.equal(out.error.code, "FOLDER_TOO_LARGE_FOR_VARITY", name);
       assert.equal(out.error.suggestion, SAVE_ACTION, name);
@@ -216,7 +237,7 @@ test("caps and the unit budget refuse before any hosted call: 500 files, 5 MB, 1
   // 45 base64 files fit: 2 + 3 x 3 + 45 = 56 units.
   const { dir, cleanup } = project(many(45, (i) => [`img${i}.png`, PNG]));
   try {
-    assert.equal((await deploy({ path: dir }, base)).isError, false);
+    assert.equal((await deploy({ path: dir }, base, { uploadOff: true })).isError, false);
   } finally {
     cleanup();
   }
@@ -315,7 +336,9 @@ test("E9: no commit starts after 170 s and no deploy starts after 200 s; both an
 
 test("E9: one resend with the same key on a network error or a 504 that landed nothing; a partial write stops without a resend", async () => {
   const unlanded = [504, { code: "github_deadline_exceeded", message: "The request ran out of time before GitHub answered; no write was started after the deadline." }];
-  const landed = [504, { code: "github_deadline_exceeded", message: 'The request ran out of time after commit abc1234 landed on "varity/x"; nothing further was sent to GitHub.' }];
+  // ST-3: the resend is decided by the served code, never by its prose. The gateway's only
+  // landed 504 is the pull-request step, which open_pr:false never reaches; any other 504 stops.
+  const otherTimeout = [504, { code: "gateway_timeout", message: "The upstream timed out." }];
   for (const first of ["throw", unlanded]) {
     const { dir, cleanup } = project();
     try {
@@ -334,7 +357,8 @@ test("E9: one resend with the same key on a network error or a 504 that landed n
     }
   }
   for (const answers of [
-    [landed],
+    [otherTimeout],
+    ["throw", otherTimeout],
     [unlanded, [409, { code: "branch_exists", message: "The branch already exists." }]],
     [unlanded, [409, { code: "head_moved", message: "The branch moved." }]],
     [unlanded, unlanded],
@@ -349,6 +373,114 @@ test("E9: one resend with the same key on a network error or a 504 that landed n
     } finally {
       cleanup();
     }
+  }
+});
+
+test("SP-3: a 429 or 503 on the final create returns the served Retry-After as a Varity action", async () => {
+  for (const [status, seconds] of [[429, 45], [503, 90]]) {
+    const { dir, cleanup } = project();
+    try {
+      const { isError, out, calls } = await deploy({ path: dir }, {
+        ...base,
+        [CREATE]: [[status, { code: "deploy_capacity", message: "Varity is busy." }, { "Retry-After": String(seconds) }]],
+      });
+      assert.equal(isError, true, String(status));
+      assert.equal(out.error.code, "deploy_capacity");
+      assert.equal(out.error.suggestion, `Call varity_deploy again with the same path after ${seconds} seconds.`);
+      assert.match(out.error.message, /^Varity saved this folder, but the deploy was not started: Varity is busy\./);
+      assert.equal(of(calls, CREATE).length, 1);
+    } finally {
+      cleanup();
+    }
+  }
+});
+
+test("SP-6: a folder over the unit budget is refused in neutral words, not blamed on binary files", async () => {
+  // 471 text files and 29 images: 10 commits of 50 files, so 2 + 3 x 10 + 29 = 61 units. The 29 images
+  // alone are well under the 45 that fit a small folder; it is the number of saves that overflows.
+  const { dir, cleanup } = project({
+    ...many(471, (i) => [`page${String(i).padStart(3, "0")}.txt`, `${i}\n`]),
+    ...many(29, (i) => [`img${String(i).padStart(2, "0")}.png`, PNG]),
+  });
+  try {
+    const { isError, out, calls } = await deploy({ path: dir }, base, { uploadOff: true });
+    assert.equal(isError, true);
+    assert.equal(out.error.code, "FOLDER_TOO_LARGE_FOR_VARITY");
+    assert.match(out.error.message, /^This folder needs more saves than one folder deploy allows\. Nothing was deployed or charged\.$/);
+    assert.doesNotMatch(out.error.message, /binary/);
+    assert.deepEqual(calls.map((c) => c.route).filter((r) => r !== SOURCES), []);
+  } finally {
+    cleanup();
+  }
+});
+
+/** SP-4: every request's own timeout, read at the moment it is sent. */
+async function withTimeouts(run) {
+  const realSetTimeout = globalThis.setTimeout;
+  let last;
+  globalThis.setTimeout = (fn, ms, ...rest) => { last = ms; return realSetTimeout(fn, ms, ...rest); };
+  try {
+    return await run(() => last);
+  } finally {
+    globalThis.setTimeout = realSetTimeout;
+  }
+}
+
+test("SP-4: hard deadline: no request runs past 230 s, so the whole call ends inside claude.ai's 240 s", async () => {
+  const realNow = Date.now;
+  const t0 = realNow();
+  let offset = 0;
+  Date.now = () => t0 + offset;
+  try {
+    // A commit that failed at 200 s is resent with only the 30 s left.
+    let p = project();
+    try {
+      const { isError, calls } = await withTimeouts((timeout) => deploy({ path: p.dir }, {
+        ...base,
+        [CHANGES]: (call) => (call.index === 0 ? "throw" : [201, { branch: call.body.branch, commit_sha: sha(7), base_sha: sha(9) }]),
+      }, {
+        clock: (call) => {
+          call.timeout = timeout();
+          if (call.route === CHANGES && call.index === 0) offset = 200_000;
+          if (call.route === CHANGES && call.index === 1) offset = 0;
+        },
+      }));
+      assert.equal(isError, false);
+      assert.equal(of(calls, CHANGES)[0].timeout, 60_000);
+      assert.equal(of(calls, CHANGES)[1].timeout, 30_000);
+    } finally {
+      p.cleanup();
+    }
+    // A commit that failed after 230 s is not resent at all.
+    offset = 0;
+    p = project();
+    try {
+      const { out, calls } = await deploy({ path: p.dir }, { ...base, [CHANGES]: ["throw"] }, {
+        clock: (call) => { if (call.route === CHANGES) offset = 231_000; },
+      });
+      assert.equal(out.error.code, "FOLDER_SAVE_INCOMPLETE");
+      assert.equal(of(calls, CHANGES).length, 1);
+      assert.equal(of(calls, CREATE).length, 0);
+    } finally {
+      p.cleanup();
+    }
+    // The deploy started at 199 s gets 31 s, not the 60 s default.
+    offset = 0;
+    p = project();
+    try {
+      const { isError, calls } = await withTimeouts((timeout) => deploy({ path: p.dir }, base, {
+        clock: (call) => {
+          call.timeout = timeout();
+          if (call.route === CHANGES) offset = 199_000;
+        },
+      }));
+      assert.equal(isError, false);
+      assert.equal(of(calls, CREATE)[0].timeout, 31_000);
+    } finally {
+      p.cleanup();
+    }
+  } finally {
+    Date.now = realNow;
   }
 });
 
