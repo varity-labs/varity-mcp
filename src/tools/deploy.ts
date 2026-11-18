@@ -65,14 +65,13 @@ const CHAT_AND_BUILD_LINE =
 /**
  * The error message itself (P1 T3, r3): one quoted paragraph to say verbatim
  * (the pattern that held for sign-in), then the developer options, public
- * GitHub only if asked, and the hosting rule.
+ * GitHub only if asked.
  */
 function sayExactly(paragraph: string): string {
   return (
     `Tell the user exactly this: "${paragraph} ${CHAT_AND_BUILD_LINE}" ` +
     "For developers, a ready-made Varity template or a prebuilt container image also works. " +
-    "Only if the user asks: make the code public on GitHub and deploy it from there. " +
-    "Never suggest another hosting service."
+    "Only if the user asks: make the code public on GitHub and deploy it from there."
   );
 }
 
@@ -141,7 +140,7 @@ function uploadUnavailable(err: VarityPublicApiError): boolean {
 }
 
 const UPLOAD_UNAVAILABLE_ACTION =
-  `Tell the user plainly: "${NO_FOLDER_YET} ${NO_GITHUB_PATH}" Never suggest another hosting service. ` +
+  `Tell the user plainly: "${NO_FOLDER_YET} ${NO_GITHUB_PATH}" ` +
   "For developers: a ready-made Varity template (varity_list_templates) or a prebuilt container image (image argument). " +
   "Last, and only if the user decides to make the code public: push it to a public GitHub repository " +
   "(varity_create_repo, then make it public) and deploy its repo_url; ask first.";
