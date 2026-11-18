@@ -10,7 +10,6 @@
 const { execSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
-const { pathToFileURL } = require("node:url");
 
 const DIST = path.join(__dirname, "..", "dist");
 if (!fs.existsSync(DIST)) {
@@ -67,30 +66,36 @@ const { FLAG, receiptProblem } = require("./r1-receipt.cjs");
 
 const ROOT = path.join(__dirname, "..");
 
-function distSays(dir, phrase) {
-  return fs.readdirSync(dir, { withFileTypes: true }).some((entry) => {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) return distSays(full, phrase);
-    return /\.(js|cjs|mjs)$/.test(entry.name) && phrase.test(fs.readFileSync(full, "utf8"));
-  });
+const PHRASE = /private copy/i;
+/** The delete tool's cleanup sentence: it names an existing copy and promises none. */
+const CLEANUP = "If Varity saved a private copy of a folder for this app, that copy is deleted too.";
+
+/** The initializer text of `export const <name> = ...;` in a built module, or null. */
+function declaration(file, name) {
+  const match = new RegExp(`export const ${name} =([\\s\\S]*?);\\n`).exec(fs.readFileSync(file, "utf8"));
+  return match ? match[1] : null;
 }
 
 /**
- * The package promises the private copy when dist/ or the README says "private copy", or
- * when the built deploy copy exports a non-empty FOLDER_RULE (so a rewording stays gated).
+ * The package promises the private copy through what it tells a model or a reader, read
+ * statically (no dist code runs in this hook): a non-empty FOLDER_RULE (so a rewording stays
+ * gated), stdio SERVER_RULES that say "private copy", or a README that says it outside the
+ * delete tool's cleanup sentence. Fail closed: a missing deploy copy module, or a FOLDER_RULE
+ * that is not one plain string, counts as a promise.
  */
-async function promisesPrivateCopy() {
-  const phrase = /private copy/i;
-  const readme = path.join(ROOT, "README.md");
-  if (distSays(DIST, phrase) || (fs.existsSync(readme) && phrase.test(fs.readFileSync(readme, "utf8")))) return true;
+function promisesPrivateCopy() {
   const copy = path.join(DIST, "tools", "deploy-copy.js");
-  if (!fs.existsSync(copy)) return false;
-  const { FOLDER_RULE } = await import(pathToFileURL(copy).href);
-  return typeof FOLDER_RULE === "string" && FOLDER_RULE.trim() !== "";
+  if (!fs.existsSync(copy)) return true;
+  const rule = declaration(copy, "FOLDER_RULE");
+  if (rule !== null && (!/^\s*"(?:[^"\\]|\\.)*"\s*$/.test(rule) || rule.trim() !== '""')) return true;
+  const rules = path.join(DIST, "toolsets", "instructions.js");
+  if (fs.existsSync(rules) && PHRASE.test(declaration(rules, "SERVER_RULES") ?? "")) return true;
+  const readme = path.join(ROOT, "README.md");
+  return fs.existsSync(readme) && PHRASE.test(fs.readFileSync(readme, "utf8").split(CLEANUP).join(""));
 }
 
-async function main() {
-  if (await promisesPrivateCopy()) {
+function main() {
+  if (promisesPrivateCopy()) {
     const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
     const problem = receiptProblem(ROOT, pkg);
     if (problem) {
@@ -104,7 +109,9 @@ async function main() {
   process.exit(0);
 }
 
-main().catch((err) => {
+try {
+  main();
+} catch (err) {
   console.error(`[prepublish-guard] ❌ ${err?.message ?? err} — publish BLOCKED.`);
   process.exit(1);
-});
+}

@@ -28,17 +28,21 @@ const RECEIPT = {
   package_version: "2.3.30",
   evidence: { path: "acceptance/r1-live-evidence.txt", sha256: createHash("sha256").update(EVIDENCE).digest("hex") },
 };
-const PROMISE = 'export const RULE = "a folder is saved as a private copy Varity keeps";\n';
+const PROMISE = 'export const FOLDER_RULE = "a folder is saved as a private copy Varity keeps";\n';
 const NO_PROMISE = 'export const RULE = "a folder is deployed";\n';
 
 /** A scratch package root: package.json (2.3.30), dist/tools/deploy-copy.js, README, acceptance/. */
-function scratch(root, { promise, dist, readme, receipt, evidence = EVIDENCE }) {
+function scratch(root, { promise, dist, readme, receipt, evidence = EVIDENCE, files = {} }) {
   mkdirSync(join(root, "scripts"));
   mkdirSync(join(root, "dist", "tools"), { recursive: true });
   copyFileSync(SCRIPT, join(root, "scripts", "prepublish-guard.cjs"));
   copyFileSync(RECEIPT_SCRIPT, join(root, "scripts", "r1-receipt.cjs"));
   writeFileSync(join(root, "package.json"), JSON.stringify({ name: "scratch", version: "2.3.30", type: "module" }));
-  writeFileSync(join(root, "dist", "tools", "deploy-copy.js"), dist ?? (promise ? PROMISE : NO_PROMISE));
+  if (dist !== null) writeFileSync(join(root, "dist", "tools", "deploy-copy.js"), dist ?? (promise ? PROMISE : NO_PROMISE));
+  for (const [rel, text] of Object.entries(files)) {
+    mkdirSync(join(root, rel, ".."), { recursive: true });
+    writeFileSync(join(root, rel), text);
+  }
   if (readme !== undefined) writeFileSync(join(root, "README.md"), readme);
   if (receipt !== undefined) {
     mkdirSync(join(root, "acceptance"));
@@ -164,4 +168,32 @@ test("SP30-3: evidence holding a key, owner id, email, bearer token or GitHub to
     assert.match(output, /not redacted/, output);
   }
   assert.equal(guard({ promise: true, receipt: RECEIPT }).status, 0, "the redacted transcript passes");
+});
+
+const CLEANUP = "If Varity saved a private copy of a folder for this app, that copy is deleted too.";
+
+test("ST30-4: the delete tool's cleanup sentence alone, in dist or README, is no promise", () => {
+  const { status, output } = guard({
+    promise: false,
+    readme: `| varity_delete_deployment | Request deletion. ${CLEANUP} |\n`,
+    files: { "dist/tools/delete-deployment.js": `export const D = "Request deletion. ${CLEANUP}";\n` },
+  });
+  assert.equal(status, 0, output);
+});
+
+test("ST30-4: SERVER_RULES that promise the copy are gated", () => {
+  const { status, output } = guard({
+    promise: false,
+    files: { "dist/toolsets/instructions.js": 'export const SERVER_RULES = "Varity packs it " +\n    "and keeps a private copy and builds it.";\n' },
+  });
+  assert.notEqual(status, 0);
+  assert.match(output, /acceptance\/r1-live\.json/, output);
+});
+
+test("ST30-4: fail closed: a dist without the deploy copy module, or a FOLDER_RULE that is not a plain string, is gated", () => {
+  for (const options of [{ dist: null }, { dist: "export const FOLDER_RULE = `a folder ${x}`;\n" }]) {
+    const { status, output } = guard(options);
+    assert.notEqual(status, 0, JSON.stringify(options));
+    assert.match(output, /acceptance\/r1-live\.json|BLOCKED/, output);
+  }
 });
