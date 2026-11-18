@@ -41,6 +41,12 @@ export function projectOwnerPricing(data: Record<string, unknown>): OwnerPricing
   return null;
 }
 
+/** A served estimate for the Starter plan alone, with no attached service or added storage. */
+function isPlainStarter(data: Record<string, unknown>): boolean {
+  const preset = data.preset as { id?: unknown } | null | undefined;
+  return preset?.id === "starter" && data.attached_services == null && data.persistent_storage == null;
+}
+
 /**
  * GPU containers are hidden on every customer surface (founder ruling
  * 2026-10-27); GPU virtual machines remain, priced by their own quote. The one
@@ -165,7 +171,10 @@ export function registerCostCalculatorTool(server: McpServer): void {
         : servedNote ? `${servedNote}${closed ? "" : "."}` : "";
       // V1-verified claim; apps only (a machine is priced by the hour).
       const traffic = unit === "month" ? " Traffic alone does not change an app's monthly price." : "";
-      const summary = `${String(estimateName)}: ${price}.${plainNote ? ` ${plainNote}` : ""}${traffic}`;
+      // A new Starter app may be the account's one free app (gateway free-app
+      // admission: plan starter). Said only for a plain Starter estimate.
+      const freeStarter = !subdomain && isPlainStarter(data) ? " Free accounts can run one Starter app at no charge." : "";
+      const summary = `${String(estimateName)}: ${price}.${plainNote ? ` ${plainNote}` : ""}${traffic}${freeStarter}`;
 
       return successResponse(
         {
