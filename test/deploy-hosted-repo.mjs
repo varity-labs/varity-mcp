@@ -12,7 +12,7 @@
  * landed write; then POST /api/deployments {repo_url, commit}.
  */
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -184,6 +184,39 @@ test("E12: redeploying the same folder reuses the repository by name, adds a new
   } finally {
     await client.close();
     cleanup();
+  }
+});
+
+/** The gateway's served same-name create (201 {repository}), captured from the producer at 0c46f756 (CHANGE-IMPACT :36). */
+const SAME_NAME = JSON.parse(readFileSync(new URL("./fixtures/gateway-0c46f756-hosted-create-same-name.json", import.meta.url), "utf8"));
+
+test("GW-SP-2: a same-name redeploy receives the existing key-made repository (201, same id, its live default branch) and commits on a new varity/ branch from that branch, then updates the same app", async () => {
+  const { repository } = SAME_NAME.body;
+  for (const [defaultBranch, baseRef] of [[repository.default_branch, repository.default_branch], [null, "main"]]) {
+    const served = [SAME_NAME.status, { repository: { ...repository, default_branch: defaultBranch } }];
+    const routes = { ...base, [HOSTED]: [served] };
+    const { dir, cleanup } = project();
+    const client = await connect();
+    try {
+      const first = await deploy({ path: dir, app_name: "site" }, routes, { client });
+      const second = await deploy({ path: dir, app_name: "site" }, routes, { client });
+      for (const run of [first, second]) {
+        assert.equal(run.isError, false, JSON.stringify(run.out));
+        assert.deepEqual(of(run.calls, HOSTED)[0].body, { name: "site" });
+        const [change] = of(run.calls, CHANGES);
+        assert.equal(change.body.base_ref, baseRef, String(defaultBranch));
+        assert.equal(change.body.expected_head_sha, undefined);
+        assert.match(change.body.branch, /^varity\/mcp-/);
+        const create = of(run.calls, CREATE)[0].body;
+        assert.equal(create.repo_url, `https://github.com/${repository.full_name}`);
+        assert.equal(create.app_name, "site");
+        assert.doesNotMatch(run.out.message, /created/i);
+      }
+      assert.notEqual(of(second.calls, CHANGES)[0].body.branch, of(first.calls, CHANGES)[0].body.branch);
+    } finally {
+      await client.close();
+      cleanup();
+    }
   }
 });
 
