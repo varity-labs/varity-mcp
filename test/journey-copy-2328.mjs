@@ -108,11 +108,14 @@ test("F5: no monthly estimate and no shipped doc carries a traffic price promise
   }
 });
 
-test("J-17/V9-9: an hourly (machine) projection never carries the app traffic line", async () => {
+test("J-17/V9-9: an hourly (machine) projection is priced by the hour and says nothing about a month", async () => {
   const out = await call("varity_cost_calculator", { subdomain: "vm-1" }, {
     "/api/deployments/vm-1": [200, { deployment: { id: "vm-1", status: "live", billing: { currency: "USD", hourly_cost_usd: 0.05 } } }],
   });
-  assert.doesNotMatch(out.message, /Traffic alone/);
+  assert.equal(out.data.hourly_cost_usd, 0.05);
+  assert.equal(out.data.monthly_max_usd, undefined);
+  assert.match(out.message, /^vm-1: \$0\.05\/hour \(USD\)\.$/);
+  assert.doesNotMatch(out.message, /month/i);
 });
 
 test("J-18: while deploying, the stage, time so far and what happens next", async () => {
