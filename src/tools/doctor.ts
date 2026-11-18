@@ -2,7 +2,7 @@ import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import { execCLI, isCLIAvailable } from "../utils/cli-bridge.js";
-import { resolveDeployKey } from "../utils/config.js";
+import { resolveDeployKey, type DeployKeySource } from "../utils/config.js";
 import { DEPLOY_KEY_ACTION, publicApiGet, VarityPublicApiError } from "../utils/public-api.js";
 
 export interface Check {
@@ -35,13 +35,14 @@ export function classifyReadiness(checks: Check[]): {
 
 export async function verifyAuthentication(
   apiKey: string | null,
-  verify: () => Promise<unknown> = () => publicApiGet<{ deployments?: unknown[] }>("/api/deployments")
+  verify: () => Promise<unknown> = () => publicApiGet<{ deployments?: unknown[] }>("/api/deployments"),
+  source: DeployKeySource | null = null
 ): Promise<Check> {
   if (!apiKey) {
     return {
       name: "Authentication",
       status: "fail",
-      message: "Not authenticated: no deploy key found in VARITY_DEPLOY_KEY, ~/.varitykit/config.json or VARITY_API_KEY",
+      message: "Not signed in to Varity yet (no deploy key found in VARITY_DEPLOY_KEY, the sign-in file ~/.varitykit/config.json or VARITY_API_KEY)",
       fix: DEPLOY_KEY_ACTION,
     };
   }
@@ -50,7 +51,9 @@ export async function verifyAuthentication(
     return {
       name: "Authentication",
       status: "pass",
-      message: "Authentication verified by the Varity public interface",
+      message: source === "config:~/.varitykit/config.json"
+        ? "Signed in to Varity (source: sign-in file), verified by Varity"
+        : "Authentication verified by the Varity public interface",
     };
   } catch (error) {
     const ownerError = error instanceof VarityPublicApiError ? error : null;
@@ -192,7 +195,7 @@ export function registerDoctorTool(server: McpServer): void {
       // beats a rotated VARITY_API_KEY is visible.
       const resolved = await resolveDeployKey();
       const deployKeySource = resolved?.source ?? null;
-      const authentication = await verifyAuthentication(resolved?.key ?? null);
+      const authentication = await verifyAuthentication(resolved?.key ?? null, undefined, deployKeySource);
       checks.push(authentication);
       if (authentication.status === "fail") nextSteps.push(authentication.fix ?? DEPLOY_KEY_ACTION);
 

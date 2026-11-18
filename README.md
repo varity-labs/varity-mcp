@@ -108,7 +108,8 @@ The MCP exposes Varity's deploy surface so your AI tool can take action — not 
 | `varity_cost_calculator` | Project the live owner's monthly or hourly USD estimate without converting units; pre-deploy estimates need no sign-in |
 | `varity_balance` | Read your available balance, authorization maximum (`reserved_usd`) and amount owed as exact decimal USD strings using your deploy key; the authorization maximum is not funded backing, and unavailable reads never become zero |
 | `varity_doctor` | Check that your environment is ready to deploy |
-| `varity_login` | Check authentication and route sign-in to `VARITY_DEPLOY_KEY` or the trusted `varitykit auth login` terminal flow |
+| `varity_login` | Connect Varity: opens a browser tab where you confirm (or shows a short code on a machine without a browser); no key to copy, no restart |
+| `varity_logout` | Sign this computer out: revokes the saved sign-in on Varity, then removes it |
 | `varity_install_deps` | Install project dependencies |
 | `varity_build` | Build the project |
 | `varity_open_browser` | Open a URL locally |
@@ -173,10 +174,13 @@ that require a remote MCP URL are not supported by this package.
 ## Prerequisites
 
 - **Node.js** >= 22.11 (the current supported LTS baseline; EOL Node 18/20 are unsupported)
-- **A Varity deploy key** for deploys and account reads. Create one at
+- **A Varity sign-in** for deploys and account reads. Ask your AI assistant to
+  connect Varity: `varity_login` opens a browser tab, you confirm, and the
+  sign-in is saved on this computer (`~/.varitykit/config.json`, readable only
+  by you). No key to copy and no restart. Never put a key in chat.
+  For CI or scripts, create a deploy key at
   https://developer.store.varity.so/dashboard/settings?tab=api-keys and set it
-  as `VARITY_DEPLOY_KEY` in the MCP server environment, or run
-  `varitykit auth login` in a trusted terminal. Never paste a key into chat.
+  as `VARITY_DEPLOY_KEY` in the MCP server environment.
   The key is read in this order: `VARITY_DEPLOY_KEY`, then the sign-in file
   `~/.varitykit/config.json`, then the legacy `VARITY_API_KEY`.
   `varity_doctor` reports which source supplied it.

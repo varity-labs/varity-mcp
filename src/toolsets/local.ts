@@ -14,7 +14,7 @@ import { registerInstallDepsTool } from "../tools/install-deps.js";
 import { registerBuildTool } from "../tools/build.js";
 import { registerOpenBrowserTool } from "../tools/open-browser.js";
 import { registerDevServerTool } from "../tools/dev-server.js";
-import { registerLoginTool } from "../tools/login.js";
+import { registerLoginTool, registerLogoutTool } from "../tools/login.js";
 import { registerMigrateTool } from "../tools/migrate.js";
 import { registerAgentTools } from "../tools/agent.js";
 import { registerDeleteDeploymentTool } from "../tools/delete-deployment.js";
@@ -27,7 +27,7 @@ import { registerMachinesTools } from "../tools/machines.js";
  * invoking user's machine, including filesystem and process tools.
  *
  *   - Discovery: search-docs, cost-calculator, doctor
- *   - Setup: install-deps, build, login
+ *   - Setup: install-deps, build, login, logout
  *   - Deploy own code: deploy, deploy-status, deploy-logs, delete-deployment
  *   - Operate: secret-safe set-env compatibility route; redeploy (restart of the last successful release at its saved commit)
  *   - CPU and GPU VMs: machines-list, machines-create (caller's SSH public key), machines-delete (waits for billing stop)
@@ -50,6 +50,7 @@ export function registerLocalToolset(server: McpServer): void {
 
   // ── Development tools (stdio owns the caller's local filesystem) ──
   registerLoginTool(server);
+  registerLogoutTool(server);
   registerInstallDepsTool(server);
   registerBuildTool(server);
   registerOpenBrowserTool(server);

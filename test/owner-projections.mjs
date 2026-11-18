@@ -33,7 +33,7 @@ test("doctor requires owner verification rather than credential presence", async
   });
   assert.equal(revoked.status, "fail");
   assert.match(revoked.message, /authentication was rejected/i);
-  assert.match(revoked.fix, /varitykit auth login/i);
+  assert.match(revoked.fix, /^Call varity_login/);
 
   const unreachable = await verifyAuthentication("present-key", async () => {
     throw new VarityPublicApiError(
@@ -78,15 +78,17 @@ test("pricing projection preserves owner monthly and hourly units", () => {
   assert.equal(projectOwnerPricing({ billing_model: "hourly_resource_reservation" }), null);
 });
 
-test("login guidance consistently routes secret entry to the trusted terminal", async () => {
+test("login guidance consistently routes sign-in to the browser, never to a pasted key", async () => {
   const [readme, publicApi] = await Promise.all([
     readFile(new URL("../README.md", import.meta.url), "utf8"),
     readFile(new URL("../src/utils/public-api.ts", import.meta.url), "utf8"),
   ]);
   assert.doesNotMatch(readme, /varity_login` \| Authenticate with your deploy key/);
   assert.doesNotMatch(publicApi, /Run varity_login with a Developer Portal deploy key/);
-  assert.match(readme, /varitykit auth login/);
-  assert.match(publicApi, /varitykit auth login/);
+  assert.match(readme, /browser tab/);
+  assert.match(publicApi, /I'll open a browser tab: confirm there to connect Varity/);
+  assert.doesNotMatch(readme, /paste|varitykit auth login/i);
+  assert.doesNotMatch(publicApi, /paste|varitykit auth login/i);
 });
 
 test("set-env compatibility route refuses secret-bearing MCP input", () => {

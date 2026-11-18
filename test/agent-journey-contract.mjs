@@ -222,7 +222,7 @@ test("a rejected key says 'deploy key' and where to create one", async () => {
   assert.doesNotMatch(`${out.error.message} ${out.error.suggestion}`, /API key/);
 });
 
-test("varity_login links the portal's Deploy keys tab, like every other key message", async () => {
+test("varity_login with no key and sign-in not reachable names the Deploy keys tab as the developer option", async () => {
   // A child process with an empty HOME, so the host's own varitykit login cannot answer first.
   const { execFileSync } = await import("node:child_process");
   const { mkdtempSync } = await import("node:fs");
@@ -233,9 +233,12 @@ test("varity_login links the portal's Deploy keys tab, like every other key mess
     let handler; registerLoginTool({ registerTool: (_n, _c, fn) => { handler = fn; } });
     process.stdout.write((await handler({})).content[0].text);`;
   const text = execFileSync(process.execPath, ["--input-type=module", "-e", script], {
-    env: { PATH: process.env.PATH, HOME: home, CI: "true" },
+    // Port 9 (discard) refuses: sign-in is unavailable, and no real network is touched.
+    env: { PATH: process.env.PATH, HOME: home, CI: "true", VARITY_GATEWAY_URL: "http://127.0.0.1:9" },
   }).toString();
-  assert.equal(JSON.parse(text).data.settings_url, "https://developer.store.varity.so/dashboard/settings?tab=api-keys");
+  const out = JSON.parse(text);
+  assert.equal(out.error.code, "SIGN_IN_UNAVAILABLE");
+  assert.match(out.error.suggestion, /deploy key at https:\/\/developer\.store\.varity\.so\/dashboard\/settings\?tab=api-keys/);
 });
 
 test("varity_deploy app_name names both URL shapes the gateway serves", async () => {
