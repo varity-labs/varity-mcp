@@ -378,7 +378,7 @@ export function registerDeployStatusTool(server: McpServer, options: { probe: bo
           }
           const billing = deployment.billing ?? null;
           const monthly = billing?.fixed_monthly_cost_usd;
-          if (!failure && deployment.status === "live" && (typeof monthly === "string" || typeof monthly === "number") && Number.isFinite(Number(monthly))) {
+          if (!failure && deployment.status === "live" && (typeof monthly === "number" || (typeof monthly === "string" && monthly.trim() !== "")) && Number.isFinite(Number(monthly))) {
             message += `${message.endsWith(".") ? "" : "."} It costs ${usd(Number(monthly))}/month.`;
           }
           if (deployment.status === "deleted" && billing?.state === "stopped") {

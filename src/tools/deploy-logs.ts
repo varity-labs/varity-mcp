@@ -33,6 +33,9 @@ export function registerDeployLogsTool(server: McpServer): void {
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     async ({ deployment: name, deployment_id, limit }) => {
+      if (name && deployment_id && name !== deployment_id) {
+        return errorResponse("DEPLOYMENT_CONFLICT", "deployment and deployment_id name different apps.", "Pass one of them.");
+      }
       const deployment = name ?? deployment_id;
       if (!deployment) {
         return errorResponse("DEPLOYMENT_REQUIRED", "Name the app to read logs for.", "Pass deployment (the id or app name).");
@@ -68,7 +71,7 @@ export function registerDeployLogsTool(server: McpServer): void {
         );
       } catch (err) {
         // A static site has no runtime, so no runtime logs: a normal answer, not an error.
-        if (err instanceof VarityPublicApiError && err.code === "runtime_not_started" && /static site/i.test(err.message)) {
+        if (err instanceof VarityPublicApiError && err.code === "runtime_not_started" && /^This is a static site\b/.test(err.message)) {
           return successResponse(
             { deployment, log_lines: [], total_lines: 0, complete: true, static_site: true },
             `${deployment} is a static site: it is served as files and has no server, so it has no runtime logs. That is normal.`

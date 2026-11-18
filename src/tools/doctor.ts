@@ -246,7 +246,7 @@ export function registerDoctorTool(server: McpServer): void {
       } = classifyReadiness(checks);
       // `connected`: a verified deploy key. `ready` never reads as deploy-ready without it.
       const connected = authentication.status === "pass";
-      const notConnected = connected ? "" : "Not connected yet: call varity_login to connect Varity. ";
+      const notConnected = resolved?.key ? "" : "Not connected yet: call varity_login to connect Varity. ";
 
       if (developmentReady && cliDeployReady) {
         return successResponse(

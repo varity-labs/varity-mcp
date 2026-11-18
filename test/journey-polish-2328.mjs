@@ -69,7 +69,7 @@ test("2: doctor with no key leads with 'Not connected yet' and says connected: f
   assert.match(out.message, /^Not connected yet: call varity_login/);
   assert.equal(out.data.connected, false);
   assert.equal(out.data.cli_deploy_ready, false, "not deploy-ready without a key");
-  assert.equal(typeof out.data.ready, "boolean", "ready is unchanged: it still means local development readiness");
+  assert.equal(out.data.ready, true, "ready keeps its meaning: local development readiness (node and npm present)");
 });
 
 test("3: an accepted deploy says it is building and usually live in under a minute", async () => {
@@ -112,6 +112,31 @@ test("5: a static site's 'no runtime logs' is a normal answer, and deployment_id
   const byId = await call("varity_deploy_logs", { deployment_id: "site" }, routes);
   assert.equal(byId.out.success, true);
   assert.ok(byId.calls.includes("GET /api/deployments/site/logs"));
+});
+
+test("7: a failing pre-delete read still sends exactly one DELETE and keeps the cached-content line", async () => {
+  const out = await call("varity_delete_deployment", { deployment: "shop" }, {
+    "GET /api/deployments/shop": [500, { code: "internal" }],
+    "DELETE /api/deployments/shop": [200, { deleted: true }],
+  });
+  assert.equal(out.calls.filter((c) => c.startsWith("DELETE")).length, 1);
+  assert.match(out.out.message, /cached content/);
+});
+
+test("5: deploy_logs refuses two different ids and asks for one when none is given", async () => {
+  const both = await call("varity_deploy_logs", { deployment: "a", deployment_id: "b" }, {});
+  assert.equal(both.out.error.code, "DEPLOYMENT_CONFLICT");
+  assert.equal(both.calls.length, 0);
+  const none = await call("varity_deploy_logs", {}, {});
+  assert.equal(none.out.error.code, "DEPLOYMENT_REQUIRED");
+});
+
+test("4: an empty served price shows no price", async () => {
+  const out = await call("varity_deploy_status", { deployment_id: "op-l" }, {
+    "/api/deployments/op-l": [200, { deployment: { id: "op-l", status: "live", url: "https://s.varity.app", run_id: "run-l", billing: { state: "active", fixed_monthly_cost_usd: " " } } }],
+    "/api/deployments/runs/run-l": [200, { public_status: "live" }],
+  });
+  assert.doesNotMatch(out.out.message, /month/);
 });
 
 test("7: the cached-content line appears only when the deployment ever had a URL", async () => {
