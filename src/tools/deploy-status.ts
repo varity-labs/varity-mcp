@@ -2,6 +2,7 @@ import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
 import {
+  billingDeclineCopy,
   getDeployment,
   getRun,
   currentCredential,
@@ -280,7 +281,8 @@ export function latestRunFailure(deployment: DeploymentRecord, runOutcome: unkno
     return null;
   }
   const onVarity = classification === "infrastructure_failure" || outcome.retryable === true;
-  const why =
+  const billing = outcome.code === "billing_declined" ? billingDeclineCopy(outcome.diagnostic_code) : null;
+  const why = billing ? billing.why :
     classification === "cancelled" ? "The latest deploy was cancelled"
       : onVarity ? "Varity had a problem starting this app"
         : outcome.stage === "build" ? "The build failed"
@@ -290,7 +292,7 @@ export function latestRunFailure(deployment: DeploymentRecord, runOutcome: unkno
   const result = deployment.status === "live"
     ? "so the app keeps running its previous release."
     : "so the app is not online.";
-  return `${why}, ${result}${onVarity ? " This was on Varity's side, so trying again is fine." : ""}`;
+  return `${why}, ${result}${onVarity ? " This was on Varity's side, so trying again is fine." : ""}${billing ? ` ${billing.action}` : ""}`;
 }
 
 function apiFailure(err: unknown, action: string) {

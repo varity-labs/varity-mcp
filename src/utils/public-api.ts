@@ -97,7 +97,7 @@ export class VarityPublicApiError extends Error {
   }
 }
 
-const BILLING_URL = `${INFRASTRUCTURE.DASHBOARD}/billing`;
+export const BILLING_URL = `${INFRASTRUCTURE.DASHBOARD}/billing`;
 /** Where the portal's "Create deploy key" button lives; the portal calls these keys "deploy keys". */
 export const DEPLOY_KEY_URL = `${INFRASTRUCTURE.DASHBOARD}/settings?tab=api-keys`;
 /**
@@ -178,6 +178,39 @@ const REMOTE_BILLING_ACTIONS: Readonly<Record<string, string>> = {
   quote_expired: "Retry the request to get a fresh quote.",
   billing_unavailable: "Retry in a few minutes.",
 };
+/**
+ * A deploy that admission declined for billing (`outcome.code` `billing_declined`),
+ * keyed by its `diagnostic_code` (deploy-api `BILLING_DECLINE_OUTCOME_BY_REASON`):
+ * the reason without its closing period, and what to do next. A hosted call
+ * gets the hosted action (no link, no purchase step).
+ */
+const BILLING_DECLINE_COPY: Readonly<Record<string, string>> = {
+  insufficient_prepaid_balance: "insufficient_credits",
+  prepaid_monthly_limit_reached: "spending_limit_reached",
+  prepaid_balance_frozen: "wallet_frozen",
+  payment_method_shared: "payment_method_shared",
+};
+export function billingDeclineCopy(diagnosticCode: unknown): { why: string; action: string } {
+  const code = typeof diagnosticCode === "string" && Object.hasOwn(BILLING_DECLINE_COPY, diagnosticCode)
+    ? BILLING_DECLINE_COPY[diagnosticCode]
+    : null;
+  if (code) {
+    return {
+      why: BILLING_COPY[code].message.replace(/\.$/, ""),
+      action: isRemoteCall() ? REMOTE_BILLING_ACTIONS[code] ?? OUTSIDE_CHAT : BILLING_COPY[code].action,
+    };
+  }
+  if (diagnosticCode === "payment_method_required") {
+    return {
+      why: "Varity needs a payment method on file before it can run this app",
+      action: isRemoteCall() ? OUTSIDE_CHAT : `Add a payment method at ${BILLING_URL}, then deploy again.`,
+    };
+  }
+  return {
+    why: "Varity billing declined this deploy",
+    action: isRemoteCall() ? OUTSIDE_CHAT : BILLING_FALLBACK.action,
+  };
+}
 /** A served text a hosted call may not pass on: a link or a purchase step. */
 const PURCHASE_TEXT = /https?:\/\/|\/billing|\b(?:add funds|top up|choose a plan|upgrade|buy|purchase|subscribe)\b/i;
 

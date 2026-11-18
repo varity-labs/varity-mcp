@@ -1,10 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { isRemoteCall, publicApiGet, VarityPublicApiError } from "../utils/public-api.js";
+import { BILLING_URL, isRemoteCall, publicApiGet, VarityPublicApiError } from "../utils/public-api.js";
 import { errorResponse, successResponse } from "../utils/responses.js";
-import { INFRASTRUCTURE } from "../utils/endpoints.js";
 
 const BALANCE_PATH = "/api/credits/balance";
-const BILLING_URL = `${INFRASTRUCTURE.DASHBOARD}/billing`;
 
 /** Preserve exact served USD amounts, including sub-cent and large balances. */
 function usdAmount(value: unknown): string | null {
