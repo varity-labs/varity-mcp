@@ -100,15 +100,26 @@ export class VarityPublicApiError extends Error {
 export const BILLING_URL = `${INFRASTRUCTURE.DASHBOARD}/billing`;
 /** Where the portal's "Create deploy key" button lives; the portal calls these keys "deploy keys". */
 export const DEPLOY_KEY_URL = `${INFRASTRUCTURE.DASHBOARD}/settings?tab=api-keys`;
+/** Varity's no-GitHub, no-card path for a non-coder today: the Portal's Chat and Build (describe the app; Varity builds and publishes it). */
+export const CHAT_AND_BUILD_URL = `${INFRASTRUCTURE.DASHBOARD}/ai-gateway?tab=chat&mode=build`;
+/**
+ * When browser sign-in is down, the deploy key is the way in for everyone (J-21), not a developer aside.
+ * A free account may be asked for a payment method before a key is issued, so the no-card path follows (F1).
+ */
+export const KEY_SIGN_IN_LINE =
+  "Browser sign-in isn't available right now. You can connect with a deploy key instead: " +
+  `create one at ${DEPLOY_KEY_URL} and add it as VARITY_DEPLOY_KEY in your editor's MCP settings, then restart your editor or AI assistant. ` +
+  "Keep the key out of the chat. If the Portal asks for a payment method before it creates the key, you can still put a site online " +
+  `today without a card using Chat and Build: ${CHAT_AND_BUILD_URL}`;
 /**
  * The one sign-in remedy: no key (doctor), a rejected key and an unauthenticated
- * call all say it. Browser sign-in leads, in the words the agent says to the
- * user; the developer option (an environment key) comes second.
+ * call all say it. It is true whether or not browser sign-in is switched on:
+ * varity_login opens the browser when it is, and answers SIGN_IN_UNAVAILABLE
+ * when it is not, and then the deploy key is the way in (J-21, T2).
  */
 export const DEPLOY_KEY_ACTION =
-  "Call varity_login and tell the user: \"I'll open a browser tab: confirm there to connect Varity.\" " +
-  "No key is needed and nothing needs restarting. " +
-  `For CI or scripts, developers can instead create a deploy key at ${DEPLOY_KEY_URL} and set it as VARITY_DEPLOY_KEY in the MCP server environment.`;
+  "Call varity_login to connect. If browser sign-in is switched on, it opens a browser tab and the user confirms there. " +
+  `If it answers SIGN_IN_UNAVAILABLE, tell the user: "${KEY_SIGN_IN_LINE}"`;
 /** A hosted call signs in through the host's connector, not a local key. */
 const REMOTE_SIGN_IN_ACTION = "Reconnect the Varity connector in this app to sign in again, then retry.";
 

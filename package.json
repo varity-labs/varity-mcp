@@ -1,6 +1,6 @@
 {
   "name": "@varity-labs/mcp",
-  "version": "2.3.28",
+  "version": "2.3.29",
   "mcpName": "io.github.varity-labs/varity-mcp",
   "description": "Deploy apps and AI agents to production from your AI editor, with the cost shown up front.",
   "type": "module",

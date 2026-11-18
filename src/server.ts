@@ -6,6 +6,7 @@ import { getApiKey } from "./utils/config.js";
 import { runInCallContext, type CallContext, type CredentialProvider } from "./utils/public-api.js";
 import { registerLocalToolset } from "./toolsets/local.js";
 import { registerRemoteToolset, REMOTE_INSTRUCTIONS } from "./toolsets/remote.js";
+import { SERVER_RULES } from "./toolsets/instructions.js";
 
 export type { CredentialProvider };
 
@@ -79,7 +80,7 @@ export function createVarityServer(options: VarityServerOptions = {}): McpServer
   const remote = options.toolset === "remote";
   const server = new McpServer(
     { name: "varity", version: VERSION },
-    remote ? { instructions: REMOTE_INSTRUCTIONS } : undefined
+    { instructions: remote ? REMOTE_INSTRUCTIONS : SERVER_RULES }
   );
 
   // Instrument the registration seam once so every resource, prompt, and tool

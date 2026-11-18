@@ -218,7 +218,7 @@ test("a rejected key says 'deploy key' and where to create one", async () => {
     "/api/deployments": [401, { code: "invalid_api_key", message: "The API key is invalid or revoked.", action: "Create a new API key in the Developer Portal and retry." }],
   }, "varity_deploy_status");
   assert.equal(out.error.code, "invalid_api_key");
-  assert.match(out.error.suggestion, /deploy key at https:\/\/developer\.store\.varity\.so\/dashboard\/settings\?tab=api-keys/);
+  assert.match(out.error.suggestion, /deploy key instead: create one at https:\/\/developer\.store\.varity\.so\/dashboard\/settings\?tab=api-keys/);
   assert.doesNotMatch(`${out.error.message} ${out.error.suggestion}`, /API key/);
 });
 
@@ -239,7 +239,7 @@ test("varity_login with no key and sign-in not reachable names the Deploy keys t
   const out = JSON.parse(text);
   assert.equal(out.error.code, "SIGN_IN_UNAVAILABLE");
   // J-21: the key path for everyone, in plain words; no wait-and-retry, no developer framing.
-  assert.equal(out.error.message, "Browser sign-in isn't available right now. You can connect with a deploy key instead: create one at https://developer.store.varity.so/dashboard/settings?tab=api-keys and add it as VARITY_DEPLOY_KEY in your editor's MCP settings. Keep the key out of the chat.");
+  assert.equal(out.error.message, "Browser sign-in isn't available right now. You can connect with a deploy key instead: create one at https://developer.store.varity.so/dashboard/settings?tab=api-keys and add it as VARITY_DEPLOY_KEY in your editor's MCP settings, then restart your editor or AI assistant. Keep the key out of the chat. If the Portal asks for a payment method before it creates the key, you can still put a site online today without a card using Chat and Build: https://developer.store.varity.so/dashboard/ai-gateway?tab=chat&mode=build");
   assert.doesNotMatch(`${out.error.message} ${out.error.suggestion}`, /few minutes|for CI|developers/i);
 });
 
@@ -298,9 +298,11 @@ test("a private or unreachable repo names the working remedies, not 'the supplie
   }, "varity_deploy", { repo_url: "https://github.com/acme/secret-app.git", app_name: "secret-app" });
   assert.equal(out.error.code, "source_repository_unreadable");
   assert.match(out.error.message, /private or does not exist/);
-  assert.match(out.error.message, /Nothing was deployed and nothing was charged/);
+  assert.match(out.error.message, /Nothing was deployed or charged/);
   assert.doesNotMatch(out.error.message, /supplied token/);
-  assert.match(out.error.suggestion, /upload your project folder to Varity instead; your code stays private/);
+  // J-23/E3 (journey 2.3.29): no upload promise before an upload worked; the no-GitHub path leads.
+  assert.doesNotMatch(out.error.suggestion, /your code stays private/);
+  assert.match(out.error.suggestion, /Chat and Build/);
   assert.match(out.error.suggestion, /gh repo edit acme\/secret-app --visibility public/);
   assert.match(out.error.suggestion, /container image/);
 });
@@ -430,7 +432,7 @@ test("J-4: a rejected key on the estimate gets the deploy-key remedy, never an a
   }, "varity_cost_calculator", { app_profile: "static-site" });
   assert.equal(out.success, false);
   assert.equal(out.error.code, "invalid_api_key");
-  assert.match(out.error.suggestion, /deploy key at https:\/\/developer\.store\.varity\.so\/dashboard\/settings\?tab=api-keys/);
+  assert.match(out.error.suggestion, /deploy key instead: create one at https:\/\/developer\.store\.varity\.so\/dashboard\/settings\?tab=api-keys/);
   assert.equal(calls.length, 1, "no second, anonymous request");
   assert.equal(calls[0].init.headers.Authorization, "Bearer api-key");
 });

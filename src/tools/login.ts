@@ -13,7 +13,7 @@ import {
   startLoopbackSignIn,
   type Grant,
 } from "../utils/oauth-login.js";
-import { DEPLOY_KEY_URL, publicApiGet, runInCallContext, VarityPublicApiError } from "../utils/public-api.js";
+import { DEPLOY_KEY_URL, KEY_SIGN_IN_LINE, publicApiGet, runInCallContext, VarityPublicApiError } from "../utils/public-api.js";
 
 /** How long one varity_login call waits for the browser before answering `pending` (d1-auth §3.9). */
 export const LOGIN_WAIT_MS = 120_000;
@@ -195,10 +195,6 @@ function pendingResponse(current: Session) {
   );
 }
 
-/** When browser sign-in is down, the deploy key is the way in for everyone (J-21), not a developer aside. */
-export const KEY_SIGN_IN_LINE =
-  "Browser sign-in isn't available right now. You can connect with a deploy key instead: " +
-  `create one at ${DEPLOY_KEY_URL} and add it as VARITY_DEPLOY_KEY in your editor's MCP settings. Keep the key out of the chat.`;
 
 export function failureResponse(error: LoginError) {
   if (error.code === "SIGN_IN_UNAVAILABLE") {
@@ -275,9 +271,10 @@ export function registerLoginTool(server: McpServer, overrides: LoginToolDeps = 
     {
       title: "Connect Varity",
       description:
-        "Connect Varity on this computer with a browser sign-in, so deploys work. Before calling, tell the user: " +
-        `"${BROWSER_SIGN_IN_LINE}" Confirming in the browser is the only step: there is no key to type or copy, ` +
-        "and nothing needs restarting. The call waits up to 2 minutes; if it returns status \"pending\", relay its message " +
+        "Connect Varity on this computer, so deploys work. When browser sign-in is switched on, tell the user before calling: " +
+        `"${BROWSER_SIGN_IN_LINE}" and confirming in the browser is the only step. When it is not, the call answers ` +
+        "SIGN_IN_UNAVAILABLE: then relay its message, which connects with a deploy key added to the editor's MCP settings, " +
+        "never typed into chat. The call waits up to 2 minutes; if it returns status \"pending\", relay its message " +
         "to the user and call varity_login again to finish the same sign-in. On a machine without a browser it returns a " +
         "link and a short code for the user to confirm on any device. Never ask the user for a key; credentials are never " +
         "accepted as tool input.",

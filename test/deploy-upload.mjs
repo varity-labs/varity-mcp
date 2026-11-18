@@ -181,7 +181,7 @@ for (const [label, refusal] of [
       const { out, calls } = await callTool({ [SOURCES]: [refusal] }, { path: dir });
       assert.equal(out.success, false);
       assert.equal(out.error.code, "UPLOAD_UNAVAILABLE");
-      assert.match(out.error.message, /not switched on at Varity yet\. Nothing was uploaded, deployed or charged\./);
+      assert.match(out.error.message, /^Tell the user exactly this: "Varity can't take a folder from this computer yet\. Nothing was uploaded, deployed or charged\./);
       assert.match(out.error.suggestion, /varity_list_templates/);
       assert.match(out.error.suggestion, /ask first/);
       assert.deepEqual(calls.map((call) => call.route), [SOURCES], "no upload and no create");
@@ -227,10 +227,27 @@ test("a private repo while the upload route is off still explains, deploys nothi
   }
 });
 
-test("J-14: an explicit private repo_url offers the folder upload first, publishing last", async () => {
-  const { out } = await callTool({
-    [CREATE]: [[422, { code: "source_repository_unreadable", message: "supplied token cannot read" }]],
-  }, { repo_url: "https://github.com/acme/secret-app" });
+test("J-14: once an upload worked, an explicit private repo_url offers the folder upload first, publishing last", async () => {
+  // E3 (journey 2.3.29): the offer reuses what this server's upload route last answered.
+  const { dir, cleanup } = project();
+  const stub = stubGateway({
+    [SOURCES]: [SLOT()], [PUT]: [SEALED],
+    [CREATE]: [ACCEPTED, [422, { code: "source_repository_unreadable", message: "supplied token cannot read" }]],
+  });
+  const [serverSide, clientSide] = InMemoryTransport.createLinkedPair();
+  await createVarityServer().connect(serverSide);
+  const client = new Client({ name: "u6-same-server", version: "1" });
+  await client.connect(clientSide);
+  let out;
+  try {
+    const first = JSON.parse((await client.callTool({ name: "varity_deploy", arguments: { path: dir } })).content[0].text);
+    assert.equal(first.success, true);
+    out = JSON.parse((await client.callTool({ name: "varity_deploy", arguments: { repo_url: "https://github.com/acme/secret-app" } })).content[0].text);
+  } finally {
+    await client.close();
+    stub.restore();
+    cleanup();
+  }
   assert.equal(out.error.code, "source_repository_unreadable");
   assert.match(out.error.message, /private or does not exist\. Nothing was deployed and nothing was charged\./);
   const suggestion = out.error.suggestion;
@@ -408,7 +425,7 @@ test("review: deploy-api's upload flag off at create time is explained plainly",
       [SOURCES]: [SLOT()], [PUT]: [SEALED], [CREATE]: [[404, { code: "uploads_unavailable", message: "x" }]],
     }, { path: dir });
     assert.equal(out.error.code, "UPLOAD_UNAVAILABLE");
-    assert.match(out.error.message, /not switched on at Varity yet\. Nothing was deployed or charged\./);
+    assert.match(out.error.message, /^Tell the user exactly this: "Varity can't take a folder from this computer yet\. Nothing was deployed or charged\./);
   } finally {
     cleanup();
   }

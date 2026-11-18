@@ -85,7 +85,7 @@ test("login guidance consistently routes sign-in to the browser, never to a past
   assert.doesNotMatch(readme, /varity_login` \| Authenticate with your deploy key/);
   assert.doesNotMatch(publicApi, /Run varity_login with a Developer Portal deploy key/);
   assert.match(readme, /browser tab/);
-  assert.match(publicApi, /I'll open a browser tab: confirm there to connect Varity/);
+  assert.match(publicApi, /it opens a browser tab and the user confirms there/);
   assert.doesNotMatch(readme, /paste|varitykit auth login/i);
   assert.doesNotMatch(publicApi, /paste|varitykit auth login/i);
 });
