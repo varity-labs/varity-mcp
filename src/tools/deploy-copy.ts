@@ -52,8 +52,8 @@ export const NEEDS_PATH =
   "Pass path as the absolute path of the project folder (the server's working directory is rarely the project), then deploy again.";
 
 /** What happens to a folder (PLAN-R1 M5), as a clause and as a sentence; true only behind the release gate in ARCHITECTURE.md ## Verification. */
-const FOLDER_RULE = "a folder without a readable GitHub repository is saved as a private copy Varity keeps (deleted with the deployment) and built.";
-const FOLDER_RULE_SENTENCE = "A folder without a readable GitHub repository is saved as a private copy Varity keeps (deleted with the deployment) and built.";
+export const FOLDER_RULE = "a folder without a readable GitHub repository is saved as a private copy Varity keeps (deleted with the deployment) and built.";
+export const FOLDER_RULE_SENTENCE = "A folder without a readable GitHub repository is saved as a private copy Varity keeps (deleted with the deployment) and built.";
 
 export const PATH_DESCRIPTION =
   "Absolute path to the project directory (e.g. '/home/user/my-app'). " +

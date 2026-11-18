@@ -524,3 +524,9 @@ test("M5: varity_deploy says precisely what happens to a folder without a readab
   assert.ok(tool.inputSchema.properties.path.description.includes(rule), tool.inputSchema.properties.path.description);
   assert.deepEqual(tool.annotations, { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true });
 });
+
+test("STN-7: the folder rule's clause and sentence say the same thing", async () => {
+  const { FOLDER_RULE, FOLDER_RULE_SENTENCE } = await import("../dist/tools/deploy-copy.js");
+  assert.equal(typeof FOLDER_RULE, "string");
+  assert.equal(FOLDER_RULE_SENTENCE, FOLDER_RULE[0].toUpperCase() + FOLDER_RULE.slice(1));
+});
