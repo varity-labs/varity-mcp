@@ -17,6 +17,7 @@ function s256(verifier) {
 export async function startFakeAuthorizationServer() {
   const state = {
     live: true,
+    endpointsLive: true, // false: metadata served (gateway static) but /api/oauth/* and revoke 404 (VARITY_OAUTH_ENABLED off)
     issuerOverride: null,
     requests: new Map(), // code -> request
     authorizeHits: [],
@@ -55,6 +56,9 @@ export async function startFakeAuthorizationServer() {
         code_challenge_methods_supported: ["S256"],
       });
     }
+    if (!state.endpointsLive && (url.pathname.startsWith("/api/oauth/") || url.pathname === "/api/keys/current/revoke")) {
+      return json(404, { error: "not_found" });
+    }
     if (req.method === "GET" && url.pathname === "/api/oauth/authorize") {
       const q = url.searchParams;
       state.authorizeHits.push(Object.fromEntries(q));
@@ -81,6 +85,10 @@ export async function startFakeAuthorizationServer() {
     }
     if (req.method === "POST" && url.pathname === "/api/oauth/token") {
       state.tokenCalls.push(Object.fromEntries(form));
+      // Like oauth.py token(): the grant type is checked before the client.
+      if (!["authorization_code", "urn:ietf:params:oauth:grant-type:device_code"].includes(form.get("grant_type"))) {
+        return json(400, { error: "unsupported_grant_type" });
+      }
       if (form.get("client_id") !== "varity-mcp-local") return json(401, { error: "invalid_client" });
       if (form.get("grant_type") === "authorization_code") {
         const request = state.requests.get(form.get("code"));
@@ -104,6 +112,7 @@ export async function startFakeAuthorizationServer() {
       return json(400, { error: "unsupported_grant_type" });
     }
     if (req.method === "POST" && url.pathname === "/api/keys/current/revoke") {
+      state.revokeCalls = (state.revokeCalls ?? 0) + 1;
       const bearer = (req.headers.authorization ?? "").replace(/^Bearer /, "");
       state.revokes.push(bearer);
       if (state.revokeStatus === 200) state.validKeys.delete(bearer);

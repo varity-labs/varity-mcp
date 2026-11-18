@@ -112,8 +112,12 @@ key; for the sign-in file it says "signed in (source: sign-in file)".
 `https://varity.app`, endpoints `/api/oauth/*`, owned by credential-proxy behind
 the gateway); `src/utils/oauth-login.ts` speaks the protocol and
 `src/tools/login.ts` owns the session. It first requires RFC 8414 metadata
-naming exactly that issuer with PKCE `S256`; otherwise it stops with a plain
-"isn't available right now, so nothing was changed" and opens nothing. By
+naming exactly that issuer with PKCE `S256`, and, because the gateway serves
+that metadata statically, a grant-less `POST /api/oauth/token` answered with an
+RFC 6749 error (400/401) rather than 404; otherwise it stops with a plain
+"isn't available right now, so nothing was changed" and opens nothing. The
+browser opens without a shell (`rundll32 url.dll,FileProtocolHandler` on
+Windows, `open`, `xdg-open`). Concurrent calls share one start. By
 default it runs authorization code + PKCE S256 through a **single-use loopback
 listener** on `127.0.0.1:<random port>/callback`: the only network listener this
 process ever opens, alive only during a sign-in (at most the server's 600 s
@@ -130,14 +134,19 @@ a tool result. A browser-minted key it replaces is revoked with itself as the
 bearer; a minted key that cannot be saved is revoked. `varity_logout` calls
 `POST /api/keys/current/revoke` with the saved key and deletes it locally only
 after a 2xx, or after a 401/403 that the API confirms (the key no longer
-works); any other outcome keeps the key and says so. Environment keys are
-never written or revoked.
+works); any other outcome (404 while sign-out is not live, 5xx, no answer)
+keeps the key and says so. It also ends any in-flight sign-in, and names a key
+that still connects the computer (environment, or the legacy `api_key`).
+Environment keys and `api_key` are never written or revoked.
 
 **One writer.** `updateSignIn` in `src/utils/config.ts` is the only code that
 writes `~/.varitykit/config.json`: it merges `deploy_key`/`deploy_key_id` into
 the existing fields, writes a new file created 0600 with `O_CREAT|O_EXCL`,
-fsyncs it and renames it over the old one in a 0700 directory. It never writes
-the legacy `api_key`, which stays read only.
+fsyncs it and renames it over the old one in a 0700 directory, then fsyncs the
+directory. It refuses (leaving the file untouched) a file it cannot parse as a
+JSON object and a symlinked file or directory. It never writes the legacy
+`api_key`, which stays read only. There is no cross-process lock: a concurrent
+varitykit write can win, but the rename means neither leaves a torn file.
 
 **stdout is the JSON-RPC channel.** Diagnostics go to stderr through the
 central logger or `console.error`. A single unrelated stdout byte can corrupt

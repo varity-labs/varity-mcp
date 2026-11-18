@@ -1,8 +1,8 @@
 import { hostname } from "node:os";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
-import { execCLI } from "../utils/cli-bridge.js";
-import { readSavedSignIn, resolveDeployKey, updateSignIn } from "../utils/config.js";
+import { execFile } from "node:child_process";
+import { readSavedSignIn, resolveDeployKey, SignInFileError, updateSignIn, type DeployKeySource } from "../utils/config.js";
 import { INFRASTRUCTURE } from "../utils/endpoints.js";
 import {
   checkAuthorizationServer,
@@ -53,22 +53,37 @@ interface Session {
   userCode: string | null;
   outcome: Outcome | null;
   settled: Promise<Outcome>;
+  cancel: () => void;
 }
 
 /** The one in-flight sign-in of this process; a later varity_login call resumes it. */
 let session: Session | null = null;
+/** A start in progress, set before the first await so concurrent calls share it. */
+let starting: Promise<Session | ToolResult> | null = null;
+type ToolResult = ReturnType<typeof successResponse> | ReturnType<typeof errorResponse>;
 
-/** Test hook: forget an in-flight sign-in. */
+/** Forget (and stop) an in-flight sign-in: logout, and tests. */
 export function resetLoginSessionForTests(): void {
+  session?.cancel();
   session = null;
+  starting = null;
 }
 
-async function defaultOpenBrowser(url: string): Promise<boolean> {
-  const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd.exe" : "xdg-open";
-  // cmd.exe would split the URL at "&": escape it for `start`.
-  const args = process.platform === "win32" ? ["/c", "start", "", url.replace(/&/g, "^&")] : [url];
-  const result = await execCLI(command, args, { timeout: 10_000 });
-  return result.exitCode === 0;
+/**
+ * The platform opener, run without a shell: on Windows `cmd /c start` would
+ * split the sign-in URL at "&", so the URL protocol handler is called directly.
+ */
+export function browserCommand(platform: string, url: string): { command: string; args: string[] } {
+  if (platform === "win32") return { command: "rundll32", args: ["url.dll,FileProtocolHandler", url] };
+  if (platform === "darwin") return { command: "open", args: [url] };
+  return { command: "xdg-open", args: [url] };
+}
+
+function defaultOpenBrowser(url: string): Promise<boolean> {
+  const { command, args } = browserCommand(process.platform, url);
+  return new Promise((resolve) => {
+    execFile(command, args, { timeout: 10_000, windowsHide: true }, (error) => resolve(!error));
+  });
 }
 
 export interface LoginToolDeps {
@@ -105,9 +120,12 @@ async function keep(baseUrl: string, grant: Grant): Promise<void> {
       grant.deployKeyId ? { deploy_key: grant.deployKey, deploy_key_id: grant.deployKeyId } : { deploy_key: grant.deployKey },
       grant.deployKeyId ? [] : ["deploy_key_id"]
     );
-  } catch {
+  } catch (error) {
     await revokeCurrentKey(baseUrl, grant.deployKey).catch(() => false);
-    throw new LoginError("Varity signed you in, but this computer could not save the sign-in, so it was cancelled. Check that your home folder is writable, then try again.", "SIGN_IN_NOT_SAVED");
+    const reason = error instanceof SignInFileError
+      ? error.message
+      : "Check that your home folder is writable, then try again.";
+    throw new LoginError(`Varity signed you in, but this computer could not save the sign-in, so it was cancelled. ${reason}`, "SIGN_IN_NOT_SAVED");
   }
   if (previous.deployKey && previous.deployKeyId && previous.deployKey !== grant.deployKey) {
     await revokeCurrentKey(baseUrl, previous.deployKey).catch(() => false);
@@ -129,7 +147,8 @@ function settle(baseUrl: string, done: Promise<Grant>): Promise<Outcome> {
 async function startSession(baseUrl: string, deps: Required<LoginToolDeps>): Promise<Session> {
   await checkAuthorizationServer(baseUrl);
   if (deps.headless()) {
-    const device = await startDeviceSignIn(baseUrl, { label: `Varity MCP on ${hostname()}` });
+    // The server names the key "<client> on <label>": send the host name only.
+    const device = await startDeviceSignIn(baseUrl, { label: hostname() });
     return {
       kind: "device",
       browserOpened: false,
@@ -137,6 +156,7 @@ async function startSession(baseUrl: string, deps: Required<LoginToolDeps>): Pro
       userCode: device.userCode,
       outcome: null,
       settled: settle(baseUrl, device.done),
+      cancel: device.cancel,
     };
   }
   const loopback = await startLoopbackSignIn(baseUrl);
@@ -153,6 +173,7 @@ async function startSession(baseUrl: string, deps: Required<LoginToolDeps>): Pro
     userCode: null,
     outcome: null,
     settled: settle(baseUrl, loopback.done),
+    cancel: loopback.cancel,
   };
 }
 
@@ -182,6 +203,35 @@ function failureResponse(error: LoginError) {
       ? `Try varity_login again in a few minutes. ${DEVELOPER_OPTION}`
       : `Call varity_login to start a new browser sign-in. ${DEVELOPER_OPTION}`
   );
+}
+
+/** Check an existing key, then start one sign-in and make it the process's session. */
+async function begin(deps: Required<LoginToolDeps>): Promise<Session | ToolResult> {
+  const resolved = await resolveDeployKey();
+  if (resolved) {
+    const verdict = await checkKey(resolved.key);
+    if (verdict === "valid") return connectedResponse(false);
+    if (verdict === "unknown") return configuredCredentialResponse();
+    if (resolved.source !== "config:~/.varitykit/config.json") {
+      const name = resolved.source.slice("env:".length);
+      return errorResponse(
+        "DEPLOY_KEY_REJECTED",
+        `Varity rejected the key set as ${name} in the MCP server environment, and that setting overrides browser sign-in.`,
+        `Remove ${name} from the MCP server configuration, then call varity_login to connect in the browser. ` +
+          `Developers can instead replace it with a new deploy key from ${DEPLOY_KEY_URL}.`
+      );
+    }
+    // A rejected saved sign-in (revoked or expired): sign in again and replace it.
+  }
+  let started: Session;
+  try {
+    started = await startSession(deps.baseUrl, deps);
+  } catch (error) {
+    return failureResponse(error instanceof LoginError ? error : new LoginError("Sign-in could not start. Call varity_login to try again."));
+  }
+  session = started;
+  void started.settled.then((outcome) => { started.outcome = outcome; });
+  return started;
 }
 
 async function waitFor(current: Session, waitMs: number, progress: (elapsedMs: number) => Promise<void>): Promise<Outcome | null> {
@@ -247,32 +297,16 @@ export function registerLoginTool(server: McpServer, overrides: LoginToolDeps = 
         });
       };
 
+      // A sign-in that already failed while nobody was waiting starts over.
+      if (session?.outcome && !session.outcome.ok) session = null;
       if (!session) {
-        const resolved = await resolveDeployKey();
-        if (resolved) {
-          const verdict = await checkKey(resolved.key);
-          if (verdict === "valid") return connectedResponse(false);
-          if (verdict === "unknown") return configuredCredentialResponse();
-          if (resolved.source !== "config:~/.varitykit/config.json") {
-            return errorResponse(
-              "DEPLOY_KEY_REJECTED",
-              `Varity rejected the key set as ${resolved.source.slice("env:".length)} in the MCP server environment, and that setting overrides browser sign-in.`,
-              `Remove ${resolved.source.slice("env:".length)} from the MCP server configuration, then call varity_login to connect in the browser. ` +
-                `Developers can instead replace it with a new deploy key from ${DEPLOY_KEY_URL}.`
-            );
-          }
-          // A rejected saved sign-in (revoked or expired): sign in again and replace it.
-        }
-        try {
-          session = await startSession(deps.baseUrl, deps);
-        } catch (error) {
-          return failureResponse(error instanceof LoginError ? error : new LoginError("Sign-in could not start. Call varity_login to try again."));
-        }
-        const started = session;
-        void started.settled.then((outcome) => { started.outcome = outcome; });
+        starting ??= begin(deps).finally(() => { starting = null; });
+        const begun = await starting;
+        if (!("settled" in begun)) return begun;
         // A code or link the user must act on first is returned at once.
-        if (started.kind === "device" || !started.browserOpened) return pendingResponse(started);
+        if (begun.kind === "device" || !begun.browserOpened) return pendingResponse(begun);
       }
+      if (!session) return failureResponse(new LoginError("Sign-in was stopped. Call varity_login to start again."));
 
       const current = session;
       const outcome = await waitFor(current, deps.waitMs, progress);
@@ -281,6 +315,18 @@ export function registerLoginTool(server: McpServer, overrides: LoginToolDeps = 
       return outcome.ok ? connectedResponse(true) : failureResponse(outcome.error);
     }
   );
+}
+
+const SOURCE_WORDS: Readonly<Record<DeployKeySource, string>> = {
+  "env:VARITY_DEPLOY_KEY": "VARITY_DEPLOY_KEY in the MCP server environment",
+  "config:~/.varitykit/config.json": "the older api_key field in ~/.varitykit/config.json",
+  "env:VARITY_API_KEY": "VARITY_API_KEY in the MCP server environment",
+};
+
+/** After the browser sign-in is gone, which key (if any) still connects this computer. */
+async function stillConnectedBy(): Promise<string | null> {
+  const resolved = await resolveDeployKey();
+  return resolved ? SOURCE_WORDS[resolved.source] : null;
 }
 
 /**
@@ -302,9 +348,17 @@ export function registerLogoutTool(server: McpServer, overrides: Pick<LoginToolD
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     },
     async () => {
+      resetLoginSessionForTests(); // an unfinished or unseen sign-in never outlives a sign-out
       const saved = await readSavedSignIn();
       if (!saved.deployKey) {
-        return successResponse({ signed_in: false }, "This computer is not signed in to Varity, so there was nothing to sign out of.");
+        const remaining = await stillConnectedBy();
+        return remaining
+          ? successResponse(
+              { signed_in: false, still_connected_by: remaining },
+              `There is no browser sign-in to remove, but this computer is still connected to Varity through ${remaining}. ` +
+                `To disconnect fully, remove it there (or revoke it in the Deploy keys tab: ${DEPLOY_KEY_URL}).`
+            )
+          : successResponse({ signed_in: false }, "This computer is not signed in to Varity, so there was nothing to sign out of.");
       }
       let revoked: boolean;
       try {
@@ -333,11 +387,18 @@ export function registerLogoutTool(server: McpServer, overrides: Pick<LoginToolD
           "Check that your home folder is writable, then call varity_logout again."
         );
       }
+      const done = revoked
+        ? "Signed out. The sign-in was revoked on Varity and removed from this computer."
+        : "Signed out. Varity no longer accepted the saved sign-in, and it was removed from this computer.";
+      const remaining = await stillConnectedBy();
       return successResponse(
-        { signed_in: false, revoked_on_varity: revoked },
-        revoked
-          ? "Signed out. The sign-in was revoked on Varity and removed from this computer."
-          : "Signed out. Varity no longer accepted the saved sign-in, and it was removed from this computer."
+        remaining
+          ? { signed_in: false, revoked_on_varity: revoked, still_connected_by: remaining }
+          : { signed_in: false, revoked_on_varity: revoked },
+        remaining
+          ? `${done} This computer is still connected to Varity through ${remaining}; to disconnect fully, remove it there ` +
+            `(or revoke it in the Deploy keys tab: ${DEPLOY_KEY_URL}).`
+          : done
       );
     }
   );

@@ -1,4 +1,4 @@
-import { chmod, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
+import { chmod, lstat, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { randomBytes } from "node:crypto";
@@ -66,13 +66,44 @@ export interface SavedSignIn {
   deployKeyId: string | null;
 }
 
+/** The sign-in file cannot be rewritten safely; the message is plain and names the file. */
+export class SignInFileError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SignInFileError";
+  }
+}
+
+const FILE_LABEL = "~/.varitykit/config.json";
+
 async function readConfigObject(): Promise<Record<string, unknown>> {
+  let text: string;
   try {
-    const parsed: unknown = JSON.parse(await readFile(configFile(), "utf-8"));
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+    text = await readFile(configFile(), "utf-8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
     throw error;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    parsed = undefined;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    // Never overwrite settings this process cannot read: they would be lost.
+    throw new SignInFileError(`${FILE_LABEL} could not be read as settings, so it was left unchanged. Fix or remove that file, then try again.`);
+  }
+  return parsed as Record<string, unknown>;
+}
+
+async function refuseLink(path: string, label: string): Promise<void> {
+  try {
+    if ((await lstat(path)).isSymbolicLink()) {
+      throw new SignInFileError(`${label} is a link to another place, so it was left unchanged. Replace it with a regular file or folder, then try again.`);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
 }
 
@@ -107,8 +138,10 @@ export async function updateSignIn(
   remove: ReadonlyArray<"deploy_key" | "deploy_key_id"> = []
 ): Promise<void> {
   const dir = configDir();
+  await refuseLink(dir, "~/.varitykit");
   await mkdir(dir, { recursive: true, mode: 0o700 });
   await chmod(dir, 0o700);
+  await refuseLink(configFile(), FILE_LABEL);
   const next = { ...(await readConfigObject()) };
   for (const field of remove) delete next[field];
   if (set.deploy_key !== undefined) next["deploy_key"] = set.deploy_key;
@@ -129,5 +162,11 @@ export async function updateSignIn(
   } catch (error) {
     await unlink(temp).catch(() => undefined);
     throw error;
+  }
+  // Make the rename itself durable (best effort: not every platform fsyncs a directory).
+  const dirHandle = await open(dir, "r").catch(() => null);
+  if (dirHandle) {
+    await dirHandle.sync().catch(() => undefined);
+    await dirHandle.close();
   }
 }

@@ -41,7 +41,7 @@ const readConfig = () => JSON.parse(readFileSync(file, "utf8"));
 beforeEach(() => {
   rmSync(dir, { recursive: true, force: true });
   login.resetLoginSessionForTests();
-  Object.assign(fake.state, { live: true, issuerOverride: null, revokeStatus: 200, device: null, deviceInterval: 1 });
+  Object.assign(fake.state, { live: true, endpointsLive: true, issuerOverride: null, revokeStatus: 200, device: null, deviceInterval: 1 });
   fake.state.revokes.length = 0;
   fake.state.authorizeHits.length = 0;
   fake.state.validKeys.clear();
@@ -360,4 +360,140 @@ test("doctor says signed in (source: sign-in file), never the key", async () => 
   const missing = await verifyAuthentication(null);
   assert.match(missing.message, /Not signed in to Varity yet/);
   assert.match(missing.fix, /^Call varity_login/);
+});
+
+// ── review fixes (independent review of 84f96e0) ─────────────────────────────
+
+test("review 1: metadata served but /api/oauth not enabled fails safe before any tab opens", async () => {
+  fake.state.endpointsLive = false;
+  try {
+    await assert.rejects(oauth.checkAuthorizationServer(fake.base), (e) => e.code === "SIGN_IN_UNAVAILABLE");
+    let opened = false;
+    const t = await tools({ baseUrl: fake.base, waitMs: 50, headless: () => false, openBrowser: async () => { opened = true; return true; } });
+    const result = await t.call("varity_login");
+    assert.equal(result.error.code, "SIGN_IN_UNAVAILABLE");
+    assert.equal(opened, false);
+    await t.close();
+  } finally {
+    fake.state.endpointsLive = true;
+  }
+});
+
+test("review 2: the browser opener never passes the sign-in URL through a shell", () => {
+  const url = `${fake.base}/api/oauth/authorize?response_type=code&client_id=varity-mcp-local&state=a`;
+  assert.deepEqual(login.browserCommand("win32", url), { command: "rundll32", args: ["url.dll,FileProtocolHandler", url] });
+  assert.deepEqual(login.browserCommand("darwin", url), { command: "open", args: [url] });
+  assert.deepEqual(login.browserCommand("linux", url), { command: "xdg-open", args: [url] });
+});
+
+test("review 3: two concurrent varity_login calls share one sign-in (one tab, one key)", async () => {
+  const opened = [];
+  const t = await tools({ baseUrl: fake.base, waitMs: 3_000, headless: () => false, openBrowser: async (url) => { opened.push(url); return true; } });
+  const both = Promise.all([t.call("varity_login"), t.call("varity_login")]);
+  while (opened.length === 0) await new Promise((r) => setTimeout(r, 10));
+  await fake.approveInBrowser(opened[0]);
+  const [a, b] = await both;
+  assert.equal(opened.length, 1);
+  assert.equal(fake.state.authorizeHits.length, 1);
+  assert.equal(a.data.authenticated, true);
+  assert.equal(b.data.authenticated, true);
+  await t.close();
+});
+
+test("review 4: a sign-in that finished unseen does not outlive logout", async () => {
+  const opened = [];
+  const t = await tools({ baseUrl: fake.base, waitMs: 30, headless: () => false, openBrowser: async (url) => { opened.push(url); return true; } });
+  assert.equal((await t.call("varity_login")).data.status, "pending");
+  await fake.approveInBrowser(opened[0]);
+  while (!readConfigSafe()?.deploy_key) await new Promise((r) => setTimeout(r, 10));
+  assert.equal((await t.call("varity_logout")).success, true);
+  const next = await t.call("varity_login");
+  assert.equal(next.data.status, "pending", "a fresh sign-in starts; it does not claim to be connected");
+  assert.equal(opened.length, 2);
+  await t.close();
+});
+
+function readConfigSafe() {
+  try { return readConfig(); } catch { return null; }
+}
+
+test("review 5: logout names a key that still connects this computer (legacy api_key or environment)", async () => {
+  await signedIn();
+  const saved = readConfig();
+  writeFileSync(file, JSON.stringify({ ...saved, api_key: "vk_dev_legacy" }));
+  const t = await tools({ baseUrl: fake.base });
+  const result = await t.call("varity_logout");
+  assert.equal(result.success, true);
+  assert.equal(result.data.still_connected_by, "the older api_key field in ~/.varitykit/config.json");
+  assert.match(result.message, /still connected/);
+  assert.equal(readConfig().api_key, "vk_dev_legacy", "api_key is never written");
+
+  writeFileSync(file, JSON.stringify({ api_key: "vk_dev_legacy" }));
+  const only = await t.call("varity_logout");
+  assert.equal(only.data.still_connected_by, "the older api_key field in ~/.varitykit/config.json");
+  assert.doesNotMatch(only.message, /^This computer is not signed in/);
+
+  rmSync(file);
+  process.env.VARITY_DEPLOY_KEY = "vk_dev_env";
+  try {
+    const env = await t.call("varity_logout");
+    assert.equal(env.data.still_connected_by, "VARITY_DEPLOY_KEY in the MCP server environment");
+  } finally {
+    delete process.env.VARITY_DEPLOY_KEY;
+  }
+  await t.close();
+});
+
+test("review 6: logout while sign-out is not live says so plainly and keeps the key", async () => {
+  await signedIn();
+  fake.state.endpointsLive = false;
+  try {
+    const t = await tools({ baseUrl: fake.base });
+    const result = await t.call("varity_logout");
+    assert.equal(result.error.code, "SIGN_OUT_NOT_CONFIRMED");
+    assert.match(result.error.message, /Signing out through Varity isn't available yet/);
+    assert.equal(readConfig().deploy_key, "vk_dev_saved");
+    await t.close();
+  } finally {
+    fake.state.endpointsLive = true;
+  }
+});
+
+test("review 7: the writer refuses a corrupt or non-object file and a symlinked file, and loses nothing", async () => {
+  const { symlinkSync } = await import("node:fs");
+  mkdirSync(dir, { recursive: true });
+  for (const content of ["{not json", "[1,2]"]) {
+    writeFileSync(file, content);
+    await assert.rejects(config.updateSignIn({ deploy_key: "vk_dev_x" }), /could not be read as settings/);
+    assert.equal(readFileSync(file, "utf8"), content, "left untouched");
+  }
+  rmSync(file);
+  const target = join(home, "elsewhere.json");
+  writeFileSync(target, "{}");
+  symlinkSync(target, file);
+  await assert.rejects(config.updateSignIn({ deploy_key: "vk_dev_x" }), /is a link/);
+  rmSync(file);
+  rmSync(target);
+});
+
+test("review 7: login with a corrupt sign-in file names the file, not the home folder, and revokes the new key", async () => {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(file, "{not json");
+  const t = await tools({
+    baseUrl: fake.base, waitMs: 10_000, headless: () => false,
+    openBrowser: async (url) => { setTimeout(() => void fake.approveInBrowser(url), 20); return true; },
+  });
+  const result = await t.call("varity_login");
+  assert.equal(result.error.code, "SIGN_IN_NOT_SAVED");
+  assert.match(result.error.message, /~\/\.varitykit\/config\.json could not be read as settings/);
+  assert.equal(fake.state.revokes.length, 1, "the unsaved key was revoked");
+  await t.close();
+});
+
+test("review 8: the device label is the host name only (the server adds the client name)", async () => {
+  const t = await tools({ baseUrl: fake.base, waitMs: 30, headless: () => true, openBrowser: async () => false });
+  await t.call("varity_login");
+  const { hostname } = await import("node:os");
+  assert.equal(fake.state.device.label, hostname().slice(0, 64));
+  await t.close();
 });

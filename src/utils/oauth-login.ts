@@ -132,6 +132,18 @@ export async function checkAuthorizationServer(baseUrl: string): Promise<void> {
   ) {
     throw new LoginError(UNAVAILABLE, "SIGN_IN_UNAVAILABLE");
   }
+  // The gateway serves the metadata statically, so it can answer while the
+  // endpoints are still off. A grant-less token request has no side effect:
+  // a live server refuses it with an RFC 6749 error, an absent one with 404.
+  let probe: { status: number; body: Record<string, unknown> };
+  try {
+    probe = await request(`${baseUrl}/api/oauth/token`, { method: "POST", form: {} });
+  } catch {
+    throw new LoginError(UNAVAILABLE, "SIGN_IN_UNAVAILABLE");
+  }
+  if ((probe.status !== 400 && probe.status !== 401) || errorOf(probe.body) === "not_found") {
+    throw new LoginError(UNAVAILABLE, "SIGN_IN_UNAVAILABLE");
+  }
 }
 
 export interface LoopbackSignIn {
@@ -170,15 +182,15 @@ export async function startLoopbackSignIn(
     }
     const ok = parsed.searchParams.has("code") && !parsed.searchParams.has("error");
     const page = `<!doctype html><meta charset="utf-8"><title>Varity</title><p>${ok ? PAGE_OK : PAGE_FAILED}</p>`;
-    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
-    res.end(page);
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", Connection: "close" });
+    server.close(); // single use: stop accepting at once; the page below still completes
+    res.end(page, () => close());
     resolveCallback(parsed.searchParams);
-    close(); // single use: nothing listens after the first answer for this state
   });
   server.requestTimeout = 10_000; // a silent local connection cannot hold the listener
   const close = () => {
-    server.close();
-    server.closeAllConnections?.();
+    if (server.listening) server.close();
+    server.closeIdleConnections?.();
   };
 
   await new Promise<void>((resolve, reject) => {
@@ -331,5 +343,6 @@ export async function revokeCurrentKey(baseUrl: string, deployKey: string): Prom
   const { status } = await request(`${baseUrl}/api/keys/current/revoke`, { method: "POST", form: {}, bearer: deployKey });
   if (status >= 200 && status < 300) return true;
   if (status === 401 || status === 403) return false;
+  if (status === 404) throw new LoginError("Signing out through Varity isn't available yet.", "REVOKE_UNAVAILABLE");
   throw new LoginError(`Varity could not revoke the key right now (HTTP ${status}).`, "REVOKE_UNAVAILABLE");
 }
