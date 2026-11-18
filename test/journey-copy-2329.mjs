@@ -97,8 +97,7 @@ test("J-23: upload off → Chat and Build first, templates next, public GitHub l
     assert.match(s, /No GitHub needed/);
     const chat = at(s, CHAT_AND_BUILD);
     assert.ok(chat >= 0 && chat < at(s, "varity_list_templates") && at(s, "varity_list_templates") < at(s, "GitHub repository"), s);
-    assert.match(s, /never suggest another hosting service/i);
-    assert.doesNotMatch(s.replace(/never suggest another hosting service/i, ""), /hosting service/i);
+    assert.doesNotMatch(s, /never suggest|hosting service/i);
   } finally {
     cleanup();
   }
@@ -289,7 +288,7 @@ test("P1 T3: the error message itself (not only the suggestion) leads with Chat 
     const gh = at(m, "public on GitHub");
     assert.ok(chat >= 0 && dev > chat && gh > dev, m);
     assert.match(m, /only if the user asks/i);
-    assert.match(m, /Never suggest another hosting service\./);
+    assert.doesNotMatch(m, /never suggest|hosting service/i);
   }
   // r3: the message opens with one quoted paragraph to say verbatim; options and rules come after the quote.
   const said = (m) => m.match(/^Tell the user exactly this: "([^"]+)"/)?.[1];
@@ -299,19 +298,29 @@ test("P1 T3: the error message itself (not only the suggestion) leads with Chat 
     `Varity can't read this project's code on GitHub: it is private or does not exist. Nothing was deployed or charged. The way to get it online today without GitHub is Varity's Chat and Build: describe the app, and Varity builds it and publishes it to a live address: ${CHAT_AND_BUILD}`);
 });
 
-test("r3: server instructions carry the three rules, locally and on the hosted surface (within 512 characters there)", async () => {
-  for (const options of [undefined, { toolset: "remote", credentialProvider: async () => "k" }]) {
+test("r3/M1: server instructions: stdio routes the local folder to varity_deploy; hosted keeps the repo order; both within 512 characters, no other-host rule", async () => {
+  const texts = {};
+  for (const [name, options] of [["stdio", undefined], ["remote", { toolset: "remote", credentialProvider: async () => "k" }]]) {
     const [serverSide, clientSide] = InMemoryTransport.createLinkedPair();
     await createVarityServer(options).connect(serverSide);
     const client = new Client({ name: "instructions", version: "1" });
     await client.connect(clientSide);
-    const text = client.getInstructions();
+    texts[name] = client.getInstructions();
     await client.close();
-    assert.equal(typeof text, "string", JSON.stringify(options));
-    assert.match(text, /Never suggest another hosting service\./);
-    assert.match(text, /Never ask the user for a key in chat\./);
-    assert.ok(text.includes(`If the user has no public GitHub repository, offer Varity's Chat and Build first: ${CHAT_AND_BUILD}`), text);
-    if (options) assert.ok(text.length <= 512, `${text.length} characters`);
+  }
+  assert.equal(texts.stdio,
+    "To deploy the folder the user is working in, call varity_deploy with path set to the absolute project folder, " +
+    "then varity_deploy_status with the returned id until it is live. " +
+    `If varity_deploy answers UPLOAD_UNAVAILABLE, offer Varity's Chat and Build: ${CHAT_AND_BUILD} ` +
+    "Sign in with varity_login; never ask for a key in chat.");
+  assert.match(texts.remote, /varity_deploy \(public repo_url or image\)/);
+  assert.match(texts.remote, /Never ask the user for a key in chat\./);
+  assert.ok(texts.remote.includes(`If the user has no public GitHub repository, offer Varity's Chat and Build first: ${CHAT_AND_BUILD}`), texts.remote);
+  // E11: the hosted surface has no local folder, so it carries none of the stdio folder rules.
+  assert.doesNotMatch(texts.remote, /absolute project folder|\.gitignore|secret files/);
+  for (const [name, text] of Object.entries(texts)) {
+    assert.ok(text.length <= 512, `${name}: ${text.length} characters`);
+    assert.doesNotMatch(text, /never suggest|hosting service/i, name);
   }
 });
 

@@ -10,7 +10,7 @@ import { registerDeployLogsTool } from "../tools/deploy-logs.js";
 import { registerRedeployTool } from "../tools/redeploy.js";
 import { registerDeleteDeploymentTool } from "../tools/delete-deployment.js";
 import { registerShowDeploymentTool } from "../tools/show-deployment.js";
-import { SERVER_RULES } from "./instructions.js";
+import { CHAT_AND_BUILD_URL } from "../utils/public-api.js";
 
 /**
  * The remote (hosted) toolset, distribution plan N8: 12 tools, no filesystem,
@@ -45,4 +45,5 @@ export const REMOTE_INSTRUCTIONS =
   "2) varity_deploy (public repo_url or image) or varity_deploy_template; " +
   "3) varity_deploy_status until live or failed; 4) varity_show_deployment: URL. " +
   "Apps are charged until varity_delete_deployment. " +
-  SERVER_RULES;
+  "Never ask the user for a key in chat. " +
+  `If the user has no public GitHub repository, offer Varity's Chat and Build first: ${CHAT_AND_BUILD_URL}`;
