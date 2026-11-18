@@ -48,6 +48,11 @@ function currentCall(): CallContext {
   return callContext.getStore() ?? { credentials: stdioCredentials, transport: "stdio", clientInfo: () => undefined };
 }
 
+/** The current call's deploy key (for redacting it from passed-on text), or null. */
+export async function currentCredential(): Promise<string | null> {
+  return currentCall().credentials().catch(() => null);
+}
+
 /** A hosted (remote) call: copy names no local setup, link or purchase step. */
 export function isRemoteCall(): boolean {
   return currentCall().transport === "streamable_http";
@@ -285,9 +290,11 @@ export interface PublicApiRequestOptions {
   keyOptional?: boolean;
 }
 
+type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+
 /** One HTTP exchange; every failure is a `VarityPublicApiError` carrying the served code. */
 async function sendRequest<T>(
-  method: "GET" | "POST" | "PATCH" | "DELETE",
+  method: HttpMethod,
   path: string,
   options: PublicApiRequestOptions = {}
 ): Promise<T> {
@@ -339,7 +346,7 @@ async function sendRequest<T>(
 }
 
 export async function publicApiRequest<T>(
-  method: "GET" | "POST" | "PATCH" | "DELETE",
+  method: HttpMethod,
   path: string,
   options: PublicApiRequestOptions = {}
 ): Promise<T> {
@@ -474,13 +481,89 @@ export async function getTemplate<T>(id: string): Promise<T> {
   return data.template;
 }
 
-/** `POST /api/templates/:id/deploy` — 202 acceptance with `source: "mcp"`. */
-export async function deployTemplate(id: string, name?: string): Promise<PublicRunAcceptance> {
+/**
+ * `POST /api/templates/:id/deploy` — 202 acceptance with `source: "mcp"`.
+ * `env` (write-only on the gateway) carries the template's required values,
+ * read on the user's machine; it is sent only when non-empty.
+ */
+export async function deployTemplate(id: string, name?: string, env?: Record<string, string>): Promise<PublicRunAcceptance> {
   return idempotentCreate<PublicRunAcceptance>(
     `/api/templates/${encodeURIComponent(id)}/deploy`,
-    { ...(name ? { name } : {}), source: "mcp" },
+    { ...(name ? { name } : {}), ...(env && Object.keys(env).length > 0 ? { env } : {}), source: "mcp" },
     "mcp-template-deploy"
   );
+}
+
+/**
+ * `PATCH /api/deployments/:id/env` — merges the given values into the app's
+ * write-only environment and RESTARTS it: 202 `{status: "redeploying",
+ * run_id, env: {keys, count}}` (gateway `public-api.ts` env PATCH). Never sent
+ * with `replace`, never retried here: the gateway mints its own idempotency key
+ * per request, so a resend is a second restart.
+ */
+export async function updateDeploymentEnv(
+  deployment: string,
+  env: Record<string, string>
+): Promise<PublicRunAcceptance & { env?: { keys?: string[]; count?: number } }> {
+  return publicApiRequest("PATCH", deploymentPath(deployment, "/env"), { body: { env } });
+}
+
+/**
+ * One run's sealed build error: `GET /api/deployments/runs/:runId/logs`
+ * (gateway `public-api.ts` `buildLogBody`): `{lines, count, complete,
+ * warning_code?, source: "build", stage, observed_at}`; 404
+ * `build_log_not_found` when the run recorded none.
+ */
+export interface RunBuildLog {
+  lines?: unknown;
+  count?: number;
+  complete?: boolean;
+  stage?: string | null;
+  observed_at?: string | null;
+}
+
+export async function getRunBuildLog(runId: string): Promise<RunBuildLog> {
+  return publicApiGet<RunBuildLog>(`/api/deployments/runs/${encodeURIComponent(runId)}/logs`);
+}
+
+/**
+ * The custom-domain claim the gateway serves (`CustomDomainRecord`, secret-free):
+ * the DNS record to add comes from `recordType`/`recordName` and
+ * `expectedCname` (subdomain) or `expectedA` + `challenge` (apex).
+ */
+export interface CustomDomainClaim {
+  hostname?: string;
+  recordType?: "cname" | "a";
+  recordName?: string;
+  expectedCname?: string;
+  expectedA?: string;
+  challenge?: { name?: string; value?: string };
+  state?: string;
+  dns?: { status?: string };
+  certificate?: { status?: string };
+  serving?: { status?: string };
+  errorCode?: string;
+}
+
+export interface CustomDomainAnswer {
+  supported?: boolean;
+  domain?: CustomDomainClaim | null;
+  removed?: boolean;
+}
+
+/** `PUT /api/deployments/:id/domain` `{hostname}` — 201 (new) or 200 (same hostname again). */
+export async function attachCustomDomain(deployment: string, hostname: string): Promise<CustomDomainAnswer> {
+  return publicApiRequest("PUT", deploymentPath(deployment, "/domain"), { body: { hostname } });
+}
+
+/** `POST /api/deployments/:id/domain/verify` — checks DNS now and returns the updated claim. */
+export async function verifyCustomDomain(deployment: string): Promise<CustomDomainAnswer> {
+  return publicApiRequest("POST", deploymentPath(deployment, "/domain/verify"));
+}
+
+/** `DELETE /api/deployments/:id/domain` — `{removed: true, domain: null}`. */
+export async function removeCustomDomain(deployment: string): Promise<CustomDomainAnswer> {
+  return publicApiRequest("DELETE", deploymentPath(deployment, "/domain"));
 }
 
 /**

@@ -4,10 +4,13 @@ import { successResponse, errorResponse } from "../utils/responses.js";
 import {
   getDeployment,
   getRun,
+  currentCredential,
+  getRunBuildLog,
   listDeployments,
   VarityPublicApiError,
   type PublicDeployment,
 } from "../utils/public-api.js";
+import { redactPublicText } from "../utils/redact.js";
 
 interface DeploymentRecord {
   /** The canonical id: the durable operation id `varity_deploy` returned, stable for the whole life. */
@@ -70,15 +73,120 @@ type ServedDeployment = PublicDeployment & { run_id?: string | null; outcome?: u
 /** Said wherever a URL would be, while the owner has not assigned one. */
 export const URL_PENDING = "URL not assigned yet";
 
-/** A deleted deployment's URL no longer serves (it returns 404), so summaries never point at it. */
+/**
+ * A deployment being or already deleted never gets a URL again: a deleted URL
+ * returns 404, and "URL not assigned yet" would promise one (J-11, J-13).
+ */
 function urlRetired(deployment: DeploymentRecord): boolean {
-  return deployment.status === "deleted";
+  return deployment.status === "deleted" || deployment.status === "deleting";
 }
 
 /** The status and where it serves. */
 function servingState(deployment: DeploymentRecord): string {
   if (urlRetired(deployment)) return deployment.status;
   return `${deployment.status}${deployment.url ? ` at ${deployment.url}` : ` (${URL_PENDING})`}`;
+}
+
+/** "22 seconds", "3 minutes 5 seconds": elapsed time in plain words. */
+export function plainDuration(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000));
+  const unit = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  if (total < 60) return unit(total, "second");
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return seconds ? `${unit(minutes, "minute")} ${unit(seconds, "second")}` : unit(minutes, "minute");
+}
+
+/**
+ * The run's `progress.stage` (`provider_attempt` while a start is being
+ * retried, otherwise the lifecycle stage: accepted, admission, build,
+ * allocation, health, access, route, cleanup, terminal) in plain words, with
+ * what comes next. An unknown stage gets no words (never guessed).
+ */
+const STAGE_WORDS: Readonly<Record<string, { now: string; next: string }>> = {
+  provider_attempt: { now: "starting your app on a server", next: "Varity checks that it responds and gives it its web address" },
+  accepted: { now: "waiting to start", next: "the build starts" },
+  admission: { now: "checking the request", next: "the build starts" },
+  build: { now: "building your app", next: "Varity finds a server for it and starts it" },
+  allocation: { now: "finding a server for your app", next: "Varity starts it and checks that it responds" },
+  health: { now: "starting your app on a server and checking that it responds", next: "it gets its web address" },
+  access: { now: "setting up access", next: "it gets its web address" },
+  route: { now: "giving your app its web address", next: "it is live" },
+};
+
+function timeOf(value: unknown): number | null {
+  if (typeof value !== "string") return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * While a run is deploying: its stage, elapsed time and what happens next
+ * (J-18) from the run's `progress` block (`stage`, `attempt`,
+ * `failover.count`). Before any attempt `progress` is absent, and only the
+ * elapsed time is said. Absent fields are simply not mentioned.
+ */
+export function deployingProgress(run: RunView, now: number = Date.now()): string | null {
+  const words = run.stage ? STAGE_WORDS[run.stage] : undefined;
+  const started = timeOf(run.accepted_at);
+  const elapsed = started !== null ? `${plainDuration(now - started)} so far` : null;
+  const attempt = typeof run.attempt === "number" && run.attempt >= 1 ? `attempt ${run.attempt}` : null;
+  let text = "";
+  if (typeof run.failover_count === "number" && run.failover_count > 0) {
+    text += "That server didn't respond, so Varity is trying another one. ";
+  }
+  if (words && attempt) text += `Now ${words.now} (${[attempt, elapsed].filter(Boolean).join(", ")}).`;
+  else if (words) text += `Now ${words.now}${elapsed ? `, ${elapsed}` : ""}.`;
+  else if (elapsed || attempt) text += `${[elapsed, attempt].filter(Boolean).join(", ")}.`;
+  if (!text) return null;
+  if (words) text += ` Next, ${words.next}.`;
+  const deadline = timeOf(run.execution_deadline_at);
+  if (deadline !== null && deadline > now) {
+    text += ` If it is not live by ${new Date(deadline).toISOString().slice(11, 16)} UTC, Varity stops trying and reports why.`;
+  }
+  return text;
+}
+
+/** How long a successful run took from acceptance to its sealed end (J-17). */
+export function timeToLive(run: RunView): string | null {
+  const started = timeOf(run.accepted_at);
+  const outcome = (run.outcome && typeof run.outcome === "object" ? run.outcome : {}) as Record<string, unknown>;
+  const ended = timeOf(outcome.terminal_at);
+  if (started === null || ended === null || ended < started) return null;
+  return `It took ${plainDuration(ended - started)} to go live.`;
+}
+
+/** Build error lines the MCP passes on: the last few, redacted again locally. */
+export const BUILD_ERROR_LINES = 20;
+
+export interface BuildError {
+  stage: string | null;
+  lines: string[];
+  complete: boolean;
+}
+
+/**
+ * A failed run's sealed build error from `GET /api/deployments/runs/:id/logs`,
+ * last `BUILD_ERROR_LINES` lines, each passed through `redactPublicText` with
+ * the configured deploy key as a known secret. `null` when the run recorded
+ * none (404) or the read failed: no lines are invented.
+ */
+export async function readBuildError(runId: string | null): Promise<BuildError | null> {
+  if (!runId) return null;
+  try {
+    const log = await getRunBuildLog(runId);
+    const lines = Array.isArray(log.lines) ? log.lines.filter((l): l is string => typeof l === "string") : [];
+    if (lines.length === 0) return null;
+    const key = await currentCredential();
+    const known = key ? [key] : [];
+    return {
+      stage: typeof log.stage === "string" && log.stage ? log.stage : null,
+      lines: lines.slice(-BUILD_ERROR_LINES).map((line) => redactPublicText(line, known)),
+      complete: log.complete === true && lines.length <= BUILD_ERROR_LINES,
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -113,15 +221,43 @@ export function normalizeDeployment(item: ServedDeployment): DeploymentRecord {
   };
 }
 
+/** The run fields the status summary reads; `null` = unobserved. */
+export interface RunView {
+  status: string | null;
+  outcome: unknown;
+  stage?: string | null;
+  accepted_at?: string | null;
+  execution_deadline_at?: string | null;
+  /** From `progress`: which try this run is on, and how many servers it has moved past. */
+  attempt?: number | null;
+  failover_count?: number | null;
+}
+
 /**
- * Read the latest run's `public_status` and sealed `outcome` so a failed run
- * shows why, not only `failed`. Unreadable is `null` (unobserved).
+ * Read the latest run's `public_status`, sealed `outcome`, `stage` and times
+ * so a failed run shows why and a running one shows where it is.
+ * Unreadable is `null` (unobserved).
  */
-export async function readRun(runId: string | null): Promise<{ status: string | null; outcome: unknown }> {
+export async function readRun(runId: string | null): Promise<RunView> {
   if (!runId) return { status: null, outcome: null };
   try {
     const run = await getRun(runId);
-    return { status: typeof run.public_status === "string" ? run.public_status : null, outcome: run.outcome ?? null };
+    const text = (value: unknown) => (typeof value === "string" && value ? value : null);
+    const record = (value: unknown) => (value && typeof value === "object" ? value as Record<string, unknown> : {});
+    const count = (value: unknown) => (Number.isInteger(value) && (value as number) >= 0 ? value as number : null);
+    const progress = record(run.progress);
+    const failover = record(progress.failover);
+    return {
+      status: text(run.public_status),
+      outcome: run.outcome ?? null,
+      // `progress` (absent before any attempt) is the user-facing progress
+      // block; the run's top-level `stage` has a different meaning and is not read.
+      stage: text(progress.stage),
+      accepted_at: text(run.accepted_at),
+      execution_deadline_at: text(run.execution_deadline_at),
+      attempt: count(progress.attempt),
+      failover_count: count(failover.count),
+    };
   } catch {
     return { status: null, outcome: null };
   }
@@ -182,7 +318,9 @@ export function registerDeployStatusTool(server: McpServer, options: { probe: bo
           ? "A separate HTTP probe records reachability without overwriting the owner's lifecycle status; authenticated, POST-only, or transiently unavailable apps may return a non-2xx probe. "
           : "Liveness is the platform's served status. ") +
         "Use this when a developer asks about their deployments, wants to check status, " +
-        "or needs to find a deployment URL.",
+        "or needs to find a deployment URL. For one deployment it also says, in plain words, the current stage and time " +
+        "so far while deploying, how long it took once live, and, when a build failed, the last lines of the build error " +
+        "(build_error.lines) so the cause can be fixed in the code.",
       inputSchema: {
         deployment_id: z
           .string()
@@ -220,11 +358,31 @@ export function registerDeployStatusTool(server: McpServer, options: { probe: bo
 
           const state = servingState(deployment);
           const failure = latestRunFailure(deployment, run.outcome);
+          const buildError = failure && run.status === "failed" ? await readBuildError(deployment.run_id) : null;
+          let message = failure
+            ? `Deployment ${deployment.id}: ${failure}. Deployment status: ${state}`
+            : `Deployment ${deployment.id}: ${state}`;
+          // A run that never served may have had an amount set aside; the platform releases it
+          // (instantly once the billing release ships, else by its periodic sweep).
+          if (failure && deployment.status === "failed") message += ". Any amount set aside for this attempt is released automatically.";
+          if (buildError) {
+            message += `${message.endsWith(".") ? " " : ". "}The build stopped with an error; its last ${buildError.lines.length} line(s) are in build_error.lines. ` +
+              "Fix that in the app's code, then deploy again with varity_deploy.";
+          } else if (!failure && (run.status === "deploying" || deployment.status === "deploying")) {
+            const progress = deployingProgress(run);
+            if (progress) message += `. ${progress}`;
+          } else if (!failure && run.status === "live" && deployment.status === "live") {
+            const took = timeToLive(run);
+            if (took) message += `. ${took}`;
+          }
           return successResponse(
-            { deployment, source: "varity_public_api:/api/deployments" },
-            failure
-              ? `Deployment ${deployment.id}: ${failure}. Deployment status: ${state}`
-              : `Deployment ${deployment.id}: ${state}`
+            {
+              deployment,
+              ...(buildError ? { build_error: buildError } : {}),
+              ...(run.stage ? { run_stage: run.stage } : {}),
+              source: "varity_public_api:/api/deployments",
+            },
+            message
           );
         }
 

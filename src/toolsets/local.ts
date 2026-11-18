@@ -19,6 +19,8 @@ import { registerMigrateTool } from "../tools/migrate.js";
 import { registerAgentTools } from "../tools/agent.js";
 import { registerDeleteDeploymentTool } from "../tools/delete-deployment.js";
 import { registerSetEnvTool } from "../tools/set-env.js";
+import { projectEnvReader } from "../tools/env-file.js";
+import { registerDomainTools } from "../tools/domain.js";
 import { registerRedeployTool } from "../tools/redeploy.js";
 import { registerMachinesTools } from "../tools/machines.js";
 
@@ -29,7 +31,7 @@ import { registerMachinesTools } from "../tools/machines.js";
  *   - Discovery: search-docs, cost-calculator, doctor
  *   - Setup: install-deps, build, login, logout
  *   - Deploy own code: deploy, deploy-status, deploy-logs, delete-deployment
- *   - Operate: secret-safe set-env compatibility route; redeploy (restart of the last successful release at its saved commit)
+ *   - Operate: set-env (values from the project's .env, restarts the app); custom domain add/verify/remove; redeploy (restart of the last successful release at its saved commit)
  *   - CPU and GPU VMs: machines-list, machines-create (caller's SSH public key), machines-delete (waits for billing stop)
  *   - Deploy certified templates: list-templates, template-info, deploy-template
  *   - Local development: open-browser, dev-server
@@ -63,8 +65,9 @@ export function registerLocalToolset(server: McpServer): void {
   registerDeployLogsTool(server);
   registerDeleteDeploymentTool(server);
   registerSetEnvTool(server);
+  registerDomainTools(server);
   registerRedeployTool(server);
   registerMachinesTools(server);
-  registerAgentTools(server);
+  registerAgentTools(server, projectEnvReader(server));
   registerMigrateTool(server);
 }

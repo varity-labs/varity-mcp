@@ -42,14 +42,15 @@ test("the agent reads the owner's exact USD balance using its deploy key, withou
   assert.doesNotMatch(JSON.stringify(output), /must-not-leak|billing\/account|credit(?!s\/balance)/i);
 });
 
-test("authorization maximum is named without implying it reduces the served available balance", async () => {
+test("J-16: the message says cents in plain words; exact values stay in data", async () => {
   const { output, definition } = await balance({ availableE8: "10000000000", reservedE8: "4506000000", debtE8: "0" });
   assert.deepEqual(output.data, {
     currency: "USD", available_usd: "100.00", reserved_usd: "45.06", debt_usd: "0.00",
     source: "varity_public_api:/api/credits/balance",
   });
-  assert.equal(output.message, "Available $100.00, authorization maximum $45.06, owed $0.00 (USD).");
-  assert.match(definition.description, /reserved_usd is the served authorization maximum/);
+  assert.equal(output.message, "Available $100.00, set aside for your running apps $45.06, owed $0.00 (USD).");
+  assert.doesNotMatch(output.message, /authorization maximum/);
+  assert.match(definition.description, /set aside for the user's running apps/);
 });
 
 test("exact USD preserves sub-cent amounts and balances beyond floating-point integer precision", async () => {
@@ -57,7 +58,7 @@ test("exact USD preserves sub-cent amounts and balances beyond floating-point in
   assert.equal(output.data.available_usd, "0.00000001");
   assert.equal(output.data.reserved_usd, "90071992.54740993");
   assert.equal(output.data.debt_usd, "92233720368.54775807");
-  assert.match(output.message, /Available \$0\.00000001/);
+  assert.equal(output.message, "Available <$0.01, set aside for your running apps $90,071,992.55, owed $92,233,720,368.55 (USD).");
 });
 
 test("a measured zero is distinct from missing, malformed and unavailable money", async () => {

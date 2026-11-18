@@ -46,10 +46,11 @@ export async function deployAccepted(accepted: Awaited<ReturnType<typeof createD
 function unreadableRepository(repoUrl: string | undefined): [string, string] {
   const slug = repoUrl?.match(/github\.com[/:]([^/]+\/[^/]+?)(?:\.git)?\/?$/)?.[1] ?? "<owner>/<repo>";
   return [
-    "Varity could not read this repository: it is private or unreachable. " +
-      "Varity cannot read private repositories from the MCP yet. No deployment or charge was created.",
-    `Make the repository public (gh repo edit ${slug} --visibility public --accept-visibility-change-consequences) ` +
-      "and call varity_deploy again, or deploy a prebuilt container image with the image argument.",
+    "Varity could not read this repository: it is private or does not exist. " +
+      "Varity can only build from public repositories today, so nothing was deployed and nothing was charged.",
+    "Explain this plainly and offer the paths that keep the code private: deploy a ready-made Varity template " +
+      "(varity_list_templates), or deploy a prebuilt container image with the image argument. " +
+      `Only if the user decides to publish the code can the repository be made public (gh repo edit ${slug} --visibility public --accept-visibility-change-consequences); ask first.`,
   ];
 }
 

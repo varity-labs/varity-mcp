@@ -25,9 +25,10 @@ const EXPECTED = {
   varity_list_agents: READ,
   varity_agent_info: READ,
   varity_migrate: [true, false, true, true],
-  varity_set_env: [true, false, true, false],
+  // P9-ENV (V9-1): a gated restart of the app.
+  varity_set_env: [false, true, false, true],
   varity_login: [false, false, true, false],
-  // Not in the §2a table yet (A5 adds the tool): revokes the saved key on Varity, then deletes it.
+  // A5: revokes the saved key on Varity, then deletes it (recorded F/T/T/F).
   varity_logout: [false, true, true, false],
   varity_open_browser: [false, false, true, false],
   varity_build: [false, false, true, false],
@@ -41,9 +42,13 @@ const EXPECTED = {
   varity_redeploy: [false, true, false, true],
   varity_delete_deployment: [false, true, true, true],
   varity_machines_delete: [false, true, true, true],
+  // P9-DOMAIN (V9-4).
+  varity_domain_add: [false, false, true, true],
+  varity_domain_verify: [false, false, true, true],
+  varity_domain_remove: [false, true, true, true],
 };
 
-test("tools/list annotations equal the binding §2a table for all 27 tools", async () => {
+test("tools/list annotations equal the binding §2a table for all 30 tools", async () => {
   const [serverSide, clientSide] = InMemoryTransport.createLinkedPair();
   await createVarityServer().connect(serverSide);
   const client = new Client({ name: "annotation-audit", version: "1" });
@@ -51,7 +56,7 @@ test("tools/list annotations equal the binding §2a table for all 27 tools", asy
   const { tools } = await client.listTools();
   await client.close();
 
-  assert.equal(tools.length, 27);
+  assert.equal(tools.length, 30);
   const actual = Object.fromEntries(tools.map((tool) => {
     const a = tool.annotations ?? {};
     return [tool.name, [a.readOnlyHint, a.destructiveHint, a.idempotentHint, a.openWorldHint]];

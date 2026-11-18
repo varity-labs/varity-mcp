@@ -14,6 +14,14 @@ function usdAmount(value: unknown): string | null {
   return `${amount / 100_000_000n}.${fraction}`;
 }
 
+/** An exact served E8 amount rounded to cents for the message; a positive sub-cent amount is "<$0.01". */
+function cents(value: string): string {
+  const amount = BigInt(value);
+  if (amount > 0n && amount < 500_000n) return "<$0.01";
+  const rounded = (amount + 500_000n) / 1_000_000n;
+  return `$${(rounded / 100n).toLocaleString("en-US")}.${(rounded % 100n).toString().padStart(2, "0")}`;
+}
+
 function unavailable() {
   // A hosted call names no billing link (explain-only copy).
   const action = isRemoteCall() ? "Retry varity_balance." : `Retry varity_balance, or see ${BILLING_URL}.`;
@@ -23,7 +31,7 @@ function unavailable() {
 export function registerBalanceTool(server: McpServer): void {
   server.registerTool("varity_balance", {
     title: "Account Balance",
-    description: "Read your Varity balance in USD: available, authorization maximum, and owed. reserved_usd is the served authorization maximum, not a measure of funded backing. Amounts are exact decimal USD strings. Use before deploying or when asked how much balance remains. An unavailable read is never reported as zero.",
+    description: "Read your Varity balance in USD: available, set aside for running apps, and owed. reserved_usd is the amount set aside for the user's running apps (their monthly maximums), not a measure of funded backing. The data carries exact decimal USD strings; the message rounds to cents. Use before deploying or when asked how much balance remains. An unavailable read is never reported as zero.",
     inputSchema: {},
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, async () => {
@@ -39,7 +47,7 @@ export function registerBalanceTool(server: McpServer): void {
         reserved_usd: authorizationMaximum,
         debt_usd: debt,
         source: `varity_public_api:${BALANCE_PATH}`,
-      }, `Available $${available}, authorization maximum $${authorizationMaximum}, owed $${debt} (USD).`);
+      }, `Available ${cents(body.availableE8 as string)}, set aside for your running apps ${cents(body.reservedE8 as string)}, owed ${cents(body.debtE8 as string)} (USD).`);
     } catch (error) {
       if (error instanceof VarityPublicApiError && (error.code === "NOT_AUTHENTICATED" || error.status === 401 || error.status === 403)) {
         return errorResponse(error.code, error.message, error.action);

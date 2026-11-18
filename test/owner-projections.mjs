@@ -4,7 +4,6 @@ import { test } from "node:test";
 
 const { classifyReadiness, verifyAuthentication } = await import("../dist/tools/doctor.js");
 const { projectOwnerPricing } = await import("../dist/tools/cost-calculator.js");
-const { secureSetEnvRefusal } = await import("../dist/tools/set-env.js");
 const { configuredCredentialResponse } = await import("../dist/tools/login.js");
 const { VarityPublicApiError } = await import("../dist/utils/public-api.js");
 
@@ -91,9 +90,3 @@ test("login guidance consistently routes sign-in to the browser, never to a past
   assert.doesNotMatch(publicApi, /paste|varitykit auth login/i);
 });
 
-test("set-env compatibility route refuses secret-bearing MCP input", () => {
-  const result = payload(secureSetEnvRefusal());
-  assert.equal(result.success, false);
-  assert.equal(result.error.code, "SECURE_ENV_CONFIGURATION_REQUIRED");
-  assert.match(result.error.suggestion, /Never place secret values in chat or MCP arguments/);
-});
