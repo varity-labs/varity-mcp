@@ -203,7 +203,7 @@ test("errors name tools the agent can call, never raw HTTP routes", async () => 
   const { out } = await call({
     "/api/deployments/site/logs": [409, {
       code: "runtime_not_started",
-      message: "This is a static site: it has no runtime logs.",
+      message: "No runtime logs: this deployment did not start a runtime.",
       action: "Read run_id from GET /api/deployments/{id}, then GET /api/deployments/runs/{run_id}.",
     }],
   }, "varity_deploy_logs", { deployment: "site" });
@@ -238,7 +238,16 @@ test("varity_login with no key and sign-in not reachable names the Deploy keys t
   }).toString();
   const out = JSON.parse(text);
   assert.equal(out.error.code, "SIGN_IN_UNAVAILABLE");
-  assert.match(out.error.suggestion, /deploy key at https:\/\/developer\.store\.varity\.so\/dashboard\/settings\?tab=api-keys/);
+  // J-21: the key path for everyone, in plain words; no wait-and-retry, no developer framing.
+  assert.equal(out.error.message, "Browser sign-in isn't available right now. You can connect with a deploy key instead: create one at https://developer.store.varity.so/dashboard/settings?tab=api-keys and add it as VARITY_DEPLOY_KEY in your editor's MCP settings. Keep the key out of the chat.");
+  assert.doesNotMatch(`${out.error.message} ${out.error.suggestion}`, /few minutes|for CI|developers/i);
+});
+
+test("J-21: when browser sign-in works, a failed sign-in still leads with the browser", async () => {
+  const { failureResponse } = await import("../dist/tools/login.js");
+  const { LoginError } = await import("../dist/utils/oauth-login.js");
+  const out = JSON.parse(failureResponse(new LoginError("The browser sign-in expired before it was confirmed. Call varity_login to start again.", "SIGN_IN_EXPIRED")).content[0].text);
+  assert.ok(out.error.suggestion.startsWith("Call varity_login to start a new browser sign-in."), out.error.suggestion);
 });
 
 test("varity_deploy app_name names both URL shapes the gateway serves", async () => {
@@ -289,8 +298,9 @@ test("a private or unreachable repo names the working remedies, not 'the supplie
   }, "varity_deploy", { repo_url: "https://github.com/acme/secret-app.git", app_name: "secret-app" });
   assert.equal(out.error.code, "source_repository_unreadable");
   assert.match(out.error.message, /private or does not exist/);
-  assert.match(out.error.message, /can only build from public repositories today/);
+  assert.match(out.error.message, /Nothing was deployed and nothing was charged/);
   assert.doesNotMatch(out.error.message, /supplied token/);
+  assert.match(out.error.suggestion, /upload your project folder to Varity instead; your code stays private/);
   assert.match(out.error.suggestion, /gh repo edit acme\/secret-app --visibility public/);
   assert.match(out.error.suggestion, /container image/);
 });
@@ -459,7 +469,7 @@ test("J-6: deploy_template states the deployment id exactly as varity_deploy doe
   assert.ok(template.out.message.includes(tracked), template.out.message);
 });
 
-test("J-7: status reports a failed latest run, its failure and action code, not only 'live at'", async () => {
+test("J-7/J-20: status reports a failed latest run in plain words, codes in data.outcome, not only 'live at'", async () => {
   // The real failed restart of a live template app (journey post-restart-status).
   const id = "88d8e064-c086-4757-be4c-7a108a4ea26b";
   const run = "8d3a1845-b29a-4f82-a468-209d3b72be8f";
@@ -476,11 +486,9 @@ test("J-7: status reports a failed latest run, its failure and action code, not 
     [`/api/deployments/runs/${run}`]: [200, { public_status: "failed", outcome }],
   }, "varity_deploy_status", { deployment_id: id });
   assert.equal(out.data.deployment.run_status, "failed");
-  assert.match(out.message, /latest run failed/i);
-  assert.match(out.message, /configuration_rejected/);
-  assert.match(out.message, /in_place_resources_changed/);
-  assert.match(out.message, /check_configuration/);
-  assert.doesNotMatch(out.message, /^Deployment [^:]+: live at/);
+  assert.equal(out.message, `Deployment ${id}: Varity could not accept this deploy as it is set up, so the app keeps running its previous release. It is still live at https://j2326-kuma-2021.varity.app.`);
+  assert.doesNotMatch(out.message, /configuration_rejected|in_place_resources_changed|check_configuration|expected_rejection/);
+  assert.equal(out.data.outcome.diagnostic_code, "in_place_resources_changed");
 
   const healthy = await call({
     [`/api/deployments/${id}`]: [200, { deployment: { id, status: "live", url: "https://a.varity.app", run_id: run, outcome: { classification: "succeeded", code: "deployment_succeeded" } } }],
@@ -501,14 +509,14 @@ test("J-7: a failed run is reported from either signal, and a cancelled run is n
   // The run view is unreadable: the row's sealed classification alone says it failed.
   const unread = await status({ outcome: failedOutcome }, [502, { code: "deploy_status_unavailable" }]);
   assert.equal(unread.out.data.deployment.run_status, null);
-  assert.match(unread.out.message, /latest run failed \(expected_rejection, configuration_rejected; action check_configuration\)/);
+  assert.match(unread.out.message, /Varity could not accept this deploy as it is set up, so the app keeps running its previous release\./);
 
   // The row carries no outcome: the run view's outcome names the failure.
   const fromRun = await status({}, [200, { public_status: "failed", outcome: failedOutcome }]);
-  assert.match(fromRun.out.message, /latest run failed \(expected_rejection, configuration_rejected; action check_configuration\)/);
+  assert.match(fromRun.out.message, /Varity could not accept this deploy as it is set up, so the app keeps running its previous release\./);
 
   const cancelled = await status({ outcome: { classification: "cancelled", code: "deployment_cancelled" } }, [200, { public_status: "live" }]);
-  assert.match(cancelled.out.message, /latest run was cancelled \(cancelled, deployment_cancelled\)/);
+  assert.match(cancelled.out.message, /The latest deploy was cancelled, so the app keeps running its previous release\./);
   assert.doesNotMatch(cancelled.out.message, /failed/);
 });
 
@@ -518,12 +526,12 @@ test("J-7: a deployment that itself failed says so, and the list names a failed 
     "/api/deployments/op-f": [200, { deployment: { id: "op-f", status: "failed", run_id: "run-f", outcome } }],
     "/api/deployments/runs/run-f": [200, { public_status: "failed", outcome }],
   }, "varity_deploy_status", { deployment_id: "op-f" });
-  assert.equal(failed.out.message, "Deployment op-f: latest run failed (user_workload_failure, health_check_failed; action check_logs). Deployment status: failed (URL not assigned yet). Any amount set aside for this attempt is released automatically.");
+  assert.equal(failed.out.message, "Deployment op-f: The app started but did not respond, so the app is not online. Any amount set aside for this attempt is released automatically.");
 
   const list = await call({
     "/api/deployments": [200, { deployments: [{ id: "op-f", app_name: "app-f", status: "live", url: "https://app-f.varity.app", created_at: "2026-11-17T20:00:00Z", run_id: "run-f", outcome }] }],
   }, "varity_deploy_status");
-  assert.match(list.out.message, /Most recent: app-f \(https:\/\/app-f\.varity\.app\), latest run failed \(user_workload_failure, health_check_failed; action check_logs\)$/);
+  assert.match(list.out.message, /Most recent: app-f \(https:\/\/app-f\.varity\.app\)\. The app started but did not respond, so the app keeps running its previous release\.$/);
 });
 
 // ── 9. Journey 2.3.27 re-run rows ───────────────────────────────────────────

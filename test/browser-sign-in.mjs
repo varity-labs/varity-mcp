@@ -246,8 +246,8 @@ test("varity_login fails safe and explains plainly when sign-in is not live yet"
     const result = await t.call("varity_login");
     assert.equal(result.success, false);
     assert.equal(result.error.code, "SIGN_IN_UNAVAILABLE");
-    assert.match(result.error.message, /Browser sign-in to Varity isn't available right now, so nothing was changed/);
-    assert.match(result.error.suggestion, /Try varity_login again in a few minutes/);
+    assert.match(result.error.message, /^Browser sign-in isn't available right now\. You can connect with a deploy key instead: create one at /);
+    assert.doesNotMatch(`${result.error.message} ${result.error.suggestion}`, /few minutes/);
     assert.equal(opened, false, "no browser tab for a server that is not there");
     assert.throws(() => statSync(file), "nothing is written");
     await t.close();

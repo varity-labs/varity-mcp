@@ -244,11 +244,15 @@ export function registerDoctorTool(server: McpServer): void {
         developmentIssues,
         cliIssues,
       } = classifyReadiness(checks);
+      // `connected`: a verified deploy key. `ready` never reads as deploy-ready without it.
+      const connected = authentication.status === "pass";
+      const notConnected = resolved?.key ? "" : "Not connected yet: call varity_login to connect Varity. ";
 
       if (developmentReady && cliDeployReady) {
         return successResponse(
           {
             ready: true,
+            connected,
             cli_deploy_ready: true,
             deploy_key_source: deployKeySource,
             checks,
@@ -264,13 +268,14 @@ export function registerDoctorTool(server: McpServer): void {
         return successResponse(
           {
             ready: true,
+            connected,
             cli_deploy_ready: false,
             deploy_key_source: deployKeySource,
             checks,
             note: `Development tools (varity_build, varity_dev_server) are ready. Fix the following ${cliIssues.length} issue${cliIssues.length === 1 ? "" : "s"} before deploying:`,
             cli_issues: cliFixList,
           },
-          `Ready for development (init, build, dev server work). Fix ${cliIssues.length} issue${cliIssues.length === 1 ? "" : "s"} before deploying: ${cliFixList.join("; ")}`
+          `${notConnected}Ready for development (init, build, dev server work). Fix ${cliIssues.length} issue${cliIssues.length === 1 ? "" : "s"} before deploying: ${cliFixList.join("; ")}`
         );
       }
 
@@ -279,6 +284,7 @@ export function registerDoctorTool(server: McpServer): void {
         return successResponse(
           {
             ready: false,
+            connected,
             cli_deploy_ready: true,
             deploy_key_source: deployKeySource,
             checks,
@@ -294,12 +300,13 @@ export function registerDoctorTool(server: McpServer): void {
       return successResponse(
         {
           ready: false,
+          connected,
           cli_deploy_ready: false,
           deploy_key_source: deployKeySource,
           checks,
           next_steps: nextSteps,
         },
-        `Local development and deployment are not ready. Development: ${developmentFixes.join("; ")}. Deployment: ${cliFixes.join("; ")}.`
+        `${notConnected}Local development and deployment are not ready. Development: ${developmentFixes.join("; ")}. Deployment: ${cliFixes.join("; ")}.`
       );
     }
   );

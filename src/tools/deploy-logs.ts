@@ -17,7 +17,13 @@ export function registerDeployLogsTool(server: McpServer): void {
         deployment: z
           .string()
           .regex(/^[a-zA-Z0-9_-]+$/, "Invalid deployment id or app name")
+          .optional()
           .describe("The deployment id or app name to get logs for"),
+        deployment_id: z
+          .string()
+          .regex(/^[a-zA-Z0-9_-]+$/, "Invalid deployment id or app name")
+          .optional()
+          .describe("Same as deployment (the name varity_deploy_status uses); pass either one."),
         limit: z
           .coerce.number()
           .optional()
@@ -26,7 +32,14 @@ export function registerDeployLogsTool(server: McpServer): void {
       },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
-    async ({ deployment, limit }) => {
+    async ({ deployment: name, deployment_id, limit }) => {
+      if (name && deployment_id && name !== deployment_id) {
+        return errorResponse("DEPLOYMENT_CONFLICT", "deployment and deployment_id name different apps.", "Pass one of them.");
+      }
+      const deployment = name ?? deployment_id;
+      if (!deployment) {
+        return errorResponse("DEPLOYMENT_REQUIRED", "Name the app to read logs for.", "Pass deployment (the id or app name).");
+      }
       try {
         const data = await getDeploymentLogs(deployment, limit ?? 100);
         const logLines = (data.lines ?? []).map((line) => {
@@ -57,6 +70,13 @@ export function registerDeployLogsTool(server: McpServer): void {
           summary
         );
       } catch (err) {
+        // A static site has no runtime, so no runtime logs: a normal answer, not an error.
+        if (err instanceof VarityPublicApiError && err.code === "runtime_not_started" && /^This is a static site\b/.test(err.message)) {
+          return successResponse(
+            { deployment, log_lines: [], total_lines: 0, complete: true, static_site: true },
+            `${deployment} is a static site: it is served as files and has no server, so it has no runtime logs. That is normal.`
+          );
+        }
         if (err instanceof VarityPublicApiError) {
           return errorResponse(
             err.code,

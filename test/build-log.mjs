@@ -81,7 +81,7 @@ test("a failed run with no recorded build error invents no lines", async () => {
   }, { deployment_id: "op-f" });
   assert.equal(out.success, true);
   assert.equal("build_error" in out.data, false);
-  assert.match(out.message, /latest run failed/);
+  assert.match(out.message, /so the app is not online\./);
 });
 
 test("a live deployment never reads the build log", async () => {

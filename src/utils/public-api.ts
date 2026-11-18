@@ -288,6 +288,10 @@ export interface PublicApiRequestOptions {
   anonymous?: boolean;
   /** A public read that carries the key when one is configured, else is anonymous. */
   keyOptional?: boolean;
+  /** A binary body sent as is (in place of `body`), with its content type. */
+  raw?: { data: Uint8Array; contentType: string };
+  /** Overrides `PUBLIC_API_GET_TIMEOUT_MS` (an upload of a large archive). */
+  timeoutMs?: number;
 }
 
 type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -303,14 +307,15 @@ async function sendRequest<T>(
     : await authHeaders(options.keyOptional);
   headers["User-Agent"] = userAgent();
   if (options.body !== undefined) headers["Content-Type"] = "application/json";
+  if (options.raw) headers["Content-Type"] = options.raw.contentType;
   if (options.idempotencyKey) headers["Idempotency-Key"] = options.idempotencyKey;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), PUBLIC_API_GET_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? PUBLIC_API_GET_TIMEOUT_MS);
   try {
     const res = await fetch(`${INFRASTRUCTURE.GATEWAY}${path}`, {
       method,
       headers,
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      body: (options.raw ? options.raw.data : options.body === undefined ? undefined : JSON.stringify(options.body)) as BodyInit | undefined,
       signal: controller.signal,
     });
     const data = await res.json().catch(() => ({}));
@@ -451,6 +456,61 @@ async function idempotentCreate<T>(path: string, body: unknown, keyPrefix: strin
 export async function createDeployment(request: Record<string, unknown>): Promise<PublicRunAcceptance> {
   return idempotentCreate<PublicRunAcceptance>(
     "/api/deployments", { ...request, source: "mcp" }, "mcp-deploy"
+  );
+}
+
+/** IF-UPLOAD: a pending, owner-bound upload slot (gateway U-5; unused slots expire after 1 h). */
+export interface UploadSourceSlot {
+  source_id: string;
+  upload_url: string;
+  upload_method?: string;
+  max_bytes: number;
+  expires_at: string;
+}
+
+/** `POST /api/deployments/sources` — 201 {source_id, upload_url, max_bytes, expires_at}. */
+export async function createUploadSource(): Promise<UploadSourceSlot> {
+  const slot = await publicApiRequest<Partial<UploadSourceSlot>>("POST", "/api/deployments/sources", {
+    body: { format: "tar.gz" },
+  });
+  if (
+    typeof slot.source_id !== "string" ||
+    typeof slot.upload_url !== "string" ||
+    // Only the gateway's own streaming PUT carries the key; never send it elsewhere.
+    !slot.upload_url.startsWith("/api/") ||
+    typeof slot.max_bytes !== "number"
+  ) {
+    throw new VarityPublicApiError(
+      "Varity answered the upload request in a form this MCP version does not understand.",
+      "upload_source_unrecognized",
+      undefined,
+      "Update the Varity MCP server, then retry."
+    );
+  }
+  return slot as UploadSourceSlot;
+}
+
+/** Upload deadline: 50 MB on a slow uplink; the gateway's own whole-body deadline is shorter. */
+const UPLOAD_TIMEOUT_MS = 10 * 60_000;
+
+/** `PUT <upload_url>` with the archive; 200 seals it. Refusals carry the served code. */
+export async function uploadSourceArchive(slot: UploadSourceSlot, archive: Uint8Array): Promise<void> {
+  const method = (slot.upload_method ?? "PUT").toUpperCase();
+  await publicApiRequest(method === "POST" ? "POST" : "PUT", slot.upload_url, {
+    raw: { data: archive, contentType: "application/gzip" },
+    timeoutMs: UPLOAD_TIMEOUT_MS,
+  });
+}
+
+/** `POST /api/deployments` from a sealed upload source; attribution rides in `source.client`. */
+export async function createUploadDeployment(
+  request: Record<string, unknown>,
+  sourceId: string
+): Promise<PublicRunAcceptance> {
+  return idempotentCreate<PublicRunAcceptance>(
+    "/api/deployments",
+    { ...request, source: { type: "upload", source_id: sourceId, client: "mcp" } },
+    "mcp-deploy"
   );
 }
 

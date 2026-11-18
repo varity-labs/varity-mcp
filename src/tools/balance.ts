@@ -47,7 +47,7 @@ export function registerBalanceTool(server: McpServer): void {
         reserved_usd: authorizationMaximum,
         debt_usd: debt,
         source: `varity_public_api:${BALANCE_PATH}`,
-      }, `Available ${cents(body.availableE8 as string)}, set aside for your running apps ${cents(body.reservedE8 as string)}, owed ${cents(body.debtE8 as string)} (USD).`);
+      }, `Available ${cents(body.availableE8 as string)}, set aside for your running apps ${cents(body.reservedE8 as string)} (released within a few minutes after an app stops), owed ${cents(body.debtE8 as string)} (USD).`);
     } catch (error) {
       if (error instanceof VarityPublicApiError && (error.code === "NOT_AUTHENTICATED" || error.status === 401 || error.status === 403)) {
         return errorResponse(error.code, error.message, error.action);

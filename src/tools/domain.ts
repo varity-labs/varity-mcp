@@ -47,13 +47,13 @@ export function domainState(claim: CustomDomainClaim): string {
     case "active":
       return `${hostname} is live at https://${hostname}.`;
     case "certificate_pending":
-      return `The DNS record for ${hostname} is correct; the secure (https) certificate is being set up. Check again in a few minutes with varity_domain_verify.`;
+      return `The DNS record for ${hostname} is correct; the secure (https) certificate is being set up. I'll check it again for you in a few minutes.`;
     case "error":
-      return `Setting up ${hostname} hit a problem${claim.errorCode ? ` (${claim.errorCode})` : ""}. Check the DNS record below, then run varity_domain_verify again.`;
+      return `Setting up ${hostname} hit a problem${claim.errorCode ? ` (${claim.errorCode})` : ""}. Check the DNS record below; once it is fixed, I'll check it again for you.`;
     default:
       return claim.dns?.status === "mismatch"
         ? `A DNS record for ${hostname} was found but does not match yet. Check it against the record below; DNS changes can take a while to show.`
-        : `Varity is waiting for the DNS record for ${hostname}. Once it is added, run varity_domain_verify (DNS changes can take a while to show).`;
+        : `Varity is waiting for the DNS record for ${hostname}. Once the record is added, I'll check it for you (DNS changes can take a while to show).`;
   }
 }
 

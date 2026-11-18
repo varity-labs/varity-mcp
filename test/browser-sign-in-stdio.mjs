@@ -47,7 +47,7 @@ test("stdio: login and logout are listed; sign-in not live fails safe; live head
     fake.state.live = false;
     const down = payload(await client.callTool({ name: "varity_login", arguments: {} }));
     assert.equal(down.error.code, "SIGN_IN_UNAVAILABLE");
-    assert.match(down.error.message, /isn't available right now, so nothing was changed/);
+    assert.match(down.error.message, /^Browser sign-in isn't available right now\. You can connect with a deploy key instead/);
 
     fake.state.live = true;
     const pending = payload(await client.callTool({ name: "varity_login", arguments: {} }));

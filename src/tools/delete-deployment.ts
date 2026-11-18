@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
-import { deleteDeployment, VarityPublicApiError } from "../utils/public-api.js";
+import { deleteDeployment, getDeployment, VarityPublicApiError } from "../utils/public-api.js";
 import { lifecycleAcceptance } from "../utils/lifecycle-acceptance.js";
 import { INFRASTRUCTURE } from "../utils/endpoints.js";
 
@@ -13,12 +13,13 @@ import { INFRASTRUCTURE } from "../utils/endpoints.js";
  */
 export async function deleteAccepted(
   deployment: string,
-  accepted: Awaited<ReturnType<typeof deleteDeployment>>
+  accepted: Awaited<ReturnType<typeof deleteDeployment>>,
+  hadUrl = true
 ) {
   const acceptance = await lifecycleAcceptance(accepted);
   const deleted = accepted.deleted === true || acceptance.public_status === "deleted";
   // Live: the URL kept serving for up to ~40 s after status deleted (E1 journey 3).
-  const cached = " The URL may serve cached content briefly after deletion.";
+  const cached = hadUrl ? " The URL may serve cached content briefly after deletion." : "";
   return successResponse(
     { deployment, ...acceptance, deleted },
     deleted
@@ -55,7 +56,15 @@ export function registerDeleteDeploymentTool(server: McpServer): void {
     },
     async ({ deployment }) => {
       try {
-        return await deleteAccepted(deployment, await deleteDeployment(deployment));
+        // Best effort: only an app that ever had a URL can serve cached content after delete.
+        let hadUrl = true;
+        try {
+          const before = await getDeployment(deployment);
+          hadUrl = Boolean(before.url ?? before.public_url);
+        } catch {
+          // Unknown: keep the cached-content line.
+        }
+        return await deleteAccepted(deployment, await deleteDeployment(deployment), hadUrl);
       } catch (err) {
         if (err instanceof VarityPublicApiError && err.status === 404) {
           return errorResponse(

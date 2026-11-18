@@ -55,20 +55,22 @@ test("J-13: deleting and deleted never say 'URL not assigned yet'", async () => 
   }
 });
 
-test("J-14: a private repository is explained plainly and offers private paths before 'make it public'", async () => {
+test("J-14: a private repository is explained plainly and offers the folder upload, then private paths, before 'make it public'", async () => {
   const out = await call("varity_deploy", { repo_url: "https://github.com/acme/secret-app" }, {
     "/api/deployments": [422, { code: "source_repository_unreadable", message: "supplied token cannot read" }],
   });
   assert.equal(out.error.code, "source_repository_unreadable");
   assert.match(out.error.message, /private or does not exist/);
-  assert.match(out.error.message, /nothing was deployed and nothing was charged/);
+  assert.match(out.error.message, /nothing was deployed and nothing was charged/i);
   const suggestion = out.error.suggestion;
   const template = suggestion.indexOf("varity_list_templates");
   const image = suggestion.indexOf("image argument");
   const publish = suggestion.indexOf("--visibility public");
   assert.ok(template >= 0 && image >= 0 && publish > template && publish > image, suggestion);
   assert.match(suggestion, /ask first/);
-  assert.doesNotMatch(`${out.error.message} ${suggestion}`, /folder|upload/i, "no promise of a feature not released");
+  // U-6 replaces the interim copy: uploading the folder (private) is offered first.
+  const upload = suggestion.indexOf("upload your project folder");
+  assert.ok(upload >= 0 && upload < template, suggestion);
 });
 
 test("J-17: the live message states how long it took", async () => {
@@ -115,21 +117,21 @@ test("J-18: while deploying, the stage, time so far and what happens next", asyn
   assert.equal(out.data.run_stage, "allocation");
 });
 
-test("J-18: optional attempt and failover fields, when served, say which try and that a server did not respond", async () => {
+test("J-18: the optional attempt field, when served, says which try", async () => {
   const now = Date.parse("2026-11-18T00:10:00Z");
   const base = { status: "deploying", outcome: null, stage: "health", accepted_at: "2026-11-18T00:07:00Z" };
   assert.equal(deployingProgress(base, now),
     "Now starting your app on a server and checking that it responds, 3 minutes so far. Next, it gets its web address.");
-  assert.equal(deployingProgress({ ...base, attempt: 2, failover_count: 1 }, now),
-    "That server didn't respond, so Varity is trying another one. Now starting your app on a server and checking that it responds (attempt 2, 3 minutes so far). Next, it gets its web address.");
+  assert.equal(deployingProgress({ ...base, attempt: 2 }, now),
+    "Now starting your app on a server and checking that it responds (attempt 2, 3 minutes so far). Next, it gets its web address.");
   const served = await call("varity_deploy_status", { deployment_id: "op-a" }, {
     "/api/deployments/op-a": [200, { deployment: { id: "op-a", status: "deploying", run_id: "run-a" } }],
     "/api/deployments/runs/run-a": [200, {
       public_status: "deploying", stage: "build", accepted_at: new Date(Date.now() - 30_000).toISOString(),
-      progress: { stage: "provider_attempt", attempt: 3, failover: { count: 2, excluded_providers: 2 } },
+      progress: { stage: "provider_attempt", attempt: 3 },
     }],
   });
-  assert.match(served.message, /That server didn't respond, so Varity is trying another one\. Now starting your app on a server \(attempt 3, \d+ seconds so far\)\. Next, Varity checks that it responds and gives it its web address\./);
+  assert.match(served.message, /Now starting your app on a server \(attempt 3, \d+ seconds so far\)\. Next, Varity checks that it responds and gives it its web address\./);
   assert.doesNotMatch(served.message, /provider/i);
   assert.equal(served.data.run_stage, "provider_attempt");
 });
@@ -164,4 +166,27 @@ test("J-18: a run that never served says set-aside amounts are released, never t
     "/api/deployments/runs/run-y": [200, { public_status: "failed" }],
   });
   assert.doesNotMatch(live.message, /released automatically/, "a live app's failed update keeps its running charge");
+});
+
+test("J-20: each failed state leads with plain words, never raw codes or 'URL not assigned yet'", async () => {
+  const states = [
+    [{ classification: "user_workload_failure", stage: "build", code: "build_failed", action_code: "check_logs" }, "The build failed, so the app is not online."],
+    [{ classification: "infrastructure_failure", code: "provider_unavailable", retryable: true }, "Varity had a problem starting this app, so the app is not online. This was on Varity's side, so trying again is fine."],
+    [{ classification: "expected_rejection", code: "configuration_rejected", action_code: "check_configuration" }, "Varity could not accept this deploy as it is set up, so the app is not online."],
+    [{ classification: "cancelled", code: "deployment_cancelled" }, "The latest deploy was cancelled, so the app is not online."],
+  ];
+  for (const [outcome, plain] of states) {
+    const row = { id: "op-z", operation_deployment_id: "op-z", status: "failed", run_id: "run-z", outcome };
+    const out = await call("varity_deploy_status", { deployment_id: "op-z" }, {
+      "/api/deployments/op-z": [200, { deployment: row }],
+      "/api/deployments/runs/run-z": [200, { public_status: "failed", outcome }],
+    });
+    assert.ok(out.message.startsWith(`Deployment op-z: ${plain}`), out.message);
+    assert.doesNotMatch(out.message, /URL not assigned yet|_rejection|_failure|_failed|check_|provider|try again in a few/);
+    assert.deepEqual(out.data.outcome, outcome);
+  }
+  const list = await call("varity_deploy_status", {}, {
+    "/api/deployments": [200, { deployments: [{ id: "op-z", app_name: "z", status: "failed", created_at: "2026-11-18T00:00:00Z", run_id: "run-z", outcome: states[0][0] }] }],
+  });
+  assert.match(list.message, /Most recent: z \(failed\)\. The build failed, so the app is not online\.$/);
 });

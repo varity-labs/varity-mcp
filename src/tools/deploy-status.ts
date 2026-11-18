@@ -11,6 +11,7 @@ import {
   type PublicDeployment,
 } from "../utils/public-api.js";
 import { redactPublicText } from "../utils/redact.js";
+import { usd } from "../utils/money.js";
 
 interface DeploymentRecord {
   /** The canonical id: the durable operation id `varity_deploy` returned, stable for the whole life. */
@@ -74,11 +75,11 @@ type ServedDeployment = PublicDeployment & { run_id?: string | null; outcome?: u
 export const URL_PENDING = "URL not assigned yet";
 
 /**
- * A deployment being or already deleted never gets a URL again: a deleted URL
- * returns 404, and "URL not assigned yet" would promise one (J-11, J-13).
+ * A deployment being or already deleted, or whose deploy failed, gets no URL
+ * from this attempt: "URL not assigned yet" would promise one (J-11, J-13, J-20).
  */
 function urlRetired(deployment: DeploymentRecord): boolean {
-  return deployment.status === "deleted" || deployment.status === "deleting";
+  return deployment.status === "deleted" || deployment.status === "deleting" || deployment.status === "failed";
 }
 
 /** The status and where it serves. */
@@ -122,8 +123,7 @@ function timeOf(value: unknown): number | null {
 
 /**
  * While a run is deploying: its stage, elapsed time and what happens next
- * (J-18) from the run's `progress` block (`stage`, `attempt`,
- * `failover.count`). Before any attempt `progress` is absent, and only the
+ * (J-18) from the run's `progress` block (`stage`, `attempt`). Before any attempt `progress` is absent, and only the
  * elapsed time is said. Absent fields are simply not mentioned.
  */
 export function deployingProgress(run: RunView, now: number = Date.now()): string | null {
@@ -132,9 +132,6 @@ export function deployingProgress(run: RunView, now: number = Date.now()): strin
   const elapsed = started !== null ? `${plainDuration(now - started)} so far` : null;
   const attempt = typeof run.attempt === "number" && run.attempt >= 1 ? `attempt ${run.attempt}` : null;
   let text = "";
-  if (typeof run.failover_count === "number" && run.failover_count > 0) {
-    text += "That server didn't respond, so Varity is trying another one. ";
-  }
   if (words && attempt) text += `Now ${words.now} (${[attempt, elapsed].filter(Boolean).join(", ")}).`;
   else if (words) text += `Now ${words.now}${elapsed ? `, ${elapsed}` : ""}.`;
   else if (elapsed || attempt) text += `${[elapsed, attempt].filter(Boolean).join(", ")}.`;
@@ -228,9 +225,8 @@ export interface RunView {
   stage?: string | null;
   accepted_at?: string | null;
   execution_deadline_at?: string | null;
-  /** From `progress`: which try this run is on, and how many servers it has moved past. */
+  /** From `progress`: which try this run is on. */
   attempt?: number | null;
-  failover_count?: number | null;
 }
 
 /**
@@ -246,7 +242,6 @@ export async function readRun(runId: string | null): Promise<RunView> {
     const record = (value: unknown) => (value && typeof value === "object" ? value as Record<string, unknown> : {});
     const count = (value: unknown) => (Number.isInteger(value) && (value as number) >= 0 ? value as number : null);
     const progress = record(run.progress);
-    const failover = record(progress.failover);
     return {
       status: text(run.public_status),
       outcome: run.outcome ?? null,
@@ -256,7 +251,6 @@ export async function readRun(runId: string | null): Promise<RunView> {
       accepted_at: text(run.accepted_at),
       execution_deadline_at: text(run.execution_deadline_at),
       attempt: count(progress.attempt),
-      failover_count: count(failover.count),
     };
   } catch {
     return { status: null, outcome: null };
@@ -273,9 +267,10 @@ async function readDeployments(): Promise<DeploymentRecord[]> {
 /**
  * The latest run's terminal outcome when it did not succeed: `run_status:
  * "failed"` or a sealed classification other than `succeeded` (from the row,
- * else the run view). A live deployment keeps its status while a later run
- * (e.g. a refused restart) failed, so the summary says the failure first,
- * with the served codes and action code, never only "live".
+ * else the run view), in plain words (J-20). The served codes stay in
+ * `data.outcome`, never in the message. A live deployment keeps its status
+ * while a later run (e.g. a refused restart) failed, so the summary says the
+ * failure first, never only "live".
  */
 export function latestRunFailure(deployment: DeploymentRecord, runOutcome: unknown = null): string | null {
   const served = deployment.outcome ?? runOutcome;
@@ -284,12 +279,18 @@ export function latestRunFailure(deployment: DeploymentRecord, runOutcome: unkno
   if (deployment.run_status !== "failed" && (classification === null || classification === "succeeded")) {
     return null;
   }
-  const text = (value: unknown): value is string => typeof value === "string" && value !== "" && value !== "succeeded";
-  const failure = [classification, outcome.code, outcome.diagnostic_code].filter(text).join(", ");
-  const action = text(outcome.action_code) ? `action ${outcome.action_code}` : "";
-  const detail = [failure, action].filter(Boolean).join("; ");
-  const verb = classification === "cancelled" ? "was cancelled" : "failed";
-  return `latest run ${verb}${detail ? ` (${detail})` : ""}`;
+  const onVarity = classification === "infrastructure_failure" || outcome.retryable === true;
+  const why =
+    classification === "cancelled" ? "The latest deploy was cancelled"
+      : onVarity ? "Varity had a problem starting this app"
+        : outcome.stage === "build" ? "The build failed"
+          : classification === "user_workload_failure" ? "The app started but did not respond"
+            : classification === "expected_rejection" ? "Varity could not accept this deploy as it is set up"
+              : "The latest deploy failed";
+  const result = deployment.status === "live"
+    ? "so the app keeps running its previous release."
+    : "so the app is not online.";
+  return `${why}, ${result}${onVarity ? " This was on Varity's side, so trying again is fine." : ""}`;
 }
 
 function apiFailure(err: unknown, action: string) {
@@ -360,13 +361,13 @@ export function registerDeployStatusTool(server: McpServer, options: { probe: bo
           const failure = latestRunFailure(deployment, run.outcome);
           const buildError = failure && run.status === "failed" ? await readBuildError(deployment.run_id) : null;
           let message = failure
-            ? `Deployment ${deployment.id}: ${failure}. Deployment status: ${state}`
+            ? `Deployment ${deployment.id}: ${failure}${deployment.status === "live" && deployment.url ? ` It is still live at ${deployment.url}.` : ""}`
             : `Deployment ${deployment.id}: ${state}`;
           // A run that never served may have had an amount set aside; the platform releases it
           // (instantly once the billing release ships, else by its periodic sweep).
-          if (failure && deployment.status === "failed") message += ". Any amount set aside for this attempt is released automatically.";
+          if (failure && deployment.status === "failed") message += " Any amount set aside for this attempt is released automatically.";
           if (buildError) {
-            message += `${message.endsWith(".") ? " " : ". "}The build stopped with an error; its last ${buildError.lines.length} line(s) are in build_error.lines. ` +
+            message += ` The error is shown below (the last ${buildError.lines.length} line(s) are in build_error.lines). ` +
               "Fix that in the app's code, then deploy again with varity_deploy.";
           } else if (!failure && (run.status === "deploying" || deployment.status === "deploying")) {
             const progress = deployingProgress(run);
@@ -375,9 +376,18 @@ export function registerDeployStatusTool(server: McpServer, options: { probe: bo
             const took = timeToLive(run);
             if (took) message += `. ${took}`;
           }
+          const billing = deployment.billing ?? null;
+          const monthly = billing?.fixed_monthly_cost_usd;
+          if (!failure && deployment.status === "live" && (typeof monthly === "number" || (typeof monthly === "string" && monthly.trim() !== "")) && Number.isFinite(Number(monthly))) {
+            message += `${message.endsWith(".") ? "" : "."} It costs ${usd(Number(monthly))}/month.`;
+          }
+          if (deployment.status === "deleted" && billing?.state === "stopped") {
+            message += `${message.endsWith(".") ? "" : "."} Billing has stopped.`;
+          }
           return successResponse(
             {
               deployment,
+              ...(failure && (deployment.outcome ?? run.outcome) ? { outcome: deployment.outcome ?? run.outcome } : {}),
               ...(buildError ? { build_error: buildError } : {}),
               ...(run.stage ? { run_stage: run.stage } : {}),
               source: "varity_public_api:/api/deployments",
@@ -415,7 +425,7 @@ export function registerDeployStatusTool(server: McpServer, options: { probe: bo
               : {}),
           },
           `Found ${deployments.length} deployment(s). Most recent: ${limited[0]!.name} (${urlRetired(limited[0]!) ? limited[0]!.status : limited[0]!.url ?? URL_PENDING})` +
-            (recentFailure ? `, ${recentFailure}` : "")
+            (recentFailure ? `. ${recentFailure}` : "")
         );
       } catch (err) {
         return apiFailure(err, "Run varity_login, then retry varity_deploy_status.");
