@@ -98,11 +98,13 @@ export function plainDuration(ms: number): string {
 }
 
 /**
- * The run's served `stage` (deploy-api `Stage`: accepted, admission, build,
+ * The run's `progress.stage` (`provider_attempt` while a start is being
+ * retried, otherwise the lifecycle stage: accepted, admission, build,
  * allocation, health, access, route, cleanup, terminal) in plain words, with
  * what comes next. An unknown stage gets no words (never guessed).
  */
 const STAGE_WORDS: Readonly<Record<string, { now: string; next: string }>> = {
+  provider_attempt: { now: "starting your app on a server", next: "Varity checks that it responds and gives it its web address" },
   accepted: { now: "waiting to start", next: "the build starts" },
   admission: { now: "checking the request", next: "the build starts" },
   build: { now: "building your app", next: "Varity finds a server for it and starts it" },
@@ -120,9 +122,9 @@ function timeOf(value: unknown): number | null {
 
 /**
  * While a run is deploying: its stage, elapsed time and what happens next
- * (J-18). `attempt` and `failover_count` are optional run fields the platform
- * is adding; when served they say which try this is and that an earlier
- * server did not respond. Absent fields are simply not mentioned.
+ * (J-18) from the run's `progress` block (`stage`, `attempt`,
+ * `failover.count`). Before any attempt `progress` is absent, and only the
+ * elapsed time is said. Absent fields are simply not mentioned.
  */
 export function deployingProgress(run: RunView, now: number = Date.now()): string | null {
   const words = run.stage ? STAGE_WORDS[run.stage] : undefined;
@@ -226,7 +228,7 @@ export interface RunView {
   stage?: string | null;
   accepted_at?: string | null;
   execution_deadline_at?: string | null;
-  /** Optional (not served yet): which try this run is on, and how many servers it has moved past. */
+  /** From `progress`: which try this run is on, and how many servers it has moved past. */
   attempt?: number | null;
   failover_count?: number | null;
 }
@@ -241,16 +243,20 @@ export async function readRun(runId: string | null): Promise<RunView> {
   try {
     const run = await getRun(runId);
     const text = (value: unknown) => (typeof value === "string" && value ? value : null);
+    const record = (value: unknown) => (value && typeof value === "object" ? value as Record<string, unknown> : {});
+    const count = (value: unknown) => (Number.isInteger(value) && (value as number) >= 0 ? value as number : null);
+    const progress = record(run.progress);
+    const failover = record(progress.failover);
     return {
       status: text(run.public_status),
       outcome: run.outcome ?? null,
-      stage: text(run.stage),
+      // `progress` (absent before any attempt) is the user-facing progress
+      // block; the run's top-level `stage` has a different meaning and is not read.
+      stage: text(progress.stage),
       accepted_at: text(run.accepted_at),
       execution_deadline_at: text(run.execution_deadline_at),
-      attempt: typeof run.attempt === "number" ? run.attempt : null,
-      failover_count: run.failover && typeof run.failover === "object" && typeof (run.failover as Record<string, unknown>).count === "number"
-        ? (run.failover as Record<string, number>).count
-        : null,
+      attempt: count(progress.attempt),
+      failover_count: count(failover.count),
     };
   } catch {
     return { status: null, outcome: null };

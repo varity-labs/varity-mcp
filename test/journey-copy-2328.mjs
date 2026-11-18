@@ -106,7 +106,7 @@ test("J-18: while deploying, the stage, time so far and what happens next", asyn
   const out = await call("varity_deploy_status", { deployment_id: "op-p" }, {
     "/api/deployments/op-p": [200, { deployment: { id: "op-p", status: "deploying", run_id: "run-p" } }],
     "/api/deployments/runs/run-p": [200, {
-      public_status: "deploying", stage: "allocation",
+      public_status: "deploying", stage: "build", progress: { stage: "allocation" },
       accepted_at: new Date(now - 125_000).toISOString(),
       execution_deadline_at: new Date(now + 475_000).toISOString(),
     }],
@@ -124,9 +124,23 @@ test("J-18: optional attempt and failover fields, when served, say which try and
     "That server didn't respond, so Varity is trying another one. Now starting your app on a server and checking that it responds (attempt 2, 3 minutes so far). Next, it gets its web address.");
   const served = await call("varity_deploy_status", { deployment_id: "op-a" }, {
     "/api/deployments/op-a": [200, { deployment: { id: "op-a", status: "deploying", run_id: "run-a" } }],
-    "/api/deployments/runs/run-a": [200, { public_status: "deploying", stage: "health", accepted_at: new Date(Date.now() - 30_000).toISOString(), attempt: 3, failover: { count: 2 } }],
+    "/api/deployments/runs/run-a": [200, {
+      public_status: "deploying", stage: "build", accepted_at: new Date(Date.now() - 30_000).toISOString(),
+      progress: { stage: "provider_attempt", attempt: 3, failover: { count: 2, excluded_providers: 2 } },
+    }],
   });
-  assert.match(served.message, /That server didn't respond, so Varity is trying another one\. Now starting your app on a server and checking that it responds \(attempt 3, \d+ seconds so far\)\./);
+  assert.match(served.message, /That server didn't respond, so Varity is trying another one\. Now starting your app on a server \(attempt 3, \d+ seconds so far\)\. Next, Varity checks that it responds and gives it its web address\./);
+  assert.doesNotMatch(served.message, /provider/i);
+  assert.equal(served.data.run_stage, "provider_attempt");
+});
+
+test("J-18: before any attempt (no progress block) only the elapsed time is said; the top-level stage is not read", async () => {
+  const out = await call("varity_deploy_status", { deployment_id: "op-b" }, {
+    "/api/deployments/op-b": [200, { deployment: { id: "op-b", status: "deploying", run_id: "run-b" } }],
+    "/api/deployments/runs/run-b": [200, { public_status: "deploying", stage: "build", accepted_at: new Date(Date.now() - 10_000).toISOString() }],
+  });
+  assert.match(out.message, /^Deployment op-b: deploying \(URL not assigned yet\)\. \d+ seconds so far\.$/);
+  assert.equal("run_stage" in out.data, false);
 });
 
 test("J-18: an unknown stage is never guessed; durations read plainly", () => {
