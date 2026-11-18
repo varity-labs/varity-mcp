@@ -40,7 +40,10 @@ const repoFor = (name) => [201, {
 }];
 const sha = (i) => i.toString(16).padStart(40, "0");
 const ACCEPTED = [202, { id: "d-1", app_name: "my-site", status: "deploying", run_id: RUN_ID }];
-const SAVE_ACTION = "Add large media, data or build folders to .gitignore, then call varity_deploy again with the same path.";
+const SAVE_ACTION =
+  "Add large media, data or build folders to .gitignore and call varity_deploy again with the same path; or put it on Varity another way: " +
+  `describe the app in Varity's Chat and Build (${CHAT_AND_BUILD}), deploy a ready-made template (varity_list_templates), ` +
+  "or deploy a prebuilt container image (image argument).";
 // A PNG header: NUL bytes, not UTF-8.
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0xff, 0xfe]);
 
@@ -246,13 +249,15 @@ test("chunks: at most 50 files, 1,000,000 bytes and 20 base64 files per commit; 
   }
 });
 
-test("caps and the unit budget refuse before any hosted call: 500 files, 5 MB, 1,000,000 bytes per file, 60 estimated units", async () => {
+test("caps and the paced unit budget refuse before any hosted call: 500 files, 5 MB, 1,000,000 bytes per file, more than 3 minute windows of 23 units", async () => {
   const cases = [
     ["files", many(501, (i) => [`f${i}.txt`, "x"])],
     ["file", { "video.bin": Buffer.alloc(1_000_001, 1) }],
     ["total", many(6, (i) => [`part${i}.txt`, "b".repeat(900_000)])],
-    // 60 base64 files need 3 commits: 2 + 3 x 3 + 60 = 71 units > 60.
+    // 60 base64 files need 3 commits: 2 + 3 x 23 = 71 units, packed [2] [23] [23] [23] = 4 windows.
     ["units", many(60, (i) => [`img${i}.png`, PNG])],
+    // 45 base64 files: 2 + 23 + 23 + 8 = 56 units, under 69 but packed in send order into 4 windows.
+    ["packing", many(45, (i) => [`img${i}.png`, PNG])],
   ];
   for (const [name, files] of cases) {
     const { dir, cleanup } = project(files);
@@ -267,8 +272,8 @@ test("caps and the unit budget refuse before any hosted call: 500 files, 5 MB, 1
       cleanup();
     }
   }
-  // 45 base64 files fit: 2 + 3 x 3 + 45 = 56 units.
-  const { dir, cleanup } = project(many(45, (i) => [`img${i}.png`, PNG]));
+  // 40 base64 files fit: [2] [23] [23] = 3 windows.
+  const { dir, cleanup } = project(many(40, (i) => [`img${i}.png`, PNG]));
   try {
     assert.equal((await deploy({ path: dir }, base, { uploadOff: true })).isError, false);
   } finally {
@@ -310,9 +315,10 @@ test("E10: route unavailable (404 flag off, 403 repo_authority_required) creates
 
 test("429 and 503 return the served Retry-After as a Varity action; nothing is deployed", async () => {
   const cases = [
-    [{ [CHANGES]: [[429, { code: "rate_limited", message: "Too many saves." }, { "Retry-After": "37" }]] }, "rate_limited", 37],
+    // A 429 whose wait cannot fit the 170 s commit deadline is not paced (the owner-hour shape).
+    [{ [CHANGES]: [[429, { code: "rate_limited", message: "Too many saves." }, { "Retry-After": "3600" }]] }, "rate_limited", 3600],
     [{ [HOSTED]: [[503, { code: "hosted_capacity_exhausted", message: "Varity is busy." }, { "Retry-After": "120" }]] }, "hosted_capacity_exhausted", 120],
-    [{ [HOSTED]: [[429, { code: "hosted_capacity_exhausted", message: "Varity is busy.", retryable: true }, { "retry-after": "60" }]] }, "hosted_capacity_exhausted", 60],
+    [{ [HOSTED]: [[429, { code: "hosted_capacity_exhausted", message: "Varity is busy.", retryable: true }, { "retry-after": "3600" }]] }, "hosted_capacity_exhausted", 3600],
   ];
   for (const [routes, code, seconds] of cases) {
     const { dir, cleanup } = project();
@@ -445,8 +451,8 @@ test("SPN-2: a create whose start is unconfirmed (unreachable, or acceptance unc
 });
 
 test("SP-6: a folder over the unit budget is refused in neutral words, not blamed on binary files", async () => {
-  // 471 text files and 29 images: 10 commits of 50 files, so 2 + 3 x 10 + 29 = 61 units. The 29 images
-  // alone are well under the 45 that fit a small folder; it is the number of saves that overflows.
+  // 471 text files and 29 images: commits of 20 images, 9 images + 41 pages, then 9 of pages, so
+  // [2] [23] [12 3 3 3] [3 x 6] = 4 windows. The 29 images alone are not the cause; the number of saves is.
   const { dir, cleanup } = project({
     ...many(471, (i) => [`page${String(i).padStart(3, "0")}.txt`, `${i}\n`]),
     ...many(29, (i) => [`img${String(i).padStart(2, "0")}.png`, PNG]),
@@ -562,4 +568,121 @@ test("STN-7: the folder rule's clause and sentence say the same thing", async ()
   const { FOLDER_RULE, FOLDER_RULE_SENTENCE } = await import("../dist/tools/deploy-copy.js");
   assert.equal(typeof FOLDER_RULE, "string");
   assert.equal(FOLDER_RULE_SENTENCE, FOLDER_RULE[0].toUpperCase() + FOLDER_RULE.slice(1));
+});
+
+/**
+ * #1099 (PLAN-2.3.30 §2.11): a fake gateway ledger of 23 key units per minute (`org_keys:minute`).
+ * A create costs 2, a commit 3 + its base64 files. A request over the window answers 429 with
+ * Retry-After = seconds to the window's end, as the gateway's reserve does. The clock is fake:
+ * `Date.now` reads `t0 + offset` and the pacing seam advances `offset` instead of waiting.
+ */
+async function withPacedClock(run) {
+  const { pacing } = await import("../dist/tools/deploy-private-copy.js");
+  const realNow = Date.now;
+  const realSleep = pacing.sleep;
+  const t0 = realNow();
+  const clock = { offset: 0, slept: [] };
+  Date.now = () => t0 + clock.offset;
+  pacing.sleep = async (ms) => { clock.slept.push(ms); clock.offset += ms; };
+  try {
+    return await run(clock);
+  } finally {
+    Date.now = realNow;
+    pacing.sleep = realSleep;
+  }
+}
+
+function minuteLedger(clock, perMinute = 23) {
+  const used = new Map();
+  let landed = 0;
+  const reserve = (units) => {
+    const window = Math.floor(clock.offset / 60_000);
+    const total = (used.get(window) ?? 0) + units;
+    if (total > perMinute) {
+      const retryAfter = Math.ceil((60_000 - (clock.offset % 60_000)) / 1000);
+      return [429, { code: "hosted_capacity_exhausted", message: "Varity is busy." }, { "Retry-After": String(retryAfter) }];
+    }
+    used.set(window, total);
+    return null;
+  };
+  return {
+    [HOSTED]: () => reserve(2) ?? repoFor("my-site"),
+    [CHANGES]: (call) => {
+      const units = 3 + call.body.files.filter((f) => f.encoding === "base64").length;
+      return reserve(units) ?? [201, { branch: call.body.branch, commit_sha: sha(100 + (landed += 1)), base_sha: sha(999) }];
+    },
+  };
+}
+
+test("#1099 pacing: a 40-unit folder against a 23-per-minute stub completes in one run with no duplicate commit", async () => {
+  await withPacedClock(async (clock) => {
+    // 32 images: commits of 20 and 12 base64 files; units 2 + 23 + 15 = 40.
+    const { dir, cleanup } = project(many(32, (i) => [`img${String(i).padStart(2, "0")}.png`, PNG]));
+    try {
+      const { isError, out, calls } = await deploy({ path: dir }, { ...base, ...minuteLedger(clock) }, { uploadOff: true });
+      assert.equal(isError, false, JSON.stringify(out));
+      assert.equal(of(calls, HOSTED).length, 1);
+      const changes = of(calls, CHANGES);
+      const keys = [...new Set(changes.map((c) => c.headers["Idempotency-Key"]))];
+      assert.equal(keys.length, 2, "two commits, each with its own key");
+      for (const key of keys) {
+        const sent = changes.filter((c) => c.headers["Idempotency-Key"] === key);
+        for (const resend of sent.slice(1)) assert.deepEqual(resend.body, sent[0].body, "a paced resend is the same request");
+      }
+      const last = (key) => changes.filter((c) => c.headers["Idempotency-Key"] === key).at(-1);
+      assert.equal(last(keys[0]).body.branch, last(keys[1]).body.branch);
+      assert.equal(last(keys[0]).body.expected_head_sha, undefined);
+      assert.equal(last(keys[1]).body.expected_head_sha, sha(101));
+      assert.equal(of(calls, CREATE).length, 1);
+      assert.equal(of(calls, CREATE)[0].body.commit, sha(102));
+      assert.ok(clock.offset < 170_000, `${clock.offset} ms`);
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+test("#1099 pacing: a deadline hit mid-pacing answers FOLDER_SAVE_INCOMPLETE and creates no second repository", async () => {
+  await withPacedClock(async (clock) => {
+    const { dir, cleanup } = project(many(60, (i) => [`f${String(i).padStart(2, "0")}.txt`, `${i}\n`]));
+    try {
+      const { isError, out, calls } = await deploy({ path: dir }, {
+        ...base,
+        [CHANGES]: (call) => {
+          if (call.index === 0) {
+            clock.offset = 150_000;
+            return [201, { branch: call.body.branch, commit_sha: sha(1), base_sha: sha(999) }];
+          }
+          clock.offset = 151_000;
+          return [429, { code: "hosted_capacity_exhausted", message: "Varity is busy." }, { "Retry-After": "30" }];
+        },
+      }, { uploadOff: true });
+      assert.equal(isError, true);
+      assert.equal(out.error.code, "FOLDER_SAVE_INCOMPLETE", JSON.stringify(out));
+      assert.equal(of(calls, HOSTED).length, 1);
+      assert.equal(of(calls, CHANGES).length, 2);
+      assert.equal(of(calls, CREATE).length, 0);
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+test("#1099: a folder over 3 windows of 23 is refused with a Varity action before any call", async () => {
+  // 80 images: 4 commits of 20, so 2 + 4 x 23 = 94 units (5 windows); 60 images: 2 + 3 x 23 = 71 (4 windows).
+  for (const images of [80, 60]) {
+    const { dir, cleanup } = project(many(images, (i) => [`img${String(i).padStart(2, "0")}.png`, PNG]));
+    try {
+      const { isError, out, calls } = await deploy({ path: dir }, base, { uploadOff: true });
+      assert.equal(isError, true, String(images));
+      assert.equal(out.error.code, "FOLDER_TOO_LARGE_FOR_VARITY", String(images));
+      assert.deepEqual(calls, [], String(images));
+      const action = out.error.suggestion;
+      assert.ok(action.includes(CHAT_AND_BUILD), action);
+      assert.match(action, /varity_list_templates/);
+      assert.match(action, /image/);
+    } finally {
+      cleanup();
+    }
+  }
 });

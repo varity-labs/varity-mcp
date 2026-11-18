@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { errorResponse, successResponse } from "../utils/responses.js";
 import {
+  CHAT_AND_BUILD_URL,
   commitHostedChange,
   createDeployment,
   createHostedRepository,
@@ -34,8 +35,15 @@ export const PRIVATE_COPY_LIMITS = {
   commitBytes: 1_000_000,
   /** Keeps one commit's sequential blob writes inside the gateway's 24 s GitHub budget. */
   commitBase64Files: 20,
-  /** `2 + 3 x commits + base64 files` must fit the per-minute key budget (60), so also the hourly one (150). */
-  maxUnits: 60,
+  /** The gateway's `org_keys:minute` (gw #1099); a folder deploy is paced across at most `pacedWindows` of them. */
+  keyUnitsPerMinute: 23,
+  /**
+   * Fixed minute windows start every 60 s, so from the run start the 3rd boundary may fall after
+   * the 170 s commit deadline: a run can count on the current window and the next two (3 x 23 = 69
+   * units). This sizes the preflight; it does not guarantee delivery (a run that misses the
+   * deadline answers FOLDER_SAVE_INCOMPLETE and the next call starts a fresh run).
+   */
+  pacedWindows: 3,
   /** No commit starts after this (claude.ai cuts a tool call at 240 s). */
   commitDeadlineMs: 170_000,
   /** No deploy starts after this. */
@@ -57,9 +65,15 @@ export interface FolderDeploy {
   startedAt: number;
 }
 
+/** The one wait of a paced run (PLAN-2.3.30 §2.11); tests replace it to advance a fake clock. */
+export const pacing = { sleep: (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)) };
+
 const NOTHING = "Nothing was deployed or charged.";
 const AGAIN = "Call varity_deploy again with the same path.";
-const TOO_LARGE_ACTION = "Add large media, data or build folders to .gitignore, then call varity_deploy again with the same path.";
+const TOO_LARGE_ACTION =
+  "Add large media, data or build folders to .gitignore and call varity_deploy again with the same path; or put it on Varity another way: " +
+  `describe the app in Varity's Chat and Build (${CHAT_AND_BUILD_URL}), deploy a ready-made template (varity_list_templates), ` +
+  "or deploy a prebuilt container image (image argument).";
 const MB = 1_000_000;
 
 type ToolResult = ReturnType<typeof errorResponse> | ReturnType<typeof successResponse>;
@@ -97,6 +111,21 @@ function chunk(files: Array<HostedChangeFile & { bytes: number }>): HostedChange
     }
   }
   return chunks.map((files) => files.map(({ path, content, encoding }) => ({ path, content, encoding })));
+}
+
+/** Minute windows a run's requests need, packed greedily in send order. */
+function windowsNeeded(units: number[], perWindow: number): number {
+  let windows = 0;
+  let room = 0;
+  for (const unit of units) {
+    if (unit > perWindow) return Infinity;
+    if (unit > room) {
+      windows += 1;
+      room = perWindow;
+    }
+    room -= unit;
+  }
+  return windows;
 }
 
 function tooLarge(why: string) {
@@ -157,24 +186,55 @@ function classify(err: unknown): "resend" | "incomplete" | "refused" {
 }
 
 /**
- * One commit, with at most one resend of the same key. Answers the new head
- * sha, or the result that ends the deploy. No attempt starts without time
- * left before the hard deadline, and none runs past it.
+ * #1099 pacing: a 429 whose Retry-After (plus 1 s, to land past the window's
+ * end) still fits the commit deadline is waited out, and the caller resends
+ * the same request. The gateway refuses a budget before any GitHub write and
+ * stores no replay for a failure, so the same Idempotency-Key is processed
+ * fresh. Answers whether it waited; a 503 or a wait past the deadline is not
+ * paced.
  */
-async function commitOnce(change: HostedChange, key: string, startedAt: number): Promise<string | ToolResult> {
+async function paced(err: unknown, startedAt: number): Promise<boolean> {
+  if (!(err instanceof VarityPublicApiError) || err.status !== 429 || err.retryAfterSeconds === undefined) return false;
+  const waitMs = (err.retryAfterSeconds + 1) * 1000;
+  if (Date.now() + waitMs > startedAt + PRIVATE_COPY_LIMITS.commitDeadlineMs) return false;
+  await pacing.sleep(waitMs);
+  return true;
+}
+
+/**
+ * One commit, with at most one resend of the same key after a network or
+ * unlanded 504 failure; paced waits are not counted. Answers the new head
+ * sha, or the result that ends the deploy. No attempt starts without time
+ * left before the hard deadline, and none runs past it. A 429 that cannot be
+ * paced ends the run as busy before any commit landed, else incomplete.
+ */
+async function commitOnce(change: HostedChange, key: string, startedAt: number, landed: boolean): Promise<string | ToolResult> {
   const deadlineAt = startedAt + PRIVATE_COPY_LIMITS.hardDeadlineMs;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 0; attempt < 2; ) {
     const timeoutMs = timeoutBefore(deadlineAt);
     if (timeoutMs <= 0) return incomplete();
     try {
       return (await commitHostedChange(change, key, timeoutMs)).commit_sha;
     } catch (err) {
+      if (await paced(err, startedAt)) continue;
+      if (landed && err instanceof VarityPublicApiError && err.status === 429) return incomplete();
       const next = classify(err);
       if (next === "refused") return refused(err as VarityPublicApiError, change.files);
       if (next === "incomplete") return incomplete();
+      attempt += 1;
     }
   }
   return incomplete();
+}
+
+/** The create's own refusal: null when the hosted route is unavailable (the caller's no-folder copy). */
+function createRefused(err: unknown): ToolResult | null {
+  if (!(err instanceof VarityPublicApiError)) return errorResponse("FOLDER_SAVE_FAILED", `Varity could not start saving this folder. ${NOTHING}`, AGAIN);
+  if (hostedRouteUnavailable(err)) return null;
+  if (err.code === "hosted_repository_name_in_use") {
+    return errorResponse(err.code, `${err.message} ${NOTHING}`, "Call varity_deploy again with a different app_name.");
+  }
+  return refused(err, []);
 }
 
 /** `varity/mcp-20261118T061756Z-a1b2c3`: a new branch per run. */
@@ -202,22 +262,21 @@ export async function deployPrivateCopy(collected: CollectedFolder, deploy: Fold
   }
   const encoded = collected.files.map((file) => encode(file.path, file.data));
   const commits = chunk(encoded);
-  const binary = encoded.filter((file) => file.encoding === "base64").length;
+  // The create (2, even when it re-finds the repository), then each commit (3 + its base64 files).
+  const units = [2, ...commits.map((files) => 3 + files.filter((file) => file.encoding === "base64").length)];
   // The estimate grows with the number of saves and with binary files, so the text blames neither.
-  if (2 + 3 * commits.length + binary > limits.maxUnits) {
+  if (windowsNeeded(units, limits.keyUnitsPerMinute) > limits.pacedWindows) {
     return tooLarge("This folder needs more saves than one folder deploy allows.");
   }
 
-  let repo: HostedRepository;
-  try {
-    repo = await createHostedRepository(deploy.appName);
-  } catch (err) {
-    if (!(err instanceof VarityPublicApiError)) return errorResponse("FOLDER_SAVE_FAILED", `Varity could not start saving this folder. ${NOTHING}`, AGAIN);
-    if (hostedRouteUnavailable(err)) return null;
-    if (err.code === "hosted_repository_name_in_use") {
-      return errorResponse(err.code, `${err.message} ${NOTHING}`, "Call varity_deploy again with a different app_name.");
+  let repo: HostedRepository | undefined;
+  while (!repo) {
+    try {
+      repo = await createHostedRepository(deploy.appName);
+    } catch (err) {
+      if (await paced(err, deploy.startedAt)) continue;
+      return createRefused(err);
     }
-    return refused(err, []);
   }
 
   const run = randomUUID();
@@ -234,7 +293,7 @@ export async function deployPrivateCopy(collected: CollectedFolder, deploy: Fold
       files,
       open_pr: false,
     };
-    const committed = await commitOnce(change, `mcp-change:${run}:${i}`, deploy.startedAt);
+    const committed = await commitOnce(change, `mcp-change:${run}:${i}`, deploy.startedAt, head !== undefined);
     if (typeof committed !== "string") return committed;
     head = committed;
   }
