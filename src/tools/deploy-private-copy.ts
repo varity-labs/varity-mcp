@@ -4,12 +4,17 @@ import {
   CHAT_AND_BUILD_URL,
   commitHostedChange,
   createDeployment,
+  createDeploymentApproval,
   createHostedRepository,
+  deploySourceRevision,
+  getDeployment,
   hostedRouteUnavailable,
   PUBLIC_API_GET_TIMEOUT_MS,
   VarityPublicApiError,
   type HostedChange,
   type HostedChangeFile,
+  type PublicDeployment,
+  type PublicRunAcceptance,
 } from "../utils/public-api.js";
 import { acceptanceSummary, checkStatusAction, lifecycleAcceptance, startUnconfirmed } from "../utils/lifecycle-acceptance.js";
 import type { CollectedFolder } from "./pack.js";
@@ -22,6 +27,12 @@ import type { CollectedFolder } from "./pack.js";
  * chunks on a fresh `varity/` branch (`POST /api/github/changes`), and the
  * app is deployed from the exact last commit. Every limit is checked before
  * the first network call, so a folder that can never fit spends no budget.
+ *
+ * PLAN-W2: the app is looked up first. A same-name create replaces a dynamic
+ * app's sealed settings and drops an attached AI key (gateway public-api.ts
+ * create, deploy-api `_select_create_deployment`), so a dynamic app this copy
+ * already runs is updated in place by an approved source revision, which keeps
+ * them; a first deploy, a static app or one that never went live is created.
  * Reads no file: the stdio local source collects the folder.
  */
 
@@ -51,6 +62,14 @@ export const PRIVATE_COPY_LIMITS = {
   deployDeadlineMs: 200_000,
   /** No request runs past this: each one's timeout is cut to what is left (claude.ai's 240 s, less a margin). */
   hardDeadlineMs: 230_000,
+  /**
+   * The source revision starts only with this much left before the hard deadline: the gateway's own
+   * worst case is the clone-token mint (8 s), the anonymous clone probe (5 s) and deploy-api (15 s),
+   * plus its ownership and approval reads (PLAN-W2 §3.1, VERIFIER-W2 finding 8).
+   */
+  revisionMinLeftMs: 45_000,
+  /** An ambiguous source revision is resent (same key, new approval) only with this much left. */
+  resendMinLeftMs: 15_000,
   /** Shown when a 429/503 carries no Retry-After. */
   defaultRetryAfterSeconds: 60,
 } as const;
@@ -261,6 +280,177 @@ function createRefused(err: unknown): ToolResult | null {
   return refused(err, []);
 }
 
+/**
+ * The name a create routes the app under: the gateway's own app-name
+ * normalization (`sanitizeSubdomain`, services/varity-gateway
+ * src/services/deploy-validation.ts:26-41 at 98042b77), so the app is looked
+ * up where the create would land.
+ */
+export function locatorName(name: string): string {
+  const trimmed = name.trim();
+  const last = trimmed.includes("/") ? trimmed.split("/").pop() || trimmed : trimmed;
+  return last.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-{2,}/g, "-").replace(/^-+|-+$/g, "").slice(0, 63);
+}
+
+/** How the saved folder is deployed (PLAN-W2 §3.1). */
+type Target = { kind: "create" } | { kind: "revision"; id: string; repositoryUrl: string };
+
+function nameInUse(appName: string) {
+  return errorResponse(
+    "APP_NAME_IN_USE",
+    `An app named ${appName} already runs on Varity from another source; deploying this folder under that name would replace it and drop its settings. ${NOTHING}`,
+    "Call varity_deploy again with the same path and a different app_name."
+  );
+}
+
+/**
+ * Which deploy keeps what the app already has, read from the owner-scoped
+ * locator before anything is saved. Only the gateway's own
+ * `deployment_not_found` means there is no such app: any other answer that
+ * could not be read refuses (R8), because a create would drop a live app's
+ * settings.
+ */
+async function deployTarget(deploy: FolderDeploy): Promise<Target | ToolResult> {
+  const name = locatorName(deploy.appName);
+  // The create refuses such a name itself (400); there is nothing to look up.
+  if (name.length < 3) return { kind: "create" };
+  let app: PublicDeployment;
+  try {
+    app = await getDeployment(name, timeoutBefore(deploy.startedAt + PRIVATE_COPY_LIMITS.hardDeadlineMs));
+  } catch (err) {
+    if (err instanceof VarityPublicApiError && err.status === 404 && err.code === "deployment_not_found") return { kind: "create" };
+    if (err instanceof VarityPublicApiError && (err.status === 429 || err.status === 503)) return busy(err);
+    return errorResponse(
+      err instanceof VarityPublicApiError ? err.code : "VARITY_API_UNREACHABLE",
+      `Varity could not check whether ${deploy.appName} already exists. ${NOTHING}`,
+      AGAIN
+    );
+  }
+  if (app.deleted_at || app.status === "deleting" || app.status === "deleted") {
+    return errorResponse(
+      "APP_BEING_DELETED",
+      `${deploy.appName} is still being deleted on Varity. ${NOTHING}`,
+      `Call varity_deploy_status with "${deploy.appName}" until it shows deleted, then call varity_deploy again with the same path.`
+    );
+  }
+  // Never went live: no saved settings or attached key exist yet.
+  if (app.membership === "durable_only" || app.runtime === "static") return { kind: "create" };
+  if (app.runtime === "dynamic" && app.membership !== "registry_legacy" && app.source?.type === "repository") {
+    const url = app.source.repository_url;
+    if (typeof url === "string" && url) return { kind: "revision", id: app.id, repositoryUrl: url };
+    return errorResponse(
+      "DEPLOYMENT_SOURCE_UNCONFIRMED",
+      `Varity could not confirm what ${deploy.appName} is running from right now. ${NOTHING}`,
+      "Call varity_deploy again with the same path in a minute."
+    );
+  }
+  return nameInUse(deploy.appName);
+}
+
+/** Whether a served `https://github.com/<owner>/<name>` is this repository (case-insensitive, `.git` ignored). */
+function sameRepository(url: string, fullName: string): boolean {
+  const match = /^https:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/i.exec(url.trim());
+  return match !== null && `${match[1]}/${match[2]}`.toLowerCase() === fullName.toLowerCase();
+}
+
+const NOT_STARTED = "Varity saved this folder, but the update was not started: ";
+const LIVE_APP_KEPT = "The live app was not changed.";
+
+/** The gateway may have accepted the update: a network failure, a 500/502/504, or the 503 that says deploy-api did not answer. */
+function ambiguous(err: unknown): boolean {
+  if (!(err instanceof VarityPublicApiError)) return true;
+  if (err.code === "VARITY_API_UNREACHABLE" || err.status === undefined) return true;
+  return err.status === 500 || err.status === 502 || err.status === 504 || (err.status === 503 && err.code === "deploy_service_unavailable");
+}
+
+function unconfirmed(err: unknown, appName: string): ToolResult {
+  return errorResponse(
+    err instanceof VarityPublicApiError ? err.code : "VARITY_API_UNREACHABLE",
+    "Varity saved this folder; whether the update started is unconfirmed.",
+    checkStatusAction(appName)
+  );
+}
+
+/** A source revision the gateway refused: the live app is unchanged and no create follows. */
+function revisionRefused(err: unknown, appName: string): ToolResult {
+  if (!(err instanceof VarityPublicApiError)) return unconfirmed(err, appName);
+  if (err.status === 429 || err.status === 503) return busy(err, NOT_STARTED);
+  if (err.code === "deployment_update_in_progress") {
+    return errorResponse(
+      err.code,
+      `${NOT_STARTED}Another update of this app is still running.`,
+      `Wait until varity_deploy_status with "${appName}" shows it live, then call varity_deploy again with the same path.`
+    );
+  }
+  if (err.code === "repository_credential_required") {
+    return errorResponse(
+      err.code,
+      `${NOT_STARTED}Varity could not get read access to this app's private copy right now. ${LIVE_APP_KEPT}`,
+      "Call varity_deploy again with the same path in a minute; if it repeats, call varity_doctor to check the deploy key."
+    );
+  }
+  if (err.status === 404 || err.status === 409 || err.status === 422) {
+    return errorResponse(
+      err.code,
+      `${NOT_STARTED}${err.message} ${LIVE_APP_KEPT}`,
+      `Call varity_deploy_status with "${appName}" to see its state; to deploy this folder as a separate app, call varity_deploy again with the same path and a different app_name.`
+    );
+  }
+  return errorResponse(err.code, `${NOT_STARTED}${err.message}`, AGAIN);
+}
+
+type Revision = { value: PublicRunAcceptance } | { approvalErr: unknown } | { err: unknown };
+
+/** One approval for exactly this update, then the source revision under the run's one key. */
+async function approvedRevision(id: string, commit: string, key: string, hardAt: number): Promise<Revision> {
+  let approvalId: string;
+  try {
+    approvalId = await createDeploymentApproval(
+      { kind: "deploy_revision", target: `deployment:${id}`.toLowerCase(), fingerprint: commit },
+      timeoutBefore(hardAt)
+    );
+  } catch (err) {
+    return { approvalErr: err };
+  }
+  try {
+    return { value: await deploySourceRevision(id, commit, approvalId, key, timeoutBefore(hardAt)) };
+  } catch (err) {
+    return { err };
+  }
+}
+
+/**
+ * The in-place update (gateway `POST /api/deployments/:id/source-revision`).
+ * An ambiguous answer is resent once with the same Idempotency-Key and a new
+ * approval: the gateway replays a stored answer, deploy-api the same run. Any
+ * other answer to that resend, even a refusal, cannot prove the first one did
+ * not start (a re-minted clone token changes deploy-api's request hash), so it
+ * is unconfirmed, never "not started".
+ */
+async function updateInPlace(id: string, commit: string, deploy: FolderDeploy): Promise<{ value: PublicRunAcceptance } | ToolResult> {
+  const hardAt = deploy.startedAt + PRIVATE_COPY_LIMITS.hardDeadlineMs;
+  if (hardAt - Date.now() < PRIVATE_COPY_LIMITS.revisionMinLeftMs) {
+    return errorResponse("DEPLOY_NOT_STARTED", `Varity saved this folder, but there was not enough time left to start the update. ${NOTHING}`, AGAIN);
+  }
+  const key = `mcp-source-revision:${randomUUID()}`;
+  const first = await approvedRevision(id, commit, key, hardAt);
+  if ("value" in first) return first;
+  if ("approvalErr" in first) {
+    const err = first.approvalErr;
+    if (err instanceof VarityPublicApiError && (err.status === 429 || err.status === 503)) return busy(err, NOT_STARTED);
+    return errorResponse(
+      err instanceof VarityPublicApiError ? err.code : "VARITY_API_UNREACHABLE",
+      `${NOT_STARTED}${err instanceof Error ? err.message : "the approval failed."}`,
+      AGAIN
+    );
+  }
+  if (!ambiguous(first.err)) return revisionRefused(first.err, deploy.appName);
+  if (hardAt - Date.now() < PRIVATE_COPY_LIMITS.resendMinLeftMs) return unconfirmed(first.err, deploy.appName);
+  const resent = await approvedRevision(id, commit, key, hardAt);
+  if ("value" in resent) return resent;
+  return unconfirmed("err" in resent ? resent.err : resent.approvalErr, deploy.appName);
+}
+
 /** `varity/mcp-20261118T061756Z-a1b2c3`: a new branch per run. */
 function runBranch(): string {
   const utc = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
@@ -293,9 +483,13 @@ export async function deployPrivateCopy(collected: CollectedFolder, deploy: Fold
     return tooLarge("This folder needs more saves than one folder deploy allows.");
   }
 
+  const target = await deployTarget(deploy);
+  if (!("kind" in target)) return target;
+
   const created = await withPacing(() => createHostedRepository(deploy.appName), deploy.startedAt);
   if ("err" in created) return createRefused(created.err);
   const repo = created.value;
+  if (target.kind === "revision" && !sameRepository(target.repositoryUrl, repo.full_name)) return nameInUse(deploy.appName);
 
   const run = randomUUID();
   const branch = runBranch();
@@ -317,6 +511,29 @@ export async function deployPrivateCopy(collected: CollectedFolder, deploy: Fold
   }
   if (Date.now() - deploy.startedAt > limits.deployDeadlineMs) return incomplete();
 
+  const secrets = collected.secretPaths;
+  const saved = [
+    `${collected.files.length} files`,
+    collected.excludedCount > 0 ? `left out ${collected.excludedCount} ignored` : "",
+    secrets.length > 0 ? `kept secret files ${secrets.join(", ")} on this computer` : "",
+  ].filter(Boolean).join("; ");
+  const savedData = { source: "varity_private_repository", saved_files: collected.files.length, left_out_count: collected.excludedCount, secret_files_not_saved: secrets };
+  const lead = deploy.why ? `${deploy.why} ` : "";
+  const setEnv = secrets.length > 0 ? "Give the app its settings with varity_set_env. " : "";
+
+  if (target.kind === "revision") {
+    const updated = await updateInPlace(target.id, head!, deploy);
+    if (!("value" in updated)) return updated;
+    const acceptance = await lifecycleAcceptance(updated.value, timeoutBefore(deploy.startedAt + limits.hardDeadlineMs));
+    return successResponse(
+      { accepted: true, id: updated.value.id ?? null, app_name: updated.value.app_name ?? null, ...savedData, update: "in_place", ...acceptance },
+      `${lead}Varity saved a private copy of this folder (${saved}) and is updating ${deploy.appName} in place; its settings and any attached AI key are kept. ` +
+        (Object.keys(deploy.volume).length > 0 ? "Its storage settings are unchanged. " : "") +
+        setEnv +
+        acceptanceSummary("Deploy", updated.value.id, acceptance)
+    );
+  }
+
   let accepted: Awaited<ReturnType<typeof createDeployment>>;
   try {
     accepted = await createDeployment(
@@ -335,25 +552,8 @@ export async function deployPrivateCopy(collected: CollectedFolder, deploy: Fold
     return errorResponse("DEPLOY_FAILED", "Varity saved this folder, but the deploy was not started.", AGAIN);
   }
   const acceptance = await lifecycleAcceptance(accepted, timeoutBefore(deploy.startedAt + limits.hardDeadlineMs));
-  const secrets = collected.secretPaths;
-  const parts = [
-    `${collected.files.length} files`,
-    collected.excludedCount > 0 ? `left out ${collected.excludedCount} ignored` : "",
-    secrets.length > 0 ? `kept secret files ${secrets.join(", ")} on this computer` : "",
-  ].filter(Boolean);
   return successResponse(
-    {
-      accepted: true,
-      id: accepted.id ?? null,
-      app_name: accepted.app_name ?? null,
-      source: "varity_private_repository",
-      saved_files: collected.files.length,
-      left_out_count: collected.excludedCount,
-      secret_files_not_saved: secrets,
-      ...acceptance,
-    },
-    `${deploy.why ? `${deploy.why} ` : ""}Varity saved a private copy of this folder (${parts.join("; ")}) and is building it. ` +
-      (secrets.length > 0 ? "Give the app its settings with varity_set_env. " : "") +
-      acceptanceSummary("Deploy", accepted.id, acceptance)
+    { accepted: true, id: accepted.id ?? null, app_name: accepted.app_name ?? null, ...savedData, ...acceptance },
+    `${lead}Varity saved a private copy of this folder (${saved}) and is building it. ` + setEnv + acceptanceSummary("Deploy", accepted.id, acceptance)
   );
 }

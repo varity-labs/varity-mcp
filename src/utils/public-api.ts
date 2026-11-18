@@ -297,6 +297,9 @@ export interface PublicDeployment {
   updated_at?: string | null;
   updatedAt?: string | null;
   billing?: Record<string, unknown> | null;
+  /** `registry_durable`, `durable_only` (never went live) or `registry_legacy` (public-deployment-view.ts). */
+  membership?: string;
+  deleted_at?: string | null;
   /** What the active release serves: a repository URL for a repository deploy. */
   source?: { type?: string; repository_url?: string } | null;
 }
@@ -429,9 +432,11 @@ export async function listDeployments(): Promise<PublicDeployment[]> {
   return Array.isArray(data.deployments) ? data.deployments : [];
 }
 
-export async function getDeployment(id: string): Promise<PublicDeployment> {
-  const data = await publicApiGet<{ deployment?: PublicDeployment }>(
-    `/api/deployments/${encodeURIComponent(id)}`
+export async function getDeployment(id: string, timeoutMs?: number): Promise<PublicDeployment> {
+  const data = await publicApiRequest<{ deployment?: PublicDeployment }>(
+    "GET",
+    `/api/deployments/${encodeURIComponent(id)}`,
+    timeoutMs === undefined ? {} : { timeoutMs }
   );
   if (!data.deployment) {
     throw new VarityPublicApiError(
@@ -665,8 +670,11 @@ export async function listHostedRepositories(): Promise<HostedRepositoryListing>
 }
 
 /** `POST /v1/deployment-approvals {action}` — 201 `{approval_id}`; single use. */
-export async function createDeploymentApproval(action: Record<string, unknown>): Promise<string> {
-  const data = await publicApiRequest<{ approval_id?: unknown }>("POST", "/v1/deployment-approvals", { body: { action } });
+export async function createDeploymentApproval(action: Record<string, unknown>, timeoutMs?: number): Promise<string> {
+  const data = await publicApiRequest<{ approval_id?: unknown }>("POST", "/v1/deployment-approvals", {
+    body: { action },
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
+  });
   if (typeof data.approval_id !== "string" || !data.approval_id) {
     throw new VarityPublicApiError("Varity returned no approval.", "approval_unrecognized", undefined, "Retry the request.");
   }
@@ -686,6 +694,28 @@ export async function queueHostedRepositoryDeletion(
   return publicApiRequest("POST", `/api/github/hosted-repositories/${encodeURIComponent(name)}/deletion`, {
     body: { repository_id: repositoryId },
     headers: { "X-Varity-Approval-Id": approvalId },
+  });
+}
+
+/**
+ * `POST /api/deployments/:id/source-revision {commit}` with `X-Varity-Approval-Id`
+ * (a `deploy_revision` approval for `deployment:<id>` and this commit) — 202
+ * `{id, app_name, subdomain, status: "redeploying", commit_sha, run_id, status_url}`.
+ * Deploys the commit of a dynamic app in place, keeping its saved settings and
+ * attached keys (gateway public-api.ts `deploySourceRevision`). Never retried here.
+ */
+export async function deploySourceRevision(
+  deployment: string,
+  commit: string,
+  approvalId: string,
+  idempotencyKey: string,
+  timeoutMs: number
+): Promise<PublicRunAcceptance> {
+  return publicApiRequest("POST", deploymentPath(deployment, "/source-revision"), {
+    body: { commit },
+    idempotencyKey,
+    headers: { "X-Varity-Approval-Id": approvalId },
+    timeoutMs,
   });
 }
 

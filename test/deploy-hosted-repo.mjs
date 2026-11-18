@@ -67,6 +67,10 @@ function stubGateway(routes, { clock } = {}) {
     let answer = routes[route];
     if (typeof answer === "function") answer = answer(call, calls);
     else if (Array.isArray(answer)) answer = answer[Math.min(call.index, answer.length - 1)];
+    // PLAN-W2: a deploy first looks the app up; the producer's own not-found (gateway public-api.ts:1645-1650 at 98042b77) is a first deploy.
+    if (answer === undefined && /^GET \/api\/deployments\/(?!runs\/)[^/]+$/.test(route)) {
+      answer = [404, { code: "deployment_not_found", message: "Deployment not found.", action: "Check the deployment id and API key owner.", retryable: false }];
+    }
     if (answer === undefined && route === CHANGES) answer = [201, { branch: body.branch, commit_sha: sha(calls.filter((c) => c.route === CHANGES).length), base_sha: sha(999) }];
     if (answer === "throw") throw new TypeError("fetch failed");
     const [status, payload, headers = {}] = answer ?? [404, { code: "not_found", message: "Not found" }];
@@ -146,7 +150,7 @@ test("a folder is saved as a private copy (utf-8 and base64, secrets kept local)
     const { isError, out, calls } = await deploy({ path: dir }, base);
     assert.equal(isError, false, JSON.stringify(out));
     // Upload is tried first; it answered off, so the hosted path ran.
-    assert.deepEqual(calls.map((c) => c.route), [SOURCES, HOSTED, CHANGES, CREATE, "GET /api/deployments/runs/" + RUN_ID]);
+    assert.deepEqual(calls.map((c) => c.route), [SOURCES, "GET /api/deployments/my-site", HOSTED, CHANGES, CREATE, "GET /api/deployments/runs/" + RUN_ID]);
     assert.deepEqual(of(calls, HOSTED)[0].body, { name: "my-site" });
     const [change] = of(calls, CHANGES);
     assert.deepEqual(change.body.repo, { owner: ORG, name: `${PREFIX}-my-site` });
