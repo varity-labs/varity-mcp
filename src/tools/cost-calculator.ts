@@ -169,12 +169,10 @@ export function registerCostCalculatorTool(server: McpServer): void {
       const plainNote = data.billing_model === PRORATED_MONTHLY_MAX
         ? "It is charged only for the time it runs, and never more than that in a month."
         : servedNote ? `${servedNote}${closed ? "" : "."}` : "";
-      // V1-verified claim; apps only (a machine is priced by the hour).
-      const traffic = unit === "month" ? " Traffic alone does not change an app's monthly price." : "";
       // A new Starter app may be the account's one free app (gateway free-app
       // admission: plan starter). Said only for a plain Starter estimate.
       const freeStarter = !subdomain && isPlainStarter(data) ? " Free accounts can run one Starter app at no charge." : "";
-      const summary = `${String(estimateName)}: ${price}.${plainNote ? ` ${plainNote}` : ""}${traffic}${freeStarter}`;
+      const summary = `${String(estimateName)}: ${price}.${plainNote ? ` ${plainNote}` : ""}${freeStarter}`;
 
       return successResponse(
         {

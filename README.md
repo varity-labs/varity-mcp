@@ -113,9 +113,9 @@ The MCP exposes Varity's deploy surface so your AI tool can take action — not 
 
 Ask your agent to finish with one plain line: where the app is, what it can cost, and how to stop paying. It reads like this:
 
-> Your app is live at `<live URL>`. It costs up to `<monthly maximum>`/month (monthly maximum). Traffic alone does not change an app's monthly price. To stop billing, ask me to delete it.
+> Your app is live at `<live URL>`. It costs up to `<monthly maximum>`/month (monthly maximum). To stop billing, ask me to delete it.
 
-The URL comes from `varity_deploy_status` and the monthly maximum from `varity_cost_calculator` or `varity_template_info`. The traffic sentence applies to apps only; virtual machines are priced by the hour.
+The URL comes from `varity_deploy_status` and the monthly maximum from `varity_cost_calculator` or `varity_template_info`. Virtual machines are priced by the hour.
 
 **Docs and pricing**
 - "Search Varity docs for environment variables"

@@ -539,13 +539,11 @@ test("J-7: a deployment that itself failed says so, and the list names a failed 
 // ── 9. Journey 2.3.27 re-run rows ───────────────────────────────────────────
 
 test("J-10: the billing_note joins the summary as a full sentence, whatever punctuation is served", async () => {
-  const TRAFFIC = " Traffic alone does not change an app's monthly price.";
   const estimate = async (billing_note) => {
     const result = await call({
       "/api/pricing": [200, { ...STATIC_ESTIMATE, billing_note }],
     }, "varity_cost_calculator", { app_profile: "static-site" });
-    assert.ok(result.out.message.endsWith(TRAFFIC), result.out.message);
-    result.out.message = result.out.message.slice(0, -TRAFFIC.length);
+    assert.doesNotMatch(result.out.message, /traffic/i);
     return result;
   };
   const bare = await estimate("First 3 static sites free, then $1/month per site");
