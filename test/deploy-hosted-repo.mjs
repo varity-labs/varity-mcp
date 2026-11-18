@@ -722,7 +722,7 @@ test("SP30-1: the run read after the create is cut to the 230 s hard deadline, a
   }
 });
 
-test("ST30-3/SP30-2: pacing ends on its own: a sleep that never advances the clock, against a gateway that always answers 429, gives at most 3 paced waits per request, then busy", { timeout: 10_000 }, async () => {
+test("ST30-3/SP30-2: pacing ends on its own: a sleep that never advances the clock, against a gateway that always answers 429, gives at most 3 paced waits per send, then busy", { timeout: 10_000 }, async () => {
   const { pacing } = await import("../dist/tools/deploy-private-copy.js");
   const realSleep = pacing.sleep;
   pacing.sleep = async () => {};

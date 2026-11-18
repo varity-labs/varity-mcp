@@ -43,7 +43,7 @@ export const PRIVATE_COPY_LIMITS = {
    * deadline answers FOLDER_SAVE_INCOMPLETE and the next call starts a fresh run).
    */
   pacedWindows: 3,
-  /** Paced waits per request (#1099 SP30-2): each counts toward the per-actor change limit. */
+  /** Paced waits per send (#1099 SP30-2): the create, and each commit attempt (its one resend has its own); each resend counts toward the per-actor change limit. */
   maxPacedWaits: 3,
   /** No commit starts after this (claude.ai cuts a tool call at 240 s). */
   commitDeadlineMs: 170_000,
@@ -198,7 +198,7 @@ const OUT_OF_TIME = new Error("No time left before the hard deadline.");
  * sent again. The gateway refuses a budget before any GitHub write and stores
  * no replay for a failure, so the same Idempotency-Key is processed fresh.
  * Each wait is the Retry-After plus 1 s (past the window's end) plus 0-3 s of
- * jitter (so paced keys do not all wake at the boundary); a request waits at
+ * jitter (so paced keys do not all wake at the boundary); one send waits at
  * most `maxPacedWaits` times, and only while the wait ends by the commit
  * deadline. That deadline is read on the clock the waits advance, so a sleep
  * that returns early still counts its whole wait and the loop always ends.
