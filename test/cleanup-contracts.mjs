@@ -89,7 +89,7 @@ test("thin adapters do not restore stale prerequisites or orchestration", async 
   assert.doesNotMatch(login, /deploy_key:\s*z|--key/);
   assert.match(server, /registerSetEnvTool/);
   const setEnv = await source("src/tools/set-env.ts");
-  // P9-ENV: values come only from the project's .env through readProjectEnv, never from tool input.
-  assert.match(setEnv, /readProjectEnv/);
+  // P9-ENV: values come only from the project's .env through projectEnvReader, never from tool input.
+  assert.match(setEnv, /projectEnvReader/);
   assert.doesNotMatch(setEnv, /z\.record|execVaritykit|KEY=VALUE/);
 });

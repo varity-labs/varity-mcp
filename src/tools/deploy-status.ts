@@ -358,9 +358,9 @@ export function registerDeployStatusTool(server: McpServer, options: { probe: bo
             : `Deployment ${deployment.id}: ${state}`;
           // A run that never served may have had an amount set aside; the platform releases it
           // (instantly once the billing release ships, else by its periodic sweep).
-          if (failure && deployment.status === "failed") message += ". Any amount set aside for this attempt is released automatically";
+          if (failure && deployment.status === "failed") message += ". Any amount set aside for this attempt is released automatically.";
           if (buildError) {
-            message += `. The build stopped with an error; its last ${buildError.lines.length} line(s) are in build_error.lines. ` +
+            message += `${message.endsWith(".") ? " " : ". "}The build stopped with an error; its last ${buildError.lines.length} line(s) are in build_error.lines. ` +
               "Fix that in the app's code, then deploy again with varity_deploy.";
           } else if (!failure && (run.status === "deploying" || deployment.status === "deploying")) {
             const progress = deployingProgress(run);

@@ -518,7 +518,7 @@ test("J-7: a deployment that itself failed says so, and the list names a failed 
     "/api/deployments/op-f": [200, { deployment: { id: "op-f", status: "failed", run_id: "run-f", outcome } }],
     "/api/deployments/runs/run-f": [200, { public_status: "failed", outcome }],
   }, "varity_deploy_status", { deployment_id: "op-f" });
-  assert.equal(failed.out.message, "Deployment op-f: latest run failed (user_workload_failure, health_check_failed; action check_logs). Deployment status: failed (URL not assigned yet)");
+  assert.equal(failed.out.message, "Deployment op-f: latest run failed (user_workload_failure, health_check_failed; action check_logs). Deployment status: failed (URL not assigned yet). Any amount set aside for this attempt is released automatically.");
 
   const list = await call({
     "/api/deployments": [200, { deployments: [{ id: "op-f", app_name: "app-f", status: "live", url: "https://app-f.varity.app", created_at: "2026-11-17T20:00:00Z", run_id: "run-f", outcome }] }],
