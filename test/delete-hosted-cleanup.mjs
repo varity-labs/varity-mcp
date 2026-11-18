@@ -30,7 +30,7 @@ const LIST = "GET /api/github/hosted-repositories";
 const APPROVE = "POST /v1/deployment-approvals";
 const QUEUE = `POST /api/github/hosted-repositories/${NAME}/deletion`;
 const DELETE = "DELETE /api/deployments/my-site";
-const RETRY = 'call varity_delete_deployment again with "my-site" to retry the source cleanup.';
+const RETRY = 'call varity_delete_deployment again with "my-site" to retry the source cleanup; this also deletes any app now named "my-site".';
 
 const deployment = (repoUrl) => [200, {
   deployment: { id: "d-1", app_name: "my-site", url: "https://varity.app/my-site/", source: { type: "repository", repository_url: repoUrl } },
@@ -181,4 +181,32 @@ test("SP-7: the delete tool and README say the private copy is deleted too", asy
   const { readFileSync } = await import("node:fs");
   const row = readFileSync(new URL("../README.md", import.meta.url), "utf8").split("\n").find((l) => l.startsWith("| `varity_delete_deployment`"));
   assert.ok(row.includes(line), row);
+});
+
+test("STN-1: a read that fails for any reason but 404 never takes the name fallback; the app is still deleted", async () => {
+  for (const failure of [
+    [500, { code: "internal_error", message: "Boom." }],
+    [503, { code: "ownership_check_unavailable", message: "Try again." }],
+  ]) {
+    const { isError, out, calls } = await remove({
+      [GET]: failure,
+      [LIST]: hexListing([hexRepo(HEX_NAME)]),
+      [APPROVE]: [201, { approval_id: "apr_4" }],
+      [HEX_QUEUE]: [202, { id: "job-4", status: "pending" }],
+      [DELETE]: [202, { status: "deleting", run_id: RUN_ID }],
+    });
+    assert.equal(isError, false, JSON.stringify(out));
+    assert.ok(!routes(calls).includes(LIST) && !routes(calls).includes(APPROVE), JSON.stringify(failure));
+    assert.ok(routes(calls).includes(DELETE));
+    assert.equal(out.data.source_copy, undefined);
+  }
+  // A read that shows the app deleted with no source still takes it.
+  const { calls } = await remove({
+    [GET]: [200, { deployment: { id: "d-1", app_name: "my-site", status: "deleted", source: { type: "unknown" } } }],
+    [LIST]: hexListing([hexRepo(HEX_NAME)]),
+    [APPROVE]: [201, { approval_id: "apr_5" }],
+    [HEX_QUEUE]: [202, { id: "job-5", status: "pending" }],
+    [DELETE]: [202, { status: "deleted", deleted: true }],
+  });
+  assert.ok(routes(calls).includes(HEX_QUEUE));
 });

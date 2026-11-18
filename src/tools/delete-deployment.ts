@@ -27,7 +27,8 @@ import { INFRASTRUCTURE } from "../utils/endpoints.js";
  * app delete.
  *
  * A retry after the app is already gone (its read answers 404, or it reads
- * deleted with no source) finds the copy by app name instead: the gateway
+ * deleted with no source; any other read failure is not "gone") finds the
+ * copy by app name instead: the gateway
  * names a copy `<16 hex owner prefix>-<slug>` (github-authority.ts
  * HOSTED_REPO_NAME) and `varity_deploy` uses the app name as the slug, so the
  * cleanup never depends on the deployment still resolving.
@@ -35,26 +36,39 @@ import { INFRASTRUCTURE } from "../utils/endpoints.js";
 
 type SourceCopy = "deletion_queued" | "not_queued" | null;
 
-const DEPLOYMENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const HOSTED_NAME = /^[0-9a-f]{16}-([a-z0-9-]+)$/;
 
-/** Which listed copy belongs to this deployment: by its source URL, or (app already gone) by app name. */
-function copyMatcher(before: PublicDeployment | null, locator: string): ((repo: { name: string; full_name: string }) => boolean) | null {
+/**
+ * Whether the locator is a deployment id rather than an app name. The gateway
+ * issues ids as dashed UUIDs (deploy-ops-public.ts OPS_ID_RE), and an id never
+ * names the copy, so the name fallback skips it. Were ids ever issued in
+ * another form, the fallback would stay harmless: a copy name needs the
+ * 16-hex owner prefix and an exact slug match.
+ */
+function isDeploymentId(locator: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(locator);
+}
+
+/** Which listed copy belongs to this deployment: by its source URL, or (app known gone) by app name. */
+function copyMatcher(
+  before: PublicDeployment | null,
+  gone: boolean,
+  locator: string
+): ((repo: { name: string; full_name: string }) => boolean) | null {
   const url = before?.source?.repository_url;
   const match = typeof url === "string" ? /^https:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/i.exec(url) : null;
   if (match) {
     const fullName = `${match[1]}/${match[2]}`.toLowerCase();
     return (repo) => repo.full_name.toLowerCase() === fullName;
   }
-  const gone = before === null || before.status === "deleted";
-  if (!gone || DEPLOYMENT_ID.test(locator)) return null;
+  if (!gone || isDeploymentId(locator)) return null;
   const slug = locator.toLowerCase();
   return (repo) => HOSTED_NAME.exec(repo.name)?.[1] === slug;
 }
 
 /** Queues the private copy's deletion; null when the deployment has none this key made. */
-async function queueSourceCopyDeletion(before: PublicDeployment | null, locator: string): Promise<SourceCopy> {
-  const belongs = copyMatcher(before, locator);
+async function queueSourceCopyDeletion(before: PublicDeployment | null, gone: boolean, locator: string): Promise<SourceCopy> {
+  const belongs = copyMatcher(before, gone, locator);
   if (!belongs) return null;
   try {
     const listing = await listHostedRepositories();
@@ -75,21 +89,26 @@ async function queueSourceCopyDeletion(before: PublicDeployment | null, locator:
   }
 }
 
-/** What to tell the user about the copy; `appName` is what a retry must name once the app is gone. */
-function sourceCopyNote(sourceCopy: Exclude<SourceCopy, null>, appName: string | null): string {
-  if (sourceCopy === "deletion_queued") return "Its private source copy is deleted once the app is gone.";
-  return (
-    "Varity could not queue the deletion of its private source copy; call varity_delete_deployment again " +
-    `${appName ? `with "${appName}"` : "with this app's name"} to retry the source cleanup.`
-  );
-}
-
 /**
- * Said when the copy was queued but the app delete did not go through: the
- * gateway has no cancel (the Portal's `queuedRepositoryNotice`).
+ * The one sentence about the copy, by what happened to the app:
+ * - "accepted": the app delete went through;
+ * - "refused": it did not, after the copy was queued (the gateway has no
+ *   cancel; the Portal's `queuedRepositoryNotice`);
+ * - "gone": there was no app left to delete.
+ * A retry names the app, because an id stops resolving once the app is gone;
+ * it is a full delete, so it says it also deletes any app now of that name.
  */
-function queuedNotice(already: boolean): string {
-  return `Its private source copy is ${already ? "already " : ""}queued for deletion and is removed once no deployment uses it.`;
+function copySentence(sourceCopy: Exclude<SourceCopy, null>, app: "accepted" | "refused" | "gone", appName: string | null): string {
+  if (sourceCopy === "not_queued") {
+    const name = appName ? `"${appName}"` : "this app's name";
+    return (
+      `Varity could not queue the deletion of its private source copy; call varity_delete_deployment again with ${name} ` +
+      `to retry the source cleanup; this also deletes any app now named ${name}.`
+    );
+  }
+  if (app === "accepted") return "Its private source copy is deleted once the app is gone.";
+  const already = app === "refused" ? "already " : "";
+  return `Its private source copy is ${already}queued for deletion and is removed once no deployment uses it.`;
 }
 
 export async function deleteAccepted(
@@ -110,7 +129,7 @@ export async function deleteAccepted(
         : `The delete request for "${deployment}" returned no run. Deletion and billing stop are not proven; check varity_deploy_status before retrying.`;
   return successResponse(
     { deployment, ...acceptance, deleted, ...(sourceCopy ? { source_copy: sourceCopy } : {}) },
-    sourceCopy ? `${message} ${sourceCopyNote(sourceCopy, appName)}` : message
+    sourceCopy ? `${message} ${copySentence(sourceCopy, "accepted", appName)}` : message
   );
 }
 
@@ -143,17 +162,21 @@ export function registerDeleteDeploymentTool(server: McpServer): void {
       // Best effort: only an app that ever had a URL can serve cached content after delete.
       let hadUrl = true;
       let before: PublicDeployment | null = null;
+      // Known gone: a 404, or a read that shows it deleted. Any other failure is unknown, not gone.
+      let gone = false;
       try {
         before = await getDeployment(deployment);
         hadUrl = Boolean(before.url ?? before.public_url);
-      } catch {
+        gone = before.status === "deleted";
+      } catch (err) {
         // Unknown: keep the cached-content line.
+        gone = err instanceof VarityPublicApiError && err.status === 404;
       }
       // A retry by name works once the app is gone; an id does not, so the note names the app.
-      const appName = before?.app_name ?? before?.appName ?? (DEPLOYMENT_ID.test(deployment) ? null : deployment);
+      const appName = before?.app_name ?? before?.appName ?? (isDeploymentId(deployment) ? null : deployment);
       // Before the app delete (the Portal's order), so the intent outlives this call.
-      const sourceCopy = await queueSourceCopyDeletion(before, deployment);
-      const withCopy = (message: string) => (sourceCopy ? `${message} ${sourceCopy === "deletion_queued" ? queuedNotice(true) : sourceCopyNote(sourceCopy, appName)}` : message);
+      const sourceCopy = await queueSourceCopyDeletion(before, gone, deployment);
+      const withCopy = (message: string) => (sourceCopy ? `${message} ${copySentence(sourceCopy, "refused", appName)}` : message);
       try {
         return await deleteAccepted(deployment, await deleteDeployment(deployment), hadUrl, sourceCopy, appName);
       } catch (err) {
@@ -161,7 +184,7 @@ export function registerDeleteDeploymentTool(server: McpServer): void {
           if (sourceCopy === "deletion_queued") {
             return successResponse(
               { deployment, found: false, source_copy: sourceCopy },
-              `No deployment "${deployment}" is left to delete. ${queuedNotice(false)}`
+              `No deployment "${deployment}" is left to delete. ${copySentence(sourceCopy, "gone", appName)}`
             );
           }
           return errorResponse(
