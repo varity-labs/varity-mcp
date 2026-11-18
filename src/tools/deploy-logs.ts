@@ -12,7 +12,7 @@ export function registerDeployLogsTool(server: McpServer): void {
       description:
         "Get recent runtime logs for a deployment from the Varity public API. " +
         "Use this when a developer asks for logs from a live app. " +
-        "For local build errors before deployment, use varity_build.",
+        "If a deploy failed while building, call varity_deploy_status with the deployment: it returns the build error lines.",
       inputSchema: {
         deployment: z
           .string()

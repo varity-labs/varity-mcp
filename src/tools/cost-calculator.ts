@@ -48,6 +48,9 @@ export function projectOwnerPricing(data: Record<string, unknown>): OwnerPricing
  */
 const GPU_CONTAINER_PROFILE = "ai-agent-gpu";
 
+/** The served `billing_model` of a monthly maximum charged by running time. */
+const PRORATED_MONTHLY_MAX = "reserved_monthly_max_prorated";
+
 export function registerCostCalculatorTool(server: McpServer): void {
   server.registerTool(
     "varity_cost_calculator",
@@ -150,13 +153,19 @@ export function registerCostCalculatorTool(server: McpServer): void {
       const price = "monthly_max_usd" in projection
         ? monthlyMaximum(amount)
         : `${usd(amount)}/${unit} (USD)`;
-      // The served note's words unchanged, trimmed and closed as a sentence
-      // only when it has no terminal punctuation (before any closing quote or
-      // bracket); `data.billing_note` stays exactly as served.
+      // The served note's words, trimmed and closed as a sentence only when it
+      // has no terminal punctuation (before any closing quote or bracket);
+      // `data.billing_note` stays exactly as served. The prorated monthly
+      // maximum's served note uses billing terms ("reserved deployment,
+      // prorated"), so the summary says the same thing in plain words (J-17).
       const servedNote = typeof data.billing_note === "string" ? data.billing_note.trim() : "";
       const closed = /[.!?\u2026]["'\u2019\u201D)\]]*$/.test(servedNote);
-      const note = servedNote ? ` ${servedNote}${closed ? "" : "."}` : "";
-      const summary = `${String(estimateName)}: ${price} estimate returned by the current Varity pricing interface.${note}`;
+      const plainNote = data.billing_model === PRORATED_MONTHLY_MAX
+        ? "It is charged only for the time it runs, and never more than that in a month."
+        : servedNote ? `${servedNote}${closed ? "" : "."}` : "";
+      // V1-verified claim; apps only (a machine is priced by the hour).
+      const traffic = unit === "month" ? " Traffic alone does not change an app's monthly price." : "";
+      const summary = `${String(estimateName)}: ${price}.${plainNote ? ` ${plainNote}` : ""}${traffic}`;
 
       return successResponse(
         {

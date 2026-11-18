@@ -14,6 +14,18 @@ The Varity MCP Server lets a supported local AI coding client build, deploy, and
 
 ## Install
 
+### One-click install
+
+GitHub does not open editor links, so use the install buttons on the [Varity MCP docs page](https://docs.varity.so/ai-tools/mcp-server-spec/), or open the link for your editor from your browser's address bar:
+
+```text
+Cursor:          cursor://anysphere.cursor-deeplink/mcp/install?name=varity&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkB2YXJpdHktbGFicy9tY3BAbGF0ZXN0Il19
+VS Code:         vscode:mcp/install?%7B%22name%22%3A%22varity%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22%40varity-labs%2Fmcp%40latest%22%5D%7D
+VS Code Insiders: vscode-insiders:mcp/install?%7B%22name%22%3A%22varity%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22%40varity-labs%2Fmcp%40latest%22%5D%7D
+```
+
+Each link installs `npx -y @varity-labs/mcp@latest` and carries no key: you connect your Varity account afterwards with `varity_login`.
+
 ### Cursor
 
 Add to `.cursor/mcp.json`:
@@ -23,7 +35,7 @@ Add to `.cursor/mcp.json`:
   "mcpServers": {
     "varity": {
       "command": "npx",
-      "args": ["-y", "@varity-labs/mcp"]
+      "args": ["-y", "@varity-labs/mcp@latest"]
     }
   }
 }
@@ -32,14 +44,14 @@ Add to `.cursor/mcp.json`:
 ### Claude Code
 
 ```bash
-claude mcp add varity -- npx -y @varity-labs/mcp
+claude mcp add varity -- npx -y @varity-labs/mcp@latest
 ```
 
 ### VS Code with Copilot
 
 1. Command Palette → **MCP: Add Server**
 2. Select **Command (stdio)**
-3. Command: `npx -y @varity-labs/mcp`
+3. Command: `npx -y @varity-labs/mcp@latest`
 4. Name: `Varity`
 
 ### Windsurf
@@ -51,7 +63,7 @@ Add to `mcp_config.json`:
   "mcpServers": {
     "varity": {
       "command": "npx",
-      "args": ["-y", "@varity-labs/mcp"]
+      "args": ["-y", "@varity-labs/mcp@latest"]
     }
   }
 }
@@ -64,7 +76,7 @@ Add to `mcp_config.json`:
   "mcpServers": {
     "varity": {
       "command": "npx",
-      "args": ["-y", "@varity-labs/mcp"]
+      "args": ["-y", "@varity-labs/mcp@latest"]
     }
   }
 }
@@ -95,6 +107,14 @@ The MCP exposes Varity's deploy surface so your AI tool can take action — not 
 - "Preview what would change when migrating github.com/me/my-app"
 - "Show me the Vercel-specific artifacts to replace"
 
+**When your app is live**
+
+Ask your agent to finish with one plain line: where the app is, what it can cost, and how to stop paying. It reads like this:
+
+> Your app is live at `<live URL>`. It costs up to `<monthly maximum>`/month (monthly maximum). Traffic alone does not change an app's monthly price. To stop billing, ask me to delete it.
+
+The URL comes from `varity_deploy_status` and the monthly maximum from `varity_cost_calculator` or `varity_template_info`. The traffic sentence applies to apps only; virtual machines are priced by the hour.
+
 **Docs and pricing**
 - "Search Varity docs for environment variables"
 - "What is the current estimate for this pricing profile?"
@@ -106,7 +126,7 @@ The MCP exposes Varity's deploy surface so your AI tool can take action — not 
 |---|---|
 | `varity_search_docs` | Search the Varity documentation |
 | `varity_cost_calculator` | Project the live owner's monthly or hourly USD estimate without converting units; pre-deploy estimates need no sign-in |
-| `varity_balance` | Read your available balance, authorization maximum (`reserved_usd`) and amount owed as exact decimal USD strings using your deploy key; the authorization maximum is not funded backing, and unavailable reads never become zero |
+| `varity_balance` | Read your available balance, the amount set aside for your running apps (`reserved_usd`) and the amount owed; the message rounds to cents and the data keeps the exact decimal USD strings; unavailable reads never become zero |
 | `varity_doctor` | Check that your environment is ready to deploy |
 | `varity_login` | Connect Varity: opens a browser tab where you confirm (or shows a short code on a machine without a browser); no key to copy, no restart |
 | `varity_logout` | Sign this computer out: revokes the saved sign-in on Varity, then removes it |
@@ -116,17 +136,20 @@ The MCP exposes Varity's deploy surface so your AI tool can take action — not 
 | `varity_dev_server` | Start the local development server |
 | `varity_create_repo` | Create a GitHub repository and push the project |
 | `varity_deploy` | Deploy the current project to production |
-| `varity_deploy_status` | Check the status of a deployment, including why a build failed |
+| `varity_deploy_status` | Check the status of a deployment: the current step and time so far while it deploys, how long it took once live, and the last lines of the build error when a build failed |
 | `varity_deploy_logs` | Read runtime logs |
 | `varity_delete_deployment` | Request deletion; poll `varity_deploy_status` until it is deleted and billing is stopped |
-| `varity_set_env` | Preserve the public tool route while refusing secret values and directing configuration to a secret-safe interface |
+| `varity_set_env` | Set an app's settings (such as API keys) from the project's own `.env` file: you name the settings, the values are read on your computer and never pass through chat. Your app restarts; a restart sets aside another monthly maximum until it settles |
+| `varity_domain_add` | Point your own domain at an app and get the exact DNS record to add at your registrar |
+| `varity_domain_verify` | Check whether that DNS record is in place and the domain is live |
+| `varity_domain_remove` | Stop serving an app at its custom domain (it keeps its Varity address) |
 | `varity_redeploy` | Restart a deployed dynamic or container app from its last successful release at its saved commit; a static site cannot be restarted. To ship new commits, push and run `varity_deploy` again with the same app name |
 | `varity_machines_list` | List your CPU and GPU virtual machines (optionally the CPU or, with `gpu`, GPU VM profile catalog) |
 | `varity_machines_create` | Quote and create a CPU or (`gpu: true`) GPU virtual machine with your SSH public key |
 | `varity_machines_delete` | Delete a CPU or GPU virtual machine and confirm its billing stopped |
 | `varity_list_templates` | List certified gateway-owned Varity templates |
 | `varity_template_info` | Show full details for one certified template |
-| `varity_deploy_template` | Deploy a public certified template with no required secrets; refuse private or secret-bearing templates |
+| `varity_deploy_template` | Deploy a public certified template; a template's required settings are read from your project's `.env` file, never typed into chat; private templates are refused |
 | `varity_list_agents` | Backward-compatible alias for `varity_list_templates` |
 | `varity_agent_info` | Backward-compatible alias for `varity_template_info` |
 | `varity_deploy_agent` | Backward-compatible alias for `varity_deploy_template` |
@@ -134,7 +157,7 @@ The MCP exposes Varity's deploy surface so your AI tool can take action — not 
 
 ## Templates
 
-Varity templates come from the gateway-owned certified catalog. Ask your AI editor "what templates can I deploy?" and it will list the live catalog and inspect each template contract. The MCP deploy tool supports only public templates that declare no required environment variables; it refuses private or secret-bearing templates and routes those through an approved secret-safe interface.
+Varity templates come from the gateway-owned certified catalog. Ask your AI editor "what templates can I deploy?" and it will list the live catalog and inspect each template contract. The MCP deploy tool supports public templates; when a template needs settings (for example an API key), put them in a `.env` file in your project folder and the tool reads them there, so the values never pass through chat. Private templates are refused.
 
 Each template reserves different hardware. Use `varity_template_info` to see the required environment variables, private/public access mode, resources, hardware profile, and certification state before deciding whether the MCP can deploy it.
 
@@ -165,7 +188,7 @@ The package supports stdio for local MCP clients such as Cursor, Claude Code,
 VS Code, and Windsurf.
 
 ```bash
-npx -y @varity-labs/mcp
+npx -y @varity-labs/mcp@latest
 ```
 
 The former hosted endpoint and network transport are retired. Browser clients

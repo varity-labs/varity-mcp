@@ -10,6 +10,15 @@ import {
 } from "../utils/public-api.js";
 import { acceptanceSummary, lifecycleAcceptance } from "../utils/lifecycle-acceptance.js";
 import { monthlyMaximum } from "../utils/money.js";
+import { withoutValues } from "../utils/redact.js";
+import type { ProjectEnvReader } from "./env-file.js";
+
+/** Where a template's required settings come from: the project's `.env` (stdio only). */
+export interface TemplateEnvSource {
+  read: ProjectEnvReader;
+  path?: string;
+  envFile?: string;
+}
 
 /**
  * Template tools are a thin projection of the gateway-owned catalog through
@@ -137,7 +146,7 @@ async function templateInfo(id: string) {
   );
 }
 
-export async function deployTemplate(templateId: string, name?: string) {
+export async function deployTemplate(templateId: string, name?: string, envSource?: TemplateEnvSource) {
   let template: TemplateMeta;
   try {
     template = await getTemplate<TemplateMeta>(templateId.trim());
@@ -146,20 +155,35 @@ export async function deployTemplate(templateId: string, name?: string) {
   }
 
   const requiredEnv = requiredEnvOf(template);
-  if (template.private || requiredEnv.length > 0) {
+  // Required settings come only from the project's .env on this computer (stdio, P9-ENV).
+  const envFromFile = requiredEnv.length > 0 && !template.private && envSource?.path !== undefined;
+  if (template.private || (requiredEnv.length > 0 && !envFromFile)) {
     const restriction = [
       template.private ? "private access" : null,
       requiredEnv.length > 0 ? `required environment variables (${requiredEnv.join(", ")})` : null,
     ].filter(Boolean).join(" and ");
+    const action = !template.private && envSource
+      ? `Ask the user to put ${requiredEnv.join(", ")} in a .env file in their project folder, then call this again with path set to that folder. Never put the values in chat.`
+      : "Configure and deploy private or secret-bearing templates through the Developer Portal or another approved secret-safe interface. Never place secret values in chat or MCP arguments.";
     return errorResponse(
       "SECURE_ENV_CONFIGURATION_REQUIRED",
-      `Template ${template.id} uses ${restriction}, which this MCP deployment tool does not configure.`,
-      "Configure and deploy private or secret-bearing templates through the Developer Portal or another approved secret-safe interface. Never place secret values in chat or MCP arguments."
+      `Template ${template.id} uses ${restriction}, which this MCP deployment tool does not configure${!template.private && envSource ? " without a .env file" : ""}.`,
+      action
     );
   }
+  let env: Record<string, string> | undefined;
+  if (envFromFile) {
+    const read = await envSource!.read(envSource!.path!, envSource!.envFile ?? ".env", requiredEnv);
+    if (!read.ok) return read.response;
+    env = read.env;
+  }
 
+  return withoutValues(await sendTemplateDeploy(template, name, env), Object.values(env ?? {}));
+}
+
+async function sendTemplateDeploy(template: TemplateMeta, name: string | undefined, env: Record<string, string> | undefined) {
   try {
-    return await templateDeployAccepted(template, name, await postTemplateDeploy(template.id, name));
+    return await templateDeployAccepted(template, name, await postTemplateDeploy(template.id, name, env));
   } catch (error) {
     if (error instanceof VarityPublicApiError) {
       return errorResponse(error.code, error.message, error.action ?? "Check the request with varity_template_info and retry.");
@@ -168,8 +192,20 @@ export async function deployTemplate(templateId: string, name?: string) {
   }
 }
 
-/** The certified template tools (both toolsets). */
-export function registerTemplateTools(server: McpServer): void {
+/** `path` / `env_file` inputs, registered only when a local env reader is injected (stdio). */
+const envInputs = {
+  path: z
+    .string()
+    .optional()
+    .describe("Absolute path to the project folder whose .env file holds the template's required settings (only for templates that need them)."),
+  env_file: z
+    .string()
+    .optional()
+    .describe("The settings file inside that folder (default .env). Values are read on this computer and never go through chat."),
+};
+
+/** The certified template tools (both toolsets); `readEnv` (stdio only) lets a template take its required settings from .env. */
+export function registerTemplateTools(server: McpServer, readEnv?: ProjectEnvReader): void {
   server.registerTool(
     "varity_list_templates",
     {
@@ -201,23 +237,26 @@ export function registerTemplateTools(server: McpServer): void {
     {
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
       title: "Deploy a Varity Template",
-      description:
-        "Deploy a public certified Varity template that declares no required environment variables. Private or secret-bearing templates are refused; call varity_template_info first.",
+      description: readEnv
+        ? "Deploy a public certified Varity template. Call varity_template_info first: if it lists required env vars, ask the user to put them in a .env file in their project folder and pass that folder as path (values never go through chat). Private templates are refused."
+        : "Deploy a public certified Varity template that declares no required environment variables. Private or secret-bearing templates are refused; call varity_template_info first.",
       inputSchema: {
         template: z.string().describe("Template ID from varity_list_templates."),
         name: z
           .string()
           .optional()
           .describe("Memorable deployment name. Defaults to <template>-derived name if omitted."),
+        ...(readEnv ? envInputs : {}),
       },
     },
-    async ({ template, name }) => deployTemplate(template, name)
+    async ({ template, name, path, env_file }: { template: string; name?: string; path?: string; env_file?: string }) =>
+      deployTemplate(template, name, readEnv ? { read: readEnv, path, envFile: env_file } : undefined)
   );
 }
 
 /** The template tools plus their backward-compatible agent aliases (stdio toolset). */
-export function registerAgentTools(server: McpServer): void {
-  registerTemplateTools(server);
+export function registerAgentTools(server: McpServer, readEnv?: ProjectEnvReader): void {
+  registerTemplateTools(server, readEnv);
 
   server.registerTool(
     "varity_list_agents",

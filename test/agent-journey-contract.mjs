@@ -288,8 +288,8 @@ test("a private or unreachable repo names the working remedies, not 'the supplie
     }],
   }, "varity_deploy", { repo_url: "https://github.com/acme/secret-app.git", app_name: "secret-app" });
   assert.equal(out.error.code, "source_repository_unreadable");
-  assert.match(out.error.message, /private or unreachable/);
-  assert.match(out.error.message, /cannot read private repositories from the MCP yet/);
+  assert.match(out.error.message, /private or does not exist/);
+  assert.match(out.error.message, /can only build from public repositories today/);
   assert.doesNotMatch(out.error.message, /supplied token/);
   assert.match(out.error.suggestion, /gh repo edit acme\/secret-app --visibility public/);
   assert.match(out.error.suggestion, /container image/);
@@ -529,19 +529,25 @@ test("J-7: a deployment that itself failed says so, and the list names a failed 
 // ── 9. Journey 2.3.27 re-run rows ───────────────────────────────────────────
 
 test("J-10: the billing_note joins the summary as a full sentence, whatever punctuation is served", async () => {
-  const estimate = (billing_note) => call({
-    "/api/pricing": [200, { ...STATIC_ESTIMATE, billing_note }],
-  }, "varity_cost_calculator", { app_profile: "static-site" });
+  const TRAFFIC = " Traffic alone does not change an app's monthly price.";
+  const estimate = async (billing_note) => {
+    const result = await call({
+      "/api/pricing": [200, { ...STATIC_ESTIMATE, billing_note }],
+    }, "varity_cost_calculator", { app_profile: "static-site" });
+    assert.ok(result.out.message.endsWith(TRAFFIC), result.out.message);
+    result.out.message = result.out.message.slice(0, -TRAFFIC.length);
+    return result;
+  };
   const bare = await estimate("First 3 static sites free, then $1/month per site");
   assert.match(bare.out.message, / First 3 static sites free, then \$1\/month per site\.$/);
   const stopped = await estimate("First 3 static sites are free, then $1/month per site.");
   assert.match(stopped.out.message, / then \$1\/month per site\.$/);
   assert.doesNotMatch(stopped.out.message, /\.\.$/);
   const padded = await estimate("  Billed $1/month!  ");
-  assert.match(padded.out.message, /interface\. Billed \$1\/month!$/);
+  assert.match(padded.out.message, /USD\)\. Billed \$1\/month!$/);
   assert.equal(padded.out.data.billing_note, "  Billed $1/month!  ", "the structured note stays as served");
   const twoSentences = await estimate("You have 3 active static sites. This one is $1/month");
-  assert.match(twoSentences.out.message, /interface\. You have 3 active static sites\. This one is \$1\/month\.$/);
+  assert.match(twoSentences.out.message, /USD\)\. You have 3 active static sites\. This one is \$1\/month\.$/);
   const bracketed = await estimate("First 3 sites are free (then $1/month per site.)");
   assert.match(bracketed.out.message, /per site\.\)$/);
   const quoted = await estimate('Sites are "free."');
@@ -550,7 +556,7 @@ test("J-10: the billing_note joins the summary as a full sentence, whatever punc
   assert.match(ellipsis.out.message, /More soon\u2026$/);
   for (const empty of ["", "   "]) {
     const none = await estimate(empty);
-    assert.match(none.out.message, /current Varity pricing interface\.$/);
+    assert.match(none.out.message, /^static-site: up to \$0\.00\/month \(monthly maximum, USD\)\.$/);
   }
 });
 
