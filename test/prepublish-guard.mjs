@@ -10,9 +10,14 @@ import { spawnSync } from "node:child_process";
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createRequire } from "node:module";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+
+const require = createRequire(import.meta.url);
 
 const SCRIPT = new URL("../scripts/prepublish-guard.cjs", import.meta.url);
+const RECEIPT_SCRIPT = new URL("../scripts/r1-receipt.cjs", import.meta.url);
 const RECEIPT = {
   gateway_version: "1.14.193",
   flag: { name: "VARITY_HOSTED_REPOS_DEPLOY_KEYS_ENABLED", value: true },
@@ -26,6 +31,7 @@ function guard({ promise, receipt }) {
     mkdirSync(join(root, "scripts"));
     mkdirSync(join(root, "dist", "tools"), { recursive: true });
     copyFileSync(SCRIPT, join(root, "scripts", "prepublish-guard.cjs"));
+    copyFileSync(RECEIPT_SCRIPT, join(root, "scripts", "r1-receipt.cjs"));
     writeFileSync(join(root, "dist", "tools", "deploy-copy.js"),
       promise ? 'export const RULE = "a folder is saved as a private copy Varity keeps";\n' : 'export const RULE = "a folder is deployed";\n');
     if (receipt !== undefined) {
@@ -65,9 +71,23 @@ test("SPN-3: with a passed receipt, or with no private-copy promise, the guard l
   assert.equal(guard({ promise: false }).status, 0);
 });
 
-test("SPN-3: no receipt is committed at this head, and ARCHITECTURE.md records the receipt path in ## Verification", async () => {
+test("SPA-3: scripts/r1-receipt.cjs accepts a valid receipt", () => {
+  const root = mkdtempSync(join(tmpdir(), "r1-receipt-"));
+  try {
+    mkdirSync(join(root, "acceptance"));
+    writeFileSync(join(root, "acceptance", "r1-live.json"), JSON.stringify(RECEIPT));
+    assert.equal(require("../scripts/r1-receipt.cjs").receiptProblem(root), null);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("SPA-3: a committed receipt is valid, and ARCHITECTURE.md records the receipt path in ## Verification", async () => {
   const { existsSync, readFileSync } = await import("node:fs");
-  assert.equal(existsSync(new URL("../acceptance/r1-live.json", import.meta.url)), false);
+  const root = fileURLToPath(new URL("..", import.meta.url));
+  if (existsSync(join(root, "acceptance", "r1-live.json"))) {
+    assert.equal(require("../scripts/r1-receipt.cjs").receiptProblem(root), null);
+  }
   const verification = readFileSync(new URL("../ARCHITECTURE.md", import.meta.url), "utf8").split("## Verification")[1] ?? "";
   assert.match(verification, /acceptance\/r1-live\.json/);
   assert.match(verification, /prepublish-guard\.cjs/);

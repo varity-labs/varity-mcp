@@ -62,8 +62,7 @@ console.log("[prepublish-guard] ✅ dist/ is clean (no forbidden positioning con
 // R1 release gate (ARCHITECTURE.md ## Verification): the private copy works only while the
 // gateway's hosted-repository route serves deploy keys. A package whose built text promises it
 // is published only with the live-acceptance receipt committed at acceptance/r1-live.json.
-const RECEIPT = path.join(__dirname, "..", "acceptance", "r1-live.json");
-const FLAG = "VARITY_HOSTED_REPOS_DEPLOY_KEYS_ENABLED";
+const { FLAG, receiptProblem } = require("./r1-receipt.cjs");
 
 function promisesPrivateCopy(dir) {
   return fs.readdirSync(dir, { withFileTypes: true }).some((entry) => {
@@ -73,24 +72,8 @@ function promisesPrivateCopy(dir) {
   });
 }
 
-/** Why the receipt does not prove the live acceptance, or null when it does. */
-function receiptProblem() {
-  if (!fs.existsSync(RECEIPT)) return "acceptance/r1-live.json does not exist";
-  let receipt;
-  try {
-    receipt = JSON.parse(fs.readFileSync(RECEIPT, "utf8"));
-  } catch {
-    return "acceptance/r1-live.json is not valid JSON";
-  }
-  if (typeof receipt.gateway_version !== "string" || !receipt.gateway_version.trim()) return "gateway_version is missing";
-  if (receipt.flag?.name !== FLAG || receipt.flag?.value !== true) return `flag must be {"name":"${FLAG}","value":true}`;
-  if (typeof receipt.observed_at !== "string" || Number.isNaN(Date.parse(receipt.observed_at))) return "observed_at is not an ISO 8601 time";
-  if (receipt.result !== "passed") return 'result is not "passed"';
-  return null;
-}
-
 if (promisesPrivateCopy(DIST)) {
-  const problem = receiptProblem();
+  const problem = receiptProblem(path.join(__dirname, ".."));
   if (problem) {
     console.error(`\n[prepublish-guard] ❌ dist/ promises the private copy, but ${problem} — publish BLOCKED.`);
     console.error(`Publish only after the gateway serves deploy keys in production (${FLAG}=true) and its live acceptance passed;`);
