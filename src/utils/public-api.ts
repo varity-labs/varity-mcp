@@ -805,10 +805,8 @@ export async function removeCustomDomain(deployment: string): Promise<CustomDoma
  * `GET /api/deployments/runs/:runId` — the durable run view plus
  * `public_status`, `outcome`, `url`, `error_message`, `support_id`, `events`.
  */
-export async function getRun(runId: string): Promise<Record<string, unknown>> {
-  return publicApiGet<Record<string, unknown>>(
-    `/api/deployments/runs/${encodeURIComponent(runId)}`
-  );
+export async function getRun(runId: string, timeoutMs?: number): Promise<Record<string, unknown>> {
+  return publicApiRequest<Record<string, unknown>>("GET", `/api/deployments/runs/${encodeURIComponent(runId)}`, { timeoutMs });
 }
 
 /** `GET /api/machines` — `{machines}` plus inventory completeness fields when partial. */

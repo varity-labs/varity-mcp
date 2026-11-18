@@ -316,7 +316,7 @@ export async function deployPrivateCopy(collected: CollectedFolder, deploy: Fold
     }
     return errorResponse("DEPLOY_FAILED", "Varity saved this folder, but the deploy was not started.", AGAIN);
   }
-  const acceptance = await lifecycleAcceptance(accepted);
+  const acceptance = await lifecycleAcceptance(accepted, timeoutBefore(deploy.startedAt + limits.hardDeadlineMs));
   const secrets = collected.secretPaths;
   const parts = [
     `${collected.files.length} files`,

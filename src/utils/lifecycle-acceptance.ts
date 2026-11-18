@@ -18,13 +18,19 @@ export interface LifecycleAcceptance {
   outcome: unknown;
 }
 
+/**
+ * `timeoutMs` cuts the run read to a caller's deadline; at or below 0 the run
+ * is not read (status unobserved), so the caller's own bound holds.
+ */
 export async function lifecycleAcceptance(
-  accepted: PublicRunAcceptance
+  accepted: PublicRunAcceptance,
+  timeoutMs?: number
 ): Promise<LifecycleAcceptance> {
   const runId = typeof accepted.run_id === "string" && accepted.run_id ? accepted.run_id : null;
   if (!runId) return { run_id: null, public_status: null, outcome: null };
+  if (timeoutMs !== undefined && timeoutMs <= 0) return { run_id: runId, public_status: null, outcome: null };
   try {
-    const run = await getRun(runId);
+    const run = await getRun(runId, timeoutMs);
     return {
       run_id: runId,
       public_status: typeof run.public_status === "string" ? run.public_status : null,

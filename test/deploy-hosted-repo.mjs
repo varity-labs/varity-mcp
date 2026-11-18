@@ -686,3 +686,38 @@ test("#1099: a folder over 3 windows of 23 is refused with a Varity action befor
     }
   }
 });
+
+test("SP30-1: the run read after the create is cut to the 230 s hard deadline, and skipped when no time is left", async () => {
+  const realNow = Date.now;
+  const t0 = realNow();
+  let offset = 0;
+  Date.now = () => t0 + offset;
+  try {
+    for (const [createdAt, readTimeout] of [[225_000, 5_000], [230_000, undefined]]) {
+      offset = 0;
+      const p = project();
+      try {
+        const { isError, out, calls } = await withTimeouts((timeout) => deploy({ path: p.dir }, base, {
+          clock: (call) => {
+            if (call.route === CREATE) offset = createdAt;
+            if (call.route.startsWith("GET /api/deployments/runs/")) call.timeout = timeout();
+          },
+        }));
+        assert.equal(isError, false, JSON.stringify(out));
+        const reads = of(calls, "GET /api/deployments/runs/" + RUN_ID);
+        if (readTimeout === undefined) {
+          assert.equal(reads.length, 0, "no time left: the run is not read");
+          assert.equal(out.data.public_status, null);
+          assert.equal(out.data.run_id, RUN_ID);
+        } else {
+          assert.equal(reads.length, 1);
+          assert.equal(reads[0].timeout, readTimeout);
+        }
+      } finally {
+        p.cleanup();
+      }
+    }
+  } finally {
+    Date.now = realNow;
+  }
+});
