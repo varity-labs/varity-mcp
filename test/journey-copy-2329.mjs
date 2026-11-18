@@ -105,8 +105,10 @@ test("U-ADV/SP-2: a private-copy promise ships only behind the recorded release 
     ["stdio instructions", instructions],
     ["README", readme],
   ].filter(([, text]) => PRIVATE_COPY.test(text)).map(([where]) => where);
-  if (claims.length === 0) return;
   const verification = readFileSync(new URL("../ARCHITECTURE.md", import.meta.url), "utf8").split("## Verification")[1] ?? "";
+  // S5: the upload path is flag-off; its copy is re-reviewed before it is turned on.
+  assert.ok(verification.includes("Turning uploads on requires a plugin re-review and release (varity-plugin#5) of the S5 copy"), verification);
+  if (claims.length === 0) return;
   assert.ok(verification.includes(PRIVATE_COPY_GATE), `private copy promised in ${claims.join(", ")} without the release gate in ARCHITECTURE.md ## Verification`);
 });
 
@@ -377,4 +379,24 @@ test("R2-2: structured and text results agree: same message, counts and profiles
 test("R2-3: the key line has one home (public-api); login does not re-export it", async () => {
   const login = await import("../dist/tools/login.js");
   assert.equal(login.KEY_SIGN_IN_LINE, undefined);
+});
+
+test("S5/PLUGIN-PRIV: no tool text, instruction, README line or src string claims privacy beyond what ships", async () => {
+  const OVERCLAIM = /code stays private|keeps? the code private|other private paths/i;
+  const texts = [["README", readFileSync(new URL("../README.md", import.meta.url), "utf8")]];
+  const { readdirSync } = await import("node:fs");
+  const sources = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory() ? sources(join(dir, e.name)) : e.name.endsWith(".ts") ? [join(dir, e.name)] : []);
+  for (const file of sources(new URL("../src", import.meta.url).pathname)) texts.push([file, readFileSync(file, "utf8")]);
+  for (const [name, options] of [["stdio", undefined], ["remote", { toolset: "remote", credentialProvider: async () => "k" }]]) {
+    const [serverSide, clientSide] = InMemoryTransport.createLinkedPair();
+    await createVarityServer(options).connect(serverSide);
+    const client = new Client({ name: "s5", version: "1" });
+    await client.connect(clientSide);
+    texts.push([`${name} instructions`, client.getInstructions() ?? ""]);
+    for (const tool of (await client.listTools()).tools) texts.push([`${name} ${tool.name}`, JSON.stringify(tool)]);
+    await client.close();
+  }
+  const overclaims = texts.filter(([, text]) => OVERCLAIM.test(text)).map(([where, text]) => `${where}: ${text.match(OVERCLAIM)[0]}`);
+  assert.deepEqual(overclaims, []);
 });

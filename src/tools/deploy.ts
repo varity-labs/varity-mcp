@@ -94,22 +94,22 @@ function unreadableRepository(repoUrl: string | undefined, canUpload: boolean, s
   if (canUpload && state.upload === "available") {
     return [
       "Varity could not read this repository: it is private or does not exist. Nothing was deployed and nothing was charged.",
-      "Offer this first, in plain words: \"I'll upload your project folder to Varity instead; your code stays private.\" " +
+      "Offer this first, in plain words: \"I'll upload your project folder to Varity instead; nothing is published to GitHub.\" " +
         "Then call varity_deploy again with path set to the project folder and source \"upload\" (no repo_url). " +
-        "Other private paths: a ready-made Varity template (varity_list_templates) or a prebuilt container image (image argument). " +
+        "Other paths without a public repository: a ready-made Varity template (varity_list_templates) or a prebuilt container image (image argument). " +
         publish,
     ];
   }
   const tryUpload =
     canUpload && state.upload === "unknown"
       ? "If the user wants their own folder online, you may try varity_deploy with path set to the project folder and source \"upload\", " +
-        "but do not promise it works or that the code stays private: if it answers UPLOAD_UNAVAILABLE, Varity can't take a folder from this computer yet. "
+        "but do not promise it works: if it answers UPLOAD_UNAVAILABLE, Varity can't take a folder from this computer yet. "
       : "";
   return [
     sayExactly("Varity can't read this project's code on GitHub: it is private or does not exist. Nothing was deployed or charged."),
     `Explain this plainly${canUpload && state.upload === "unavailable" ? ` (${NO_FOLDER_YET})` : ""}. ${NO_GITHUB_PATH} ` +
       tryUpload +
-      "For developers, paths that keep the code private: a ready-made Varity template (varity_list_templates) " +
+      "For developers, paths that need no public repository: a ready-made Varity template (varity_list_templates) " +
       "or a prebuilt container image (image argument). " +
       publish,
   ];
@@ -244,7 +244,7 @@ async function uploadFolder(packed: PackedFolder, deploy: FolderDeploy, state: U
   const acceptance = await lifecycleAcceptance(accepted);
   const secrets = packed.secretPaths;
   const notes = [
-    `${deploy.why ? `${deploy.why} ` : ""}I uploaded this folder to Varity (${packed.fileCount} files); your code stays private and nothing was published to GitHub.`,
+    `${deploy.why ? `${deploy.why} ` : ""}I uploaded this folder to Varity (${packed.fileCount} files); nothing was published to GitHub.`,
     packed.excludedCount > 0
       ? `Left out ${packed.excludedCount} ignored items (dependencies, build output and anything in .gitignore).`
       : "",

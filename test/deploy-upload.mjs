@@ -160,7 +160,7 @@ test("a folder with no GitHub repo is uploaded privately and deployed, secrets k
     assert.equal(create.app_name, "my-site");
 
     assert.match(out.message, /no GitHub repository/);
-    assert.match(out.message, /uploaded this folder to Varity \(7 files\); your code stays private/);
+    assert.match(out.message, /uploaded this folder to Varity \(7 files\); nothing was published to GitHub\./);
     assert.match(out.message, /Left out \d+ ignored items/);
     assert.deepEqual(out.data.secret_files_not_uploaded, [".env", "config/secrets/", "server.pem"]);
     assert.match(out.message, /did not upload them: \.env, config\/secrets\/, server\.pem/);
@@ -252,7 +252,7 @@ test("J-14: once an upload worked, an explicit private repo_url offers the folde
   assert.equal(out.error.code, "source_repository_unreadable");
   assert.match(out.error.message, /private or does not exist\. Nothing was deployed and nothing was charged\./);
   const suggestion = out.error.suggestion;
-  const upload = suggestion.indexOf("I'll upload your project folder to Varity instead; your code stays private.");
+  const upload = suggestion.indexOf("I'll upload your project folder to Varity instead; nothing is published to GitHub.");
   const template = suggestion.indexOf("varity_list_templates");
   const publish = suggestion.indexOf("--visibility public");
   assert.ok(upload >= 0 && upload < template && template < publish, suggestion);
