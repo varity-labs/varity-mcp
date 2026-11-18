@@ -8,6 +8,15 @@ const path = require("node:path");
 
 const FLAG = "VARITY_HOSTED_REPOS_DEPLOY_KEYS_ENABLED";
 
+/** What a redacted transcript never holds: keys, owner ids, emails, bearer and GitHub tokens. */
+const UNREDACTED = [
+  ["a Varity deploy key (vk_)", /vk_[A-Za-z0-9]/],
+  ["an owner id (did:privy:)", /did:privy:/],
+  ["an email address", /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/],
+  ["a bearer token", /Bearer /],
+  ["a GitHub token (gh?_)", /gh[pousr]_[A-Za-z0-9]/],
+];
+
 /**
  * Why `<root>/acceptance/r1-live.json` does not prove the live acceptance of this package
  * (`pkg` is its package.json), or null when it does. The receipt binds the package version
@@ -39,8 +48,11 @@ function evidenceProblem(root, evidence) {
     return "evidence.path must be a file under acceptance/";
   }
   if (!fs.existsSync(file) || !fs.statSync(file).isFile()) return `evidence file ${evidence.path} does not exist`;
-  const actual = createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+  const bytes = fs.readFileSync(file);
+  const actual = createHash("sha256").update(bytes).digest("hex");
   if (actual !== evidence.sha256.toLowerCase()) return `evidence sha256 does not match ${evidence.path}`;
+  const leak = UNREDACTED.find(([, pattern]) => pattern.test(bytes.toString("utf8")));
+  if (leak) return `evidence ${evidence.path} is not redacted: it holds ${leak[0]} (this repository is public)`;
   return null;
 }
 

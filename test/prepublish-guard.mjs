@@ -147,3 +147,21 @@ test("SPA-2: a dist whose FOLDER_RULE is reworded without the phrase 'private co
   assert.notEqual(status, 0);
   assert.match(output, /acceptance\/r1-live\.json/, output);
 });
+
+test("SP30-3: evidence holding a key, owner id, email, bearer token or GitHub token is refused (the repository is public)", () => {
+  for (const leak of [
+    "deploy key vk_live_9f8e7d6c5b4a",
+    "owner did:privy:cm1abc2def",
+    "signed in as founder@example.com",
+    "Authorization: Bearer abc.def.ghi",
+    "token ghs_16C7e42F292c6912E7710c838347Ae178B4a",
+    "token ghp_16C7e42F292c6912E7710c838347Ae178B4a",
+  ]) {
+    const evidence = `R1 live acceptance\n${leak}\n`;
+    const receipt = { ...RECEIPT, evidence: { ...RECEIPT.evidence, sha256: createHash("sha256").update(evidence).digest("hex") } };
+    const { status, output } = guard({ promise: true, receipt, evidence });
+    assert.notEqual(status, 0, leak);
+    assert.match(output, /not redacted/, output);
+  }
+  assert.equal(guard({ promise: true, receipt: RECEIPT }).status, 0, "the redacted transcript passes");
+});
