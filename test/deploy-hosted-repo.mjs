@@ -67,10 +67,6 @@ function stubGateway(routes, { clock } = {}) {
     let answer = routes[route];
     if (typeof answer === "function") answer = answer(call, calls);
     else if (Array.isArray(answer)) answer = answer[Math.min(call.index, answer.length - 1)];
-    // PLAN-W2: a deploy first looks the app up; the producer's own not-found (gateway public-api.ts:1645-1650 at 98042b77) is a first deploy.
-    if (answer === undefined && /^GET \/api\/deployments\/(?!runs\/)[^/]+$/.test(route)) {
-      answer = [404, { code: "deployment_not_found", message: "Deployment not found.", action: "Check the deployment id and API key owner.", retryable: false }];
-    }
     if (answer === undefined && route === CHANGES) answer = [201, { branch: body.branch, commit_sha: sha(calls.filter((c) => c.route === CHANGES).length), base_sha: sha(999) }];
     if (answer === "throw") throw new TypeError("fetch failed");
     const [status, payload, headers = {}] = answer ?? [404, { code: "not_found", message: "Not found" }];
@@ -135,7 +131,16 @@ function project(files = { "index.html": "<h1>Flour Lane</h1>\n" }) {
 
 const of = (calls, route) => calls.filter((c) => c.route === route);
 const many = (n, make) => Object.fromEntries(Array.from({ length: n }, (_, i) => make(i)));
-const base = { [SOURCES]: [UPLOAD_OFF], [HOSTED]: [repoFor("my-site")], [CREATE]: [ACCEPTED] };
+/**
+ * A deploy first looks the app up (PLAN-W2). Only the producer's own not-found (gateway
+ * public-api.ts:1645-1650 at 98042b77) is a first deploy; an unrouted lookup gets the stub's
+ * generic 404, which the deploy refuses as unread, so each test names its lookup.
+ */
+const NO_APP = [404, { code: "deployment_not_found", message: "Deployment not found.", action: "Check the deployment id and API key owner.", retryable: false }];
+const base = {
+  [SOURCES]: [UPLOAD_OFF], "GET /api/deployments/my-site": [NO_APP], "GET /api/deployments/site": [NO_APP],
+  [HOSTED]: [repoFor("my-site")], [CREATE]: [ACCEPTED],
+};
 
 test("a folder is saved as a private copy (utf-8 and base64, secrets kept local) and deployed from its exact commit", async () => {
   const { dir, cleanup } = project({

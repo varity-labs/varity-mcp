@@ -42,7 +42,9 @@ async function call(name, args, routes, shared) {
   const original = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
     const { pathname, search } = new URL(url);
-    const [status, body] = routes[`${init?.method ?? "GET"} ${pathname}${search}`] ?? routes[`${init?.method ?? "GET"} ${pathname}`] ?? [404, { code: "not_found" }];
+    // The app lookup a folder deploy sends first (PLAN-W2) exists whatever the upload and hosted flags say: no such app is the producer's own deployment_not_found (gateway public-api.ts:1645-1650).
+    const lookup = (init?.method ?? "GET") === "GET" && /^\/api\/deployments\/(?!runs\/)[^/]+$/.test(pathname) ? [404, { code: "deployment_not_found", message: "Deployment not found." }] : undefined;
+    const [status, body] = routes[`${init?.method ?? "GET"} ${pathname}${search}`] ?? routes[`${init?.method ?? "GET"} ${pathname}`] ?? lookup ?? [404, { code: "not_found" }];
     return { ok: status >= 200 && status < 300, status, json: async () => body };
   };
   try {

@@ -65,7 +65,10 @@ test("hosted route off: folder-deploy results promise no private copy and end in
   try {
     for (const [args, routes] of scenarios) {
       globalThis.fetch = async (url, init) => {
-        const [status, body] = routes[`${init?.method ?? "GET"} ${new URL(url).pathname}`] ?? [404, { code: "not_found", message: "Not found" }];
+        // The app lookup a folder deploy sends first (PLAN-W2) exists whatever the upload and hosted flags say: no such app is the producer's own deployment_not_found (gateway public-api.ts:1645-1650).
+        const route = `${init?.method ?? "GET"} ${new URL(url).pathname}`;
+        const lookup = /^GET \/api\/deployments\/(?!runs\/)[^/]+$/.test(route) ? [404, { code: "deployment_not_found", message: "Deployment not found." }] : undefined;
+        const [status, body] = routes[route] ?? lookup ?? [404, { code: "not_found", message: "Not found" }];
         return { ok: status >= 200 && status < 300, status, headers: { get: () => null }, json: async () => body };
       };
       const result = await client.callTool({ name: "varity_deploy", arguments: args });

@@ -121,12 +121,12 @@ const base = (extra = {}) => ({
   ...extra,
 });
 
-async function deploy(routes, { clock } = {}) {
+async function deploy(routes, { clock, args = {} } = {}) {
   const client = await connect();
   const { dir, cleanup } = project();
   const stub = stubGateway(routes, { clock });
   try {
-    const result = await client.callTool({ name: "varity_deploy", arguments: { path: dir } });
+    const result = await client.callTool({ name: "varity_deploy", arguments: { path: dir, ...args } });
     return { isError: Boolean(result.isError), out: JSON.parse(result.content[0].text), calls: stub.calls };
   } finally {
     stub.restore();
@@ -169,6 +169,9 @@ test("T3: only a served deployment_not_found means a first deploy; an unread ans
 
   const cases = [
     ["503", [[503, served("ownership_check_unavailable"), { "Retry-After": "20" }]], "ownership_check_unavailable", "Call varity_deploy again with the same path after 20 seconds."],
+    ["429", [[429, { code: "rate_limited", message: "Too many requests." }, { "Retry-After": "7" }]], "rate_limited", "Call varity_deploy again with the same path after 7 seconds."],
+    ["502", [[502, { code: "deployment_read_unavailable", message: "Deployment detail is temporarily unavailable." }]], "deployment_read_unavailable", "Call varity_deploy again with the same path."],
+    ["network", ["throw"], "VARITY_API_UNREACHABLE", "Call varity_deploy again with the same path."],
     ["other 404", [[404, { code: "not_found", message: "Not found" }]], "not_found", "Call varity_deploy again with the same path."],
     ["empty 200", [[200, {}]], "DEPLOYMENT_NOT_FOUND", "Call varity_deploy again with the same path."],
   ];
@@ -177,7 +180,7 @@ test("T3: only a served deployment_not_found means a first deploy; an unread ans
     assert.equal(isError, true, name);
     assert.equal(out.error.code, code, name);
     assert.equal(out.error.suggestion, action, name);
-    assert.match(out.error.message, /Nothing was deployed or charged\./, name);
+    assert.match(out.error.message, /nothing was deployed or charged\./i, name);
     assert.deepEqual(routes(calls), [LOCATOR], name);
   }
 });
@@ -186,6 +189,7 @@ test("T4: an app of that name the copy cannot update in place is refused before 
   const otherRepo = `https://github.com/${ORG}/${PREFIX}-other`;
   const cases = [
     ["another hosted repo", detail("detail_dynamic", (d) => ({ ...d, source: { ...d.source, repository_url: otherRepo } })), "APP_NAME_IN_USE", [LOCATOR, HOSTED]],
+    ["not GitHub", detail("detail_dynamic", (d) => ({ ...d, source: { ...d.source, repository_url: "https://gitlab.com/acme/my-site" } })), "APP_NAME_IN_USE", [LOCATOR]],
     ["template", detail("detail_dynamic", (d) => ({ ...d, source: { type: "template", template_id: "tpl" } })), "APP_NAME_IN_USE", [LOCATOR]],
     ["image", detail("detail_dynamic", (d) => ({ ...d, source: { type: "image" } })), "APP_NAME_IN_USE", [LOCATOR]],
     ["legacy record", detail("detail_dynamic", (d) => ({ ...d, membership: "registry_legacy" })), "APP_NAME_IN_USE", [LOCATOR]],
@@ -197,7 +201,7 @@ test("T4: an app of that name the copy cannot update in place is refused before 
     const { isError, out, calls } = await deploy(base({ [LOCATOR]: [locator] }));
     assert.equal(isError, true, name);
     assert.equal(out.error.code, code, name);
-    assert.match(out.error.message, /Nothing was deployed or charged\./, name);
+    assert.match(out.error.message, /nothing was deployed or charged\./i, name);
     assert.match(out.error.suggestion, /varity_deploy/, name);
     assert.deepEqual(routes(calls), sent, name);
   }
@@ -205,10 +209,14 @@ test("T4: an app of that name the copy cannot update in place is refused before 
 
 test("T5: source-revision refusals keep the live app and never fall back to a create; an ambiguous answer is resent once with the same key", async () => {
   const lead = "Varity saved this folder, but the update was not started: ";
+  const kept = `Call varity_deploy_status with "${APP}" to see its state; to deploy this folder as a separate app, call varity_deploy again with the same path and a different app_name.`;
   const refusals = [
     ["update in progress", [answer("update_in_progress")], "deployment_update_in_progress", `Wait until varity_deploy_status with "${APP}" shows it live, then call varity_deploy again with the same path.`],
     ["unavailable", [answer("source_revision_unavailable")], "source_revision_unavailable", `Call varity_deploy_status with "${APP}" to see its state; to deploy this folder as a separate app, call varity_deploy again with the same path and a different app_name.`],
     ["runtime not started", [answer("runtime_not_started")], "runtime_not_started", `Call varity_deploy_status with "${APP}" to see its state; to deploy this folder as a separate app, call varity_deploy again with the same path and a different app_name.`],
+    ["unsupported", [[422, { code: "source_revision_unsupported", message: "Only a web service deployed from a repository can deploy a new commit in place." }]], "source_revision_unsupported", kept],
+    ["gone", [answer("locator_not_found")], "deployment_not_found", kept],
+    ["other 4xx", [answer("idempotency_key_reused")], "idempotency_key_reused", "Call varity_deploy again with the same path."],
     ["credential", [answer("repository_credential_required")], "repository_credential_required", "Call varity_deploy again with the same path in a minute; if it repeats, call varity_doctor to check the deploy key."],
     ["rate limited", [[429, { code: "rate_limited", message: "Too many requests." }, { "Retry-After": "30" }]], "rate_limited", "Call varity_deploy again with the same path after 30 seconds."],
   ];
@@ -218,12 +226,23 @@ test("T5: source-revision refusals keep the live app and never fall back to a cr
     assert.equal(out.error.code, code, name);
     assert.ok(out.error.message.startsWith(lead), `${name}: ${out.error.message}`);
     assert.equal(out.error.suggestion, action, name);
+    if (action === kept) assert.match(out.error.message, / The live app was not changed\.$/, name);
     assert.equal(of(calls, CREATE).length, 0, name);
     assert.equal(of(calls, REVISION).length, 1, name);
   }
 
   const unavailable = answer("deploy_service_unavailable");
   const accepted = answer("source_revision_accepted", (b) => ({ ...b, commit_sha: HEAD }));
+  const firstAnswer500 = await deploy(base({ [REVISION]: [[500, { code: "redeploy_failed", message: "The commit could not be deployed." }], accepted] }));
+  assert.equal(firstAnswer500.isError, false, JSON.stringify(firstAnswer500.out));
+  assert.equal(of(firstAnswer500.calls, REVISION).length, 2);
+
+  const approvalLost = await deploy(base({ [REVISION]: [unavailable], [APPROVALS]: [answer("approval_created"), [503, { code: "approval_store_unavailable", message: "Approvals are unavailable." }]] }));
+  assert.equal(approvalLost.isError, true);
+  assert.equal(approvalLost.out.error.suggestion, UNCONFIRMED);
+  assert.match(approvalLost.out.error.message, /whether the update started is unconfirmed/);
+  assert.equal(of(approvalLost.calls, REVISION).length, 1);
+
   const resent = await deploy(base({ [REVISION]: [unavailable, accepted] }));
   assert.equal(resent.isError, false, JSON.stringify(resent.out));
   assert.equal(of(resent.calls, APPROVALS).length, 2);
@@ -270,14 +289,28 @@ test("T7: the update starts only with at least 45 s left before the 230 s hard d
     assert.equal(of(late.calls, APPROVALS).length, 0);
     assert.equal(of(late.calls, REVISION).length, 0);
 
-    // At 184 s, 46 s are left: the update starts, and the resend is skipped once under 15 s remain.
+    // At 184 s, 46 s are left: the update starts, each request's timeout is cut to what is left
+    // (read from the abort timer the client arms just before its fetch), and the resend is skipped
+    // once under 15 s remain.
     offset = 0;
-    const tight = await deploy(base({ [REVISION]: [answer("deploy_service_unavailable")] }), {
-      clock: (call) => {
-        if (call.route === CHANGES) offset = 184_000;
-        if (call.route === REVISION) offset = 216_000;
-      },
-    });
+    const realSetTimeout = globalThis.setTimeout;
+    let lastDelay;
+    const timeouts = {};
+    globalThis.setTimeout = (fn, ms, ...rest) => { lastDelay = ms; return realSetTimeout(fn, ms, ...rest); };
+    let tight;
+    try {
+      tight = await deploy(base({ [REVISION]: [answer("deploy_service_unavailable")] }), {
+        clock: (call) => {
+          if (call.route === APPROVALS || call.route === REVISION) timeouts[call.route] = lastDelay;
+          if (call.route === CHANGES) offset = 184_000;
+          if (call.route === REVISION) offset = 216_000;
+        },
+      });
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+    }
+    assert.ok(timeouts[APPROVALS] <= 46_000, String(timeouts[APPROVALS]));
+    assert.ok(timeouts[REVISION] <= 46_000, String(timeouts[REVISION]));
     assert.equal(tight.isError, true);
     assert.equal(of(tight.calls, REVISION).length, 1);
     assert.equal(tight.out.error.suggestion, UNCONFIRMED);
@@ -293,6 +326,13 @@ test("T8: a busy approval answers its wait and sends no source revision", async 
   assert.ok(out.error.message.startsWith("Varity saved this folder, but the update was not started: "));
   assert.equal(out.error.suggestion, "Call varity_deploy again with the same path after 12 seconds.");
   assert.equal(of(calls, REVISION).length, 0);
+});
+
+test("T9: an in-place update says the app keeps its storage settings when volume arguments were given", async () => {
+  const { isError, out, calls } = await deploy(base(), { args: { volume_size: 1, volume_path: "/data" } });
+  assert.equal(isError, false, JSON.stringify(out));
+  assert.deepEqual(of(calls, REVISION)[0].body, { commit: HEAD });
+  assert.match(out.message, /any attached AI key are kept\. Its storage settings are unchanged\. /);
 });
 
 test("the locator name is the gateway's own app-name normalization (deploy-validation.ts:26-41)", () => {

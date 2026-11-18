@@ -292,6 +292,11 @@ export function locatorName(name: string): string {
   return last.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-{2,}/g, "-").replace(/^-+|-+$/g, "").slice(0, 63);
 }
 
+/** The served code of a failure, or the client's own code when nothing was served. */
+function codeOf(err: unknown): string {
+  return err instanceof VarityPublicApiError ? err.code : "VARITY_API_UNREACHABLE";
+}
+
 /** How the saved folder is deployed (PLAN-W2 §3.1). */
 type Target = { kind: "create" } | { kind: "revision"; id: string; repositoryUrl: string };
 
@@ -321,8 +326,8 @@ async function deployTarget(deploy: FolderDeploy): Promise<Target | ToolResult> 
     if (err instanceof VarityPublicApiError && err.status === 404 && err.code === "deployment_not_found") return { kind: "create" };
     if (err instanceof VarityPublicApiError && (err.status === 429 || err.status === 503)) return busy(err);
     return errorResponse(
-      err instanceof VarityPublicApiError ? err.code : "VARITY_API_UNREACHABLE",
-      `Varity could not check whether ${deploy.appName} already exists. ${NOTHING}`,
+      codeOf(err),
+      `Varity could not check whether ${deploy.appName} already exists, so nothing was deployed or charged.`,
       AGAIN
     );
   }
@@ -337,26 +342,37 @@ async function deployTarget(deploy: FolderDeploy): Promise<Target | ToolResult> 
   if (app.membership === "durable_only" || app.runtime === "static") return { kind: "create" };
   if (app.runtime === "dynamic" && app.membership !== "registry_legacy" && app.source?.type === "repository") {
     const url = app.source.repository_url;
-    if (typeof url === "string" && url) return { kind: "revision", id: app.id, repositoryUrl: url };
+    if (typeof url === "string" && url) {
+      // Only a GitHub repository can be this private copy; any other source is another app.
+      return githubRepository(url) ? { kind: "revision", id: app.id, repositoryUrl: url } : nameInUse(deploy.appName);
+    }
     return errorResponse(
       "DEPLOYMENT_SOURCE_UNCONFIRMED",
-      `Varity could not confirm what ${deploy.appName} is running from right now. ${NOTHING}`,
+      `Varity could not confirm what ${deploy.appName} is running from right now, so nothing was deployed or charged.`,
       "Call varity_deploy again with the same path in a minute."
     );
   }
   return nameInUse(deploy.appName);
 }
 
-/** Whether a served `https://github.com/<owner>/<name>` is this repository (case-insensitive, `.git` ignored). */
-function sameRepository(url: string, fullName: string): boolean {
+/** `owner/name` (lowercase) of a served `https://github.com/<owner>/<name>` (`.git` ignored), else null. */
+function githubRepository(url: string): string | null {
   const match = /^https:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/i.exec(url.trim());
-  return match !== null && `${match[1]}/${match[2]}`.toLowerCase() === fullName.toLowerCase();
+  return match ? `${match[1]}/${match[2]}`.toLowerCase() : null;
+}
+
+function sameRepository(url: string, fullName: string): boolean {
+  return githubRepository(url) === fullName.toLowerCase();
 }
 
 const NOT_STARTED = "Varity saved this folder, but the update was not started: ";
 const LIVE_APP_KEPT = "The live app was not changed.";
 
-/** The gateway may have accepted the update: a network failure, a 500/502/504, or the 503 that says deploy-api did not answer. */
+/**
+ * The gateway may have accepted the update: a network failure, a 500, the 503 that says deploy-api
+ * did not answer, and also a 502/504 (an edge answer that hides whether the route ran), so a lost
+ * answer is never reported as "not started" (R8).
+ */
 function ambiguous(err: unknown): boolean {
   if (!(err instanceof VarityPublicApiError)) return true;
   if (err.code === "VARITY_API_UNREACHABLE" || err.status === undefined) return true;
@@ -365,15 +381,17 @@ function ambiguous(err: unknown): boolean {
 
 function unconfirmed(err: unknown, appName: string): ToolResult {
   return errorResponse(
-    err instanceof VarityPublicApiError ? err.code : "VARITY_API_UNREACHABLE",
+    codeOf(err),
     "Varity saved this folder; whether the update started is unconfirmed.",
     checkStatusAction(appName)
   );
 }
 
-/** A source revision the gateway refused: the live app is unchanged and no create follows. */
-function revisionRefused(err: unknown, appName: string): ToolResult {
-  if (!(err instanceof VarityPublicApiError)) return unconfirmed(err, appName);
+/** Refusals after which the live app keeps running unchanged (gateway source-revision route). */
+const LIVE_APP_REFUSALS = new Set(["source_revision_unavailable", "source_revision_refused", "runtime_not_started", "source_revision_unsupported", "deployment_not_found"]);
+
+/** A source revision the gateway refused (never an ambiguous answer): no create follows. */
+function revisionRefused(err: VarityPublicApiError, appName: string): ToolResult {
   if (err.status === 429 || err.status === 503) return busy(err, NOT_STARTED);
   if (err.code === "deployment_update_in_progress") {
     return errorResponse(
@@ -389,7 +407,7 @@ function revisionRefused(err: unknown, appName: string): ToolResult {
       "Call varity_deploy again with the same path in a minute; if it repeats, call varity_doctor to check the deploy key."
     );
   }
-  if (err.status === 404 || err.status === 409 || err.status === 422) {
+  if (LIVE_APP_REFUSALS.has(err.code)) {
     return errorResponse(
       err.code,
       `${NOT_STARTED}${err.message} ${LIVE_APP_KEPT}`,
@@ -439,12 +457,12 @@ async function updateInPlace(id: string, commit: string, deploy: FolderDeploy): 
     const err = first.approvalErr;
     if (err instanceof VarityPublicApiError && (err.status === 429 || err.status === 503)) return busy(err, NOT_STARTED);
     return errorResponse(
-      err instanceof VarityPublicApiError ? err.code : "VARITY_API_UNREACHABLE",
+      codeOf(err),
       `${NOT_STARTED}${err instanceof Error ? err.message : "the approval failed."}`,
       AGAIN
     );
   }
-  if (!ambiguous(first.err)) return revisionRefused(first.err, deploy.appName);
+  if (!ambiguous(first.err)) return revisionRefused(first.err as VarityPublicApiError, deploy.appName);
   if (hardAt - Date.now() < PRIVATE_COPY_LIMITS.resendMinLeftMs) return unconfirmed(first.err, deploy.appName);
   const resent = await approvedRevision(id, commit, key, hardAt);
   if ("value" in resent) return resent;
@@ -519,7 +537,6 @@ export async function deployPrivateCopy(collected: CollectedFolder, deploy: Fold
   ].filter(Boolean).join("; ");
   const savedData = { source: "varity_private_repository", saved_files: collected.files.length, left_out_count: collected.excludedCount, secret_files_not_saved: secrets };
   const lead = deploy.why ? `${deploy.why} ` : "";
-  const setEnv = secrets.length > 0 ? "Give the app its settings with varity_set_env. " : "";
 
   if (target.kind === "revision") {
     const updated = await updateInPlace(target.id, head!, deploy);
@@ -529,7 +546,6 @@ export async function deployPrivateCopy(collected: CollectedFolder, deploy: Fold
       { accepted: true, id: updated.value.id ?? null, app_name: updated.value.app_name ?? null, ...savedData, update: "in_place", ...acceptance },
       `${lead}Varity saved a private copy of this folder (${saved}) and is updating ${deploy.appName} in place; its settings and any attached AI key are kept. ` +
         (Object.keys(deploy.volume).length > 0 ? "Its storage settings are unchanged. " : "") +
-        setEnv +
         acceptanceSummary("Deploy", updated.value.id, acceptance)
     );
   }
@@ -554,6 +570,8 @@ export async function deployPrivateCopy(collected: CollectedFolder, deploy: Fold
   const acceptance = await lifecycleAcceptance(accepted, timeoutBefore(deploy.startedAt + limits.hardDeadlineMs));
   return successResponse(
     { accepted: true, id: accepted.id ?? null, app_name: accepted.app_name ?? null, ...savedData, ...acceptance },
-    `${lead}Varity saved a private copy of this folder (${saved}) and is building it. ` + setEnv + acceptanceSummary("Deploy", accepted.id, acceptance)
+    `${lead}Varity saved a private copy of this folder (${saved}) and is building it. ` +
+      (secrets.length > 0 ? "Give the app its settings with varity_set_env. " : "") +
+      acceptanceSummary("Deploy", accepted.id, acceptance)
   );
 }

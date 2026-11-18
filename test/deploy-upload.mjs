@@ -77,7 +77,9 @@ function stubGateway(routes) {
     const raw = init.body;
     const body = typeof raw === "string" ? JSON.parse(raw) : undefined;
     calls.push({ route, origin: parsed.origin, headers: init.headers, body, raw: raw instanceof Uint8Array ? Buffer.from(raw) : undefined });
-    const queue = routes[route] ?? [[404, { code: "not_found", message: "Not found" }]];
+    // The app lookup a folder deploy sends first (PLAN-W2) exists whatever the upload and hosted flags say: no such app is the producer's own deployment_not_found (gateway public-api.ts:1645-1650).
+    const lookup = /^GET \/api\/deployments\/(?!runs\/|sources)[^/]+$/.test(route) ? [[404, { code: "deployment_not_found", message: "Deployment not found." }]] : undefined;
+    const queue = routes[route] ?? lookup ?? [[404, { code: "not_found", message: "Not found" }]];
     const index = Math.min(used[route] ?? 0, queue.length - 1);
     used[route] = (used[route] ?? 0) + 1;
     const [status, payload] = queue[index];
@@ -184,8 +186,8 @@ for (const [label, refusal] of [
       assert.match(out.error.message, /^Tell the user exactly this: "Varity can't take a folder from this computer yet\. Nothing was uploaded, deployed or charged\./);
       assert.match(out.error.suggestion, /varity_list_templates/);
       assert.match(out.error.suggestion, /ask first/);
-      // R1 M3: the private-copy route is asked next; off too (404 here), so nothing was created.
-      assert.deepEqual(calls.map((call) => call.route), [SOURCES, "POST /api/github/hosted-repositories"], "no upload and no create");
+      // R1 M3: the private-copy route is asked next (after the app lookup, PLAN-W2); off too (404 here), so nothing was created.
+      assert.deepEqual(calls.map((call) => call.route), [SOURCES, "GET /api/deployments/my-site", "POST /api/github/hosted-repositories"], "no upload and no create");
     } finally {
       cleanup();
     }
