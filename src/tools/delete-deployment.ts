@@ -1,7 +1,15 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { successResponse, errorResponse } from "../utils/responses.js";
-import { deleteDeployment, getDeployment, VarityPublicApiError } from "../utils/public-api.js";
+import {
+  createDeploymentApproval,
+  deleteDeployment,
+  getDeployment,
+  listHostedRepositories,
+  queueHostedRepositoryDeletion,
+  VarityPublicApiError,
+  type PublicDeployment,
+} from "../utils/public-api.js";
 import { lifecycleAcceptance } from "../utils/lifecycle-acceptance.js";
 import { INFRASTRUCTURE } from "../utils/endpoints.js";
 
@@ -10,23 +18,65 @@ import { INFRASTRUCTURE } from "../utils/endpoints.js";
  * the one public-API client. The gateway resolves an id or an app name,
  * including a failed deploy that never got a route (varity-gateway
  * services/deploy-ops-public.ts `resolveOwnedDeployment`).
+ *
+ * A deployment built from a private copy this key saved (`varity_deploy` of a
+ * folder, a hosted repository listed `created_by: "deploy_key"`) has that
+ * copy's durable deletion queued first, in the Portal's order: the gateway's
+ * worker removes it once no deployment uses it. Queueing never blocks the
+ * app delete.
  */
+
+type SourceCopy = "deletion_queued" | "not_queued" | null;
+
+/** Queues the private copy's deletion; null when the deployment has none this key made. */
+async function queueSourceCopyDeletion(before: PublicDeployment | null): Promise<SourceCopy> {
+  const url = before?.source?.repository_url;
+  const match = typeof url === "string" ? /^https:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/i.exec(url) : null;
+  if (!match) return null;
+  const fullName = `${match[1]}/${match[2]}`.toLowerCase();
+  try {
+    const listing = await listHostedRepositories();
+    const listed = listing.repositories.find((repo) => repo.full_name.toLowerCase() === fullName);
+    if (!listed) return listing.truncated ? "not_queued" : null;
+    if (listed.created_by !== "deploy_key") return null;
+    const approvalId = await createDeploymentApproval({
+      kind: "delete_hosted_repository",
+      target: `repository:${fullName}`,
+      fingerprint: `${fullName}:${listed.id}`,
+    });
+    const job = await queueHostedRepositoryDeletion(listed.name, listed.id, approvalId);
+    return job.status === "pending" || job.status === "deleted" ? "deletion_queued" : "not_queued";
+  } catch (err) {
+    // A gateway without private copies for keys (404, or the single 403) has none to clean up.
+    if (err instanceof VarityPublicApiError && (err.status === 404 || (err.status === 403 && err.code === "repo_authority_required"))) {
+      return null;
+    }
+    return "not_queued";
+  }
+}
+
+const SOURCE_COPY_NOTE: Record<Exclude<SourceCopy, null>, string> = {
+  deletion_queued: "Its private source copy is deleted once the app is gone.",
+  not_queued: "Varity could not queue the deletion of its private source copy; call varity_delete_deployment again to retry the source cleanup.",
+};
 export async function deleteAccepted(
   deployment: string,
   accepted: Awaited<ReturnType<typeof deleteDeployment>>,
-  hadUrl = true
+  hadUrl = true,
+  sourceCopy: SourceCopy = null
 ) {
   const acceptance = await lifecycleAcceptance(accepted);
   const deleted = accepted.deleted === true || acceptance.public_status === "deleted";
   // Live: the URL kept serving for up to ~40 s after status deleted (E1 journey 3).
   const cached = hadUrl ? " The URL may serve cached content briefly after deletion." : "";
-  return successResponse(
-    { deployment, ...acceptance, deleted },
-    deleted
+  const message = deleted
       ? `"${deployment}" is deleted.${cached}`
       : acceptance.run_id
         ? `Delete accepted for "${deployment}" (run ${acceptance.run_id}, status ${acceptance.public_status ?? "unobserved"}). Poll varity_deploy_status with "${deployment}" until status is deleted and billing.state is stopped; billing stop is not proven before then.${cached}`
-        : `The delete request for "${deployment}" returned no run. Deletion and billing stop are not proven; check varity_deploy_status before retrying.`
+        : `The delete request for "${deployment}" returned no run. Deletion and billing stop are not proven; check varity_deploy_status before retrying.`;
+  return successResponse(
+    { deployment, ...acceptance, deleted, ...(sourceCopy ? { source_copy: sourceCopy } : {}) },
+    sourceCopy ? `${message} ${SOURCE_COPY_NOTE[sourceCopy]}` : message
   );
 }
 
@@ -58,13 +108,16 @@ export function registerDeleteDeploymentTool(server: McpServer): void {
       try {
         // Best effort: only an app that ever had a URL can serve cached content after delete.
         let hadUrl = true;
+        let before: PublicDeployment | null = null;
         try {
-          const before = await getDeployment(deployment);
+          before = await getDeployment(deployment);
           hadUrl = Boolean(before.url ?? before.public_url);
         } catch {
           // Unknown: keep the cached-content line.
         }
-        return await deleteAccepted(deployment, await deleteDeployment(deployment), hadUrl);
+        // Before the app delete (the Portal's order), so the intent outlives this call.
+        const sourceCopy = await queueSourceCopyDeletion(before);
+        return await deleteAccepted(deployment, await deleteDeployment(deployment), hadUrl, sourceCopy);
       } catch (err) {
         if (err instanceof VarityPublicApiError && err.status === 404) {
           return errorResponse(

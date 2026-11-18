@@ -134,7 +134,24 @@ function printable(path: string): string {
   return path.replace(/[\u0000-\u001f\u007f-\u009f]/g, "?");
 }
 
-export async function packFolder(root: string): Promise<PackedFolder> {
+/** A walked project folder: the files to send, and what was left out. */
+export interface CollectedFolder {
+  files: ArchiveFile[];
+  uncompressedBytes: number;
+  /** Files and folders left out (gitignored, dependencies, build output, links). */
+  excludedCount: number;
+  /** Secret files kept on the machine, by relative path only. */
+  secretPaths: string[];
+}
+
+/**
+ * Walks a project folder: every `.gitignore`, the default excludes, secret
+ * files kept on the machine, no symlink followed, unsafe names refused. The
+ * walk stops at the upload caps (`SOURCE_CAPS`) so a huge folder is never
+ * read into memory; a narrower path (the private copy) checks its own caps
+ * on the result.
+ */
+export async function collectFolder(root: string): Promise<CollectedFolder> {
   const files: ArchiveFile[] = [];
   const secretPaths: string[] = [];
   let excludedCount = 0;
@@ -211,6 +228,12 @@ export async function packFolder(root: string): Promise<PackedFolder> {
       "Check that the path points at the project folder.",
     );
   }
+  return { files, uncompressedBytes, excludedCount, secretPaths };
+}
+
+/** The upload source archive (U-6) of a collected folder; refuses one the server would. */
+export async function packCollected(collected: CollectedFolder): Promise<PackedFolder> {
+  const { files, uncompressedBytes, excludedCount, secretPaths } = collected;
   const { archive, tarBytes } = await buildSourceArchive(files);
   if (archive.length > SOURCE_CAPS.maxCompressedBytes) {
     throw new PackRefused(

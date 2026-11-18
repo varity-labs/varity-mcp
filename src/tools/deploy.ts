@@ -10,7 +10,8 @@ import {
   VarityPublicApiError,
 } from "../utils/public-api.js";
 import { acceptanceSummary, lifecycleAcceptance } from "../utils/lifecycle-acceptance.js";
-import type { PackedFolder } from "./pack.js";
+import type { CollectedFolder, PackedFolder } from "./pack.js";
+import { deployPrivateCopy } from "./deploy-private-copy.js";
 
 /**
  * `varity_deploy` → `POST /api/deployments` through the one public-API client
@@ -19,21 +20,24 @@ import type { PackedFolder } from "./pack.js";
  * control plane owns framework detection, hosting, build and lifecycle. The
  * MCP only names the source: an explicit repo/image, else (stdio only) the
  * project's `origin` remote through the injected `LocalSource`. A folder with
- * no public GitHub repo (no `origin`, or one Varity cannot read) is packed and
- * uploaded through IF-UPLOAD (`POST /api/deployments/sources`, then a PUT of
- * the archive, then a create naming the sealed `source_id`); the code stays
- * private and nothing is pushed to GitHub. The remote toolset registers this
+ * no public GitHub repo (no `origin`, or one Varity cannot read) is collected
+ * and uploaded through IF-UPLOAD (`POST /api/deployments/sources`, then a PUT
+ * of the archive, then a create naming the sealed `source_id`); while that
+ * route is unavailable it is saved as a private copy Varity keeps and
+ * deployed from its commit (`deploy-private-copy.ts`). The remote toolset registers this
  * tool without a local source, so its schema has no `path` and this module
  * reads no file.
  */
 
-/** A project folder, its `origin` remote, and its packer; stdio only (`deploy-local-source.ts`). */
+/** A project folder, its `origin` remote, its walk and its packer; stdio only (`deploy-local-source.ts`). */
 export interface LocalSource {
   resolve(
     path: string | undefined
   ): Promise<{ folder: string; repoUrl: string | null; explicit: boolean } | ReturnType<typeof errorResponse>>;
-  /** Throws `PackRefused` with plain copy when the folder cannot be uploaded. */
-  pack(folder: string): Promise<PackedFolder>;
+  /** Throws `PackRefused` with plain copy when the folder cannot be read or sent. */
+  collect(folder: string): Promise<CollectedFolder>;
+  /** The upload archive of a collected folder; throws `PackRefused` when it cannot be uploaded. */
+  pack(collected: CollectedFolder): Promise<PackedFolder>;
 }
 
 /** A contract-valid app name (`^[a-z0-9-]{1,63}$`) from the repo or image name. */
@@ -145,17 +149,22 @@ const UPLOAD_UNAVAILABLE_ACTION =
   "Last, and only if the user decides to make the code public: push it to a public GitHub repository " +
   "(varity_create_repo, then make it public) and deploy its repo_url; ask first.";
 
+/** No route takes a folder from this computer: the no-GitHub copy (Chat and Build first). */
+function folderUnavailable(step: "upload" | "deploy") {
+  return errorResponse(
+    "UPLOAD_UNAVAILABLE",
+    sayExactly(`${NO_FOLDER_YET} ${step === "upload" ? "Nothing was uploaded, deployed or charged." : "Nothing was deployed or charged."}`),
+    UPLOAD_UNAVAILABLE_ACTION
+  );
+}
+
 function uploadError(err: unknown, step: "upload" | "deploy", state: UploadState) {
   if (!(err instanceof VarityPublicApiError)) {
     return errorResponse("UPLOAD_FAILED", "The folder upload failed, so nothing was deployed or charged.", "Retry the deploy.");
   }
   if ((step === "upload" && uploadUnavailable(err)) || err.code === "uploads_unavailable") {
     state.upload = "unavailable";
-    return errorResponse(
-      "UPLOAD_UNAVAILABLE",
-      sayExactly(`${NO_FOLDER_YET} ${step === "upload" ? "Nothing was uploaded, deployed or charged." : "Nothing was deployed or charged."}`),
-      UPLOAD_UNAVAILABLE_ACTION
-    );
+    return folderUnavailable(step);
   }
   if (err.code === "source_too_large") {
     return errorResponse(
@@ -185,21 +194,56 @@ function uploadError(err: unknown, step: "upload" | "deploy", state: UploadState
   );
 }
 
+function packRefusal(err: unknown, folder: string) {
+  const refused = err as { code?: string; message?: string; action?: string };
+  if (refused?.code && refused.action) return errorResponse(refused.code, refused.message ?? "", refused.action);
+  return errorResponse("PACK_FAILED", `Could not read the project folder ${folder}, so nothing was uploaded.`, "Check the path and file permissions.");
+}
+
+/**
+ * PLAN-R1 M3 order: collect; try the upload (U-6) unless this server saw it
+ * off; once it is off, or the folder cannot be packed for it, save a private
+ * copy (its own caps); if that route is off too, the upload's own answer.
+ */
 async function deployFolder(
   local: LocalSource,
   folder: string,
   request: Record<string, unknown>,
   why: string,
+  state: UploadState,
+  startedAt: number
+) {
+  let collected: CollectedFolder;
+  try {
+    collected = await local.collect(folder);
+  } catch (err) {
+    return packRefusal(err, folder);
+  }
+  // `uploadFolder` sets the state when the route answers off.
+  const off = () => state.upload === "unavailable";
+  let answer: ReturnType<typeof errorResponse> | undefined;
+  if (!off()) {
+    let packed: PackedFolder | undefined;
+    try {
+      packed = await local.pack(collected);
+    } catch (err) {
+      answer = packRefusal(err, folder);
+    }
+    if (packed) {
+      const uploaded = await uploadFolder(packed, request, why, state);
+      if (!off()) return uploaded;
+      answer = uploaded as ReturnType<typeof errorResponse>;
+    }
+  }
+  return (await deployPrivateCopy(collected, request, why, startedAt)) ?? answer ?? folderUnavailable("upload");
+}
+
+async function uploadFolder(
+  packed: PackedFolder,
+  request: Record<string, unknown>,
+  why: string,
   state: UploadState
 ) {
-  let packed: PackedFolder;
-  try {
-    packed = await local.pack(folder);
-  } catch (err) {
-    const refused = err as { code?: string; message?: string; action?: string };
-    if (refused?.code && refused.action) return errorResponse(refused.code, refused.message ?? "", refused.action);
-    return errorResponse("PACK_FAILED", `Could not read the project folder ${folder}, so nothing was uploaded.`, "Check the path and file permissions.");
-  }
   let sourceId: string;
   try {
     const slot = await createUploadSource();
@@ -264,8 +308,8 @@ export function registerDeployTool(server: McpServer, localSource?: LocalSource)
       .optional()
       .describe(
         "Absolute path to the project directory (e.g. '/home/user/my-app'). " +
-        "Used to read the Git `origin` remote when repo_url and image are omitted, and as the folder to try uploading " +
-        "when the project has no public GitHub repository. " +
+        "Used to read the Git `origin` remote when repo_url and image are omitted; " +
+        "a folder without a readable GitHub repository is saved as a private copy Varity keeps (deleted with the deployment) and built. " +
         "If omitted, the MCP server's working directory is used (which is rarely the correct project root)."
       ),
     source: z
@@ -274,7 +318,7 @@ export function registerDeployTool(server: McpServer, localSource?: LocalSource)
       .describe(
         "Set to \"upload\" to try sending the project folder at path straight to Varity. " +
         "Tried automatically when the folder has no Git origin remote or its repository is private. " +
-        "Folder upload may not be switched on yet: then nothing is uploaded or charged and the answer says so."
+        "If Varity cannot take the folder yet, nothing is sent or charged and the answer says so."
       ),
   };
   const repoUrlHint = localSource
@@ -287,8 +331,8 @@ export function registerDeployTool(server: McpServer, localSource?: LocalSource)
       description:
         "Submit a Git repository, a local project folder, or a prebuilt container image to Varity's deployment owner. " +
         (localSource
-          ? "A folder with no public GitHub repository is tried as a direct upload, which Varity may not have switched on yet: " +
-            `never promise the upload or private code before it succeeds; if it answers UPLOAD_UNAVAILABLE, ${NO_FOLDER_YET} `
+          ? "A folder without a readable GitHub repository is saved as a private copy Varity keeps (deleted with the deployment) and built. " +
+            `If it answers UPLOAD_UNAVAILABLE, ${NO_FOLDER_YET} `
           : "") +
         "The control plane detects the framework, selects hosting, builds, and manages lifecycle state. " +
         "Use this when a developer wants to deploy, publish, ship, or make their app live. " +
@@ -296,7 +340,7 @@ export function registerDeployTool(server: McpServer, localSource?: LocalSource)
         "use varity_deploy_template instead. To ship new code for an app that is already deployed, push it and call " +
         "varity_deploy again with the same app_name: the same owner and workload shape updates that app in place at " +
         "the latest commit (varity_redeploy does not pick up new commits). " +
-        (localSource ? "For an uploaded folder, call varity_deploy again with the same path and app_name: it uploads the folder again. " : "") +
+        (localSource ? "For a folder, call varity_deploy again with the same path and app_name: it sends the folder again and updates that app in place. " : "") +
         "To stop a deployment and its billing, use varity_delete_deployment.",
       inputSchema: {
         ...(localSource ? pathInput : {}),
@@ -351,6 +395,7 @@ export function registerDeployTool(server: McpServer, localSource?: LocalSource)
     async ({ path, source, repo_url, app_name, image, port, volume_size, volume_path }: {
       path?: string; source?: "upload"; repo_url?: string; app_name?: string; image?: string; port?: number; volume_size?: number; volume_path?: string;
     }) => {
+      const startedAt = Date.now();
       if ([repo_url, image, source].filter(Boolean).length > 1) {
         return errorResponse("INVALID_SOURCE", "Pass one of repo_url, image or source \"upload\", not several.", "Choose one deploy source.");
       }
@@ -372,7 +417,7 @@ export function registerDeployTool(server: McpServer, localSource?: LocalSource)
         folder = local;
         const upload = (why: string) =>
           local.explicit
-            ? deployFolder(localSource, local.folder, { app_name: app_name || defaultAppName(folderName(local.folder)), ...volume }, why, uploadState)
+            ? deployFolder(localSource, local.folder, { app_name: app_name || defaultAppName(folderName(local.folder)), ...volume }, why, uploadState, startedAt)
             : Promise.resolve(errorResponse("PROJECT_PATH_REQUIRED", `${why ? `${why} to upload it I need` : "Uploading needs"} the folder's exact location.`, NEEDS_PATH));
         if (source === "upload") return upload("");
         if (!local.repoUrl) return upload("This project has no GitHub repository, so");
@@ -401,7 +446,8 @@ export function registerDeployTool(server: McpServer, localSource?: LocalSource)
               folder.folder,
               { app_name: app_name || defaultAppName(repoUrl!), ...volume },
               "Varity cannot read this project's GitHub repository (it is private), so",
-              uploadState
+              uploadState,
+              startedAt
             );
           }
           return errorResponse(err.code, ...unreadableRepository(repoUrl, Boolean(localSource), uploadState));

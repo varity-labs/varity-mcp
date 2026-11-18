@@ -137,7 +137,7 @@ The URL comes from `varity_deploy_status` and the monthly maximum from `varity_c
 | `varity_open_browser` | Open a URL locally |
 | `varity_dev_server` | Start the local development server |
 | `varity_create_repo` | Create a GitHub repository and push the project |
-| `varity_deploy` | Deploy the current project to production |
+| `varity_deploy` | Deploy the current project to production; a folder without a readable GitHub repository is saved as a private copy Varity keeps (deleted with the deployment) and built |
 | `varity_deploy_status` | Check the status of a deployment: the current step and time so far while it deploys, how long it took once live, and the last lines of the build error when a build failed |
 | `varity_deploy_logs` | Read runtime logs |
 | `varity_delete_deployment` | Request deletion; poll `varity_deploy_status` until it is deleted and billing is stopped |

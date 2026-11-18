@@ -184,7 +184,8 @@ for (const [label, refusal] of [
       assert.match(out.error.message, /^Tell the user exactly this: "Varity can't take a folder from this computer yet\. Nothing was uploaded, deployed or charged\./);
       assert.match(out.error.suggestion, /varity_list_templates/);
       assert.match(out.error.suggestion, /ask first/);
-      assert.deepEqual(calls.map((call) => call.route), [SOURCES], "no upload and no create");
+      // R1 M3: the private-copy route is asked next; off too (404 here), so nothing was created.
+      assert.deepEqual(calls.map((call) => call.route), [SOURCES, "POST /api/github/hosted-repositories"], "no upload and no create");
     } finally {
       cleanup();
     }
@@ -406,12 +407,13 @@ test("review: a worktree or submodule .git file is never packed", async () => {
   }
 });
 
-test("review: many empty files are refused locally on the server's tar-stream ratio", async () => {
+test("review: many empty files are refused locally on the server's tar-stream ratio (and over the private-copy cap)", async () => {
   const root = mkdtempSync(join(tmpdir(), "mcp-u6-ratio-"));
   try {
     for (let i = 0; i < 3000; i += 1) writeFileSync(join(root, `f${i}.txt`), "");
     const { out, calls } = await callTool({ [SOURCES]: [SLOT()] }, { path: root, source: "upload" });
-    assert.equal(out.error.code, "FOLDER_NOT_UPLOADABLE");
+    // R1 M3: a folder the upload cannot take is offered the private copy, whose caps refuse it before any call.
+    assert.equal(out.error.code, "FOLDER_TOO_LARGE_FOR_VARITY");
     assert.equal(calls.length, 0);
   } finally {
     rmSync(root, { recursive: true, force: true });
