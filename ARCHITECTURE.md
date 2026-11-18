@@ -267,6 +267,7 @@ conflicting, malformed or unreadable tag custody refuses publication.
 `test/release-custody.mjs` covers the guard, and `test/server-json.mjs` keeps
 `server.json` versions equal to the package version. A hand publish carries no
 npm provenance, so the GitHub Release records the npm `dist.integrity`.
+Publish with plain `npm publish` from the clean clone at the release commit; never `--ignore-scripts` (or `ignore-scripts=true` in any npmrc or env), never a tarball, never `yarn npm publish`: each skips `prepublishOnly` and with it this gate.
 
 High-value coverage includes CLI environment normalization, stderr-only logging,
 public URL liveness classification, log completeness/freshness, lifecycle

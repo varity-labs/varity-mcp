@@ -108,6 +108,15 @@ test("SPA-3: a committed receipt is valid, and ARCHITECTURE.md records the recei
   assert.match(verification, /sha256/);
 });
 
+test("SPA-1: ARCHITECTURE.md ## Verification names the one publish path that runs the gate", async () => {
+  const { readFileSync } = await import("node:fs");
+  const verification = readFileSync(new URL("../ARCHITECTURE.md", import.meta.url), "utf8").split("## Verification")[1] ?? "";
+  assert.ok(verification.includes(
+    "Publish with plain `npm publish` from the clean clone at the release commit; never `--ignore-scripts` " +
+    "(or `ignore-scripts=true` in any npmrc or env), never a tarball, never `yarn npm publish`: each skips " +
+    "`prepublishOnly` and with it this gate."), verification);
+});
+
 test("SPA-2: a receipt for another package_version is refused", () => {
   const { status, output } = guard({ promise: true, receipt: { ...RECEIPT, package_version: "2.3.29" } });
   assert.notEqual(status, 0);
