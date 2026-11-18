@@ -348,7 +348,7 @@ test("r3/M1: server instructions: stdio routes the local folder to varity_deploy
   assert.equal(texts.stdio,
     "Varity deploys the folder the user is working in: call varity_deploy with path set to the absolute project folder. " +
     "Varity packs it (honouring .gitignore, keeping secret files on this computer), keeps a private copy and builds it; " +
-    "then call varity_deploy_status with the returned id until it is live. Sign in with varity_login; never ask for a key in chat. " +
+    "then call varity_deploy_status with the returned id until it is live. Connect with varity_login; never ask for a key in chat. " +
     `If varity_deploy answers UPLOAD_UNAVAILABLE, offer Varity's Chat and Build: ${CHAT_AND_BUILD}`);
   assert.match(texts.remote, /varity_deploy \(public repo_url or image\)/);
   assert.match(texts.remote, /Never ask the user for a key in chat\./);
@@ -358,6 +358,8 @@ test("r3/M1: server instructions: stdio routes the local folder to varity_deploy
   for (const [name, text] of Object.entries(texts)) {
     assert.ok(text.length <= 512, `${name}: ${text.length} characters`);
     assert.doesNotMatch(text, /never suggest|hosting service/i, name);
+    // Listings audit F6: browser sign-in is not live (varity_login answers SIGN_IN_UNAVAILABLE), so no "sign in" promise.
+    assert.doesNotMatch(text, /\bsign in\b/i, name);
   }
 });
 

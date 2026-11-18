@@ -11,5 +11,5 @@ import { CHAT_AND_BUILD_URL } from "../utils/public-api.js";
 export const SERVER_RULES =
   "Varity deploys the folder the user is working in: call varity_deploy with path set to the absolute project folder. " +
   "Varity packs it (honouring .gitignore, keeping secret files on this computer), keeps a private copy and builds it; " +
-  "then call varity_deploy_status with the returned id until it is live. Sign in with varity_login; never ask for a key in chat. " +
+  "then call varity_deploy_status with the returned id until it is live. Connect with varity_login; never ask for a key in chat. " +
   `If varity_deploy answers UPLOAD_UNAVAILABLE, offer Varity's Chat and Build: ${CHAT_AND_BUILD_URL}`;
