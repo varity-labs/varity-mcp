@@ -4,7 +4,7 @@ import { errorResponse, successResponse } from "../utils/responses.js";
 import { getDeployment, updateDeploymentEnv, VarityPublicApiError } from "../utils/public-api.js";
 import { INFRASTRUCTURE } from "../utils/endpoints.js";
 import { withoutValues } from "../utils/redact.js";
-import { ENV_KEY, readProjectEnv } from "./env-file.js";
+import { ENV_KEY, projectEnvReader, type ProjectEnvReader } from "./env-file.js";
 
 /** Said before and after every env change: it restarts the app (V9-1/V9-3). */
 export const RESTART_NOTE =
@@ -19,8 +19,10 @@ export const RESTART_NOTE =
  * may not have arrived (timeout) is never resent: the tool reads the
  * deployment's status instead, because a resend is a second restart.
  */
-export async function setEnv(deployment: string, projectPath: string, envFile: string, keys: string[]) {
-  const read = await readProjectEnv(projectPath, envFile, keys);
+export async function setEnv(
+  read_: ProjectEnvReader, deployment: string, projectPath: string, envFile: string, keys: string[], confirm: boolean | undefined
+) {
+  const read = await read_(projectPath, envFile, keys, deployment, confirm);
   if (!read.ok) return read.response;
   return withoutValues(await sendEnv(deployment, read.env, keys), Object.values(read.env));
 }
@@ -42,7 +44,10 @@ async function sendEnv(deployment: string, env: Record<string, string>, keys: st
         "Check progress with varity_deploy_status."
     );
   } catch (err) {
-    if (err instanceof VarityPublicApiError && err.code === "VARITY_API_UNREACHABLE") {
+    // No answer, or a server-side failure (the gateway's 5xx env_update_failed
+    // includes a timed-out hand-off that may already be running): the change
+    // may have arrived, so read the status and never resend.
+    if (err instanceof VarityPublicApiError && (err.code === "VARITY_API_UNREACHABLE" || (err.status ?? 0) >= 500)) {
       let state = "unknown";
       try {
         state = (await getDeployment(deployment)).status ?? "unknown";
@@ -51,7 +56,7 @@ async function sendEnv(deployment: string, env: Record<string, string>, keys: st
       }
       return errorResponse(
         "ENV_UPDATE_UNCONFIRMED",
-        `Varity did not answer in time, so it is not known whether the settings arrived. The app's status is now: ${state}.`,
+        `Varity could not confirm the change, so it is not known whether the settings arrived. The app's status is now: ${state}.`,
         "Do not send the settings again yet: call varity_deploy_status first. If the app is restarting, they arrived; only resend if it shows no restart."
       );
     }
@@ -80,6 +85,7 @@ export function registerSetEnvTool(server: McpServer): void {
         "Pass the app, the project folder and the setting NAMES; the values are read from the file on this computer and " +
         "never go through chat. Never ask the user to type a value into chat: ask them to put it in .env. " +
         "This restarts the app, and a restart sets aside another monthly maximum until it settles, so tell the user before calling. " +
+        "The user is asked to confirm the names and the restart before anything is sent. " +
         "Call it once; do not repeat it on a timeout (check varity_deploy_status instead).",
       inputSchema: {
         deployment: z
@@ -98,9 +104,14 @@ export function registerSetEnvTool(server: McpServer): void {
           .string()
           .optional()
           .default(".env")
-          .describe("The settings file inside the project folder (default .env). Example files such as .env.example hold names only and are refused as a value source."),
+          .describe("The settings file's name in the project folder (default .env; e.g. .env.production). A name, not a path. Example files such as .env.example hold names only and are refused as a value source."),
+        confirm: z
+          .boolean()
+          .optional()
+          .describe("Set to true only after the user agreed to the setting names and the restart (needed when this editor cannot ask the user itself)."),
       },
     },
-    async ({ deployment, path, keys, env_file }) => setEnv(deployment, path, env_file ?? ".env", [...new Set(keys)])
+    async ({ deployment, path, keys, env_file, confirm }) =>
+      setEnv(projectEnvReader(server), deployment, path, env_file ?? ".env", [...new Set(keys)], confirm)
   );
 }

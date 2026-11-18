@@ -7,7 +7,8 @@
  * env the same way; both paths share one value scrub (`withoutValues`).
  */
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -20,21 +21,35 @@ delete process.env.VARITY_API_KEY;
 const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
 const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
 const { createVarityServer } = await import("../dist/server.js");
+const { ElicitRequestSchema, ListRootsRequestSchema } = await import("@modelcontextprotocol/sdk/types.js");
+
+/** Every test project lives under this folder, which the test client declares as its root. */
+const WORKSPACE = realpathSync(mkdtempSync(join(tmpdir(), "varity-ws-")));
 
 const SECRET = "sk-test-SECRETVALUE-9f8e7d6c5b4a";
 const OTHER = "second \"quoted\" value 42";
 
 function project(files) {
-  const dir = mkdtempSync(join(tmpdir(), "varity-proj-"));
+  const dir = mkdtempSync(join(WORKSPACE, "proj-"));
   for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
   return dir;
 }
 
-/** Calls one tool with a stubbed gateway; captures every request, stderr write and the result. */
-async function run(name, args, routes) {
+/**
+ * Calls one tool with a stubbed gateway; captures every request, stderr write
+ * and the result. The client declares `roots` (default: WORKSPACE) and, when
+ * `elicit` is given, answers elicitation with it; without `elicit` the call
+ * passes `confirm: true` unless the args say otherwise.
+ */
+async function run(name, args, routes, { roots = [WORKSPACE], elicit } = {}) {
   const [serverSide, clientSide] = InMemoryTransport.createLinkedPair();
   await createVarityServer().connect(serverSide);
-  const client = new Client({ name: "set-env", version: "1" });
+  const capabilities = { ...(roots ? { roots: {} } : {}), ...(elicit ? { elicitation: {} } : {}) };
+  const client = new Client({ name: "set-env", version: "1" }, { capabilities });
+  const asked = [];
+  if (roots) client.setRequestHandler(ListRootsRequestSchema, async () => ({ roots: roots.map((r) => ({ uri: pathToFileURL(r).href })) }));
+  if (elicit) client.setRequestHandler(ElicitRequestSchema, async (request) => { asked.push(request.params.message); return elicit; });
+  if (!elicit && !("confirm" in args)) args = { ...args, confirm: true };
   await client.connect(clientSide);
   const calls = [];
   const stderr = [];
@@ -51,7 +66,7 @@ async function run(name, args, routes) {
   };
   try {
     const result = await client.callTool({ name, arguments: args });
-    return { out: JSON.parse(result.content[0].text), raw: result.content[0].text, calls, stderr: stderr.join("") };
+    return { out: JSON.parse(result.content[0].text), raw: result.content[0].text, calls, stderr: stderr.join(""), asked };
   } finally {
     globalThis.fetch = original;
     process.stderr.write = write;
@@ -86,12 +101,34 @@ test("one PATCH with all requested keys, merge only, says the app restarts; valu
 test("a gateway error that echoes a value comes back redacted", async () => {
   const dir = project({ ".env": ENV_TEXT });
   const result = await run("varity_set_env", { deployment: "shop", path: dir, keys: ["API_KEY", "OTHER"] }, {
-    "PATCH /api/deployments/shop/env": [500, { code: "env_update_failed", message: `bad value ${SECRET} and ${OTHER}`, action: `retry with ${SECRET}` }],
+    "PATCH /api/deployments/shop/env": [400, { code: "invalid_env", message: `bad value ${SECRET} and ${OTHER}`, action: `retry with ${SECRET}` }],
   });
   assert.equal(result.out.success, false);
-  assert.equal(result.out.error.code, "env_update_failed");
+  assert.equal(result.out.error.code, "invalid_env");
   assertNoValues(result);
   assert.equal(result.calls.filter((call) => call.method === "PATCH").length, 1, "never retried");
+});
+
+test("a 5xx env_update_failed may have arrived: status read, never resent, values scrubbed", async () => {
+  const dir = project({ ".env": ENV_TEXT });
+  const result = await run("varity_set_env", { deployment: "shop", path: dir, keys: ["API_KEY"] }, {
+    "PATCH /api/deployments/shop/env": [502, { code: "env_update_failed", message: `rejected ${SECRET}`, action: "retry later" }],
+    "GET /api/deployments/shop": [200, { deployment: { id: "shop", status: "live" } }],
+  });
+  assert.equal(result.out.error.code, "ENV_UPDATE_UNCONFIRMED");
+  assert.equal(result.calls.filter((call) => call.method === "PATCH").length, 1);
+  assert.doesNotMatch(JSON.stringify(result.out), /retry later/);
+  assertNoValues(result);
+});
+
+test("ordinary values like true or 3000 are scrubbed from strings without breaking the JSON", async () => {
+  const dir = project({ ".env": "DEBUG=true\nPORT=3000\n" });
+  const result = await run("varity_set_env", { deployment: "shop", path: dir, keys: ["DEBUG", "PORT"] }, {
+    "PATCH /api/deployments/shop/env": [202, { id: "shop", status: "redeploying", run_id: "run-1", env: { keys: ["DEBUG", "PORT"], count: 2 } }],
+  });
+  assert.equal(result.out.success, true, "valid JSON with a real boolean");
+  assert.equal(result.out.data.count, 2);
+  assert.equal(result.out.data.deployment, "shop");
 });
 
 test("a timeout is never resent: the tool reads the status instead", async () => {
@@ -134,11 +171,12 @@ test("only .env files inside the project folder are a value source", async () =>
   const dir = project({ "config.json": `{"API_KEY":"${SECRET}"}`, ".env.local": ENV_TEXT });
   symlinkSync(join(outside, ".env"), join(dir, ".env"));
   mkdirSync(join(dir, "sub"));
+  writeFileSync(join(dir, "sub", ".env"), ENV_TEXT);
   const cases = [
     [{ env_file: "config.json" }, "ENV_FILE_NOT_ALLOWED"],
     [{ env_file: ".env" }, "ENV_FILE_OUTSIDE_PROJECT"],
-    [{ env_file: "../x/.env" }, "ENV_FILE_NOT_FOUND"],
-    [{ env_file: "sub/.env" }, "ENV_FILE_NOT_FOUND"],
+    [{ env_file: "../x/.env" }, "ENV_FILE_NOT_ALLOWED"],
+    [{ env_file: "sub/.env" }, "ENV_FILE_NOT_ALLOWED"],
   ];
   for (const [args, code] of cases) {
     const result = await run("varity_set_env", { deployment: "shop", path: dir, keys: ["API_KEY"], ...args }, {});
@@ -172,7 +210,7 @@ test("the tool takes names, not values, in its arguments", async () => {
   const { tools } = await client.listTools();
   await client.close();
   const tool = tools.find((t) => t.name === "varity_set_env");
-  assert.deepEqual(Object.keys(tool.inputSchema.properties).sort(), ["deployment", "env_file", "keys", "path"]);
+  assert.deepEqual(Object.keys(tool.inputSchema.properties).sort(), ["confirm", "deployment", "env_file", "keys", "path"]);
   assert.match(tool.description, /restarts the app/);
 });
 
@@ -203,4 +241,38 @@ test("template deploy reads required env from .env and scrubs values from accept
   const noPath = await run("varity_deploy_template", { template: "n8n" }, { "GET /api/templates/n8n": [200, { template: TEMPLATE }] });
   assert.equal(noPath.out.error.code, "SECURE_ENV_CONFIGURATION_REQUIRED");
   assert.match(noPath.out.error.suggestion, /\.env file in their project folder/);
+});
+
+test("a project folder outside the client's roots is refused; with no roots, only the working directory is trusted", async () => {
+  const outside = mkdtempSync(join(tmpdir(), "varity-outside-"));
+  writeFileSync(join(outside, ".env"), ENV_TEXT);
+  for (const options of [{}, { roots: null }]) {
+    const result = await run("varity_set_env", { deployment: "shop", path: outside, keys: ["API_KEY"] }, {}, options);
+    assert.equal(result.out.error.code, "PROJECT_OUTSIDE_WORKSPACE", JSON.stringify(options));
+    assert.equal(result.calls.length, 0);
+    assertNoValues(result);
+  }
+});
+
+test("the user confirms key names and the app before anything is sent", async () => {
+  const dir = project({ ".env": ENV_TEXT });
+  const args = { deployment: "shop", path: dir, keys: ["API_KEY", "OTHER"] };
+  const routes = { "PATCH /api/deployments/shop/env": ACCEPTED };
+
+  const declined = await run("varity_set_env", args, routes, { elicit: { action: "decline" } });
+  assert.equal(declined.out.error.code, "ENV_NOT_CONFIRMED");
+  assert.equal(declined.calls.length, 0, "decline: nothing sent");
+  assert.deepEqual(declined.asked, ["Set API_KEY, OTHER on shop? The app will restart."]);
+  assertNoValues(declined);
+
+  const accepted = await run("varity_set_env", args, routes, { elicit: { action: "accept", content: { confirm: true } } });
+  assert.equal(accepted.out.success, true);
+  assert.equal(accepted.calls.filter((call) => call.method === "PATCH").length, 1);
+
+  const unconfirmed = await run("varity_set_env", { ...args, confirm: undefined }, routes);
+  assert.equal(unconfirmed.out.data.confirmation_required, true);
+  assert.equal(unconfirmed.out.data.sent, false);
+  assert.match(unconfirmed.out.message, /^Set API_KEY, OTHER on shop\? The app will restart\. Nothing has been sent yet\./);
+  assert.equal(unconfirmed.calls.length, 0, "no elicitation and no confirm: nothing sent");
+  assertNoValues(unconfirmed);
 });

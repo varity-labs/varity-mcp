@@ -94,13 +94,13 @@ test("a live deployment never reads the build log", async () => {
 
 test("redactPublicText removes secret shapes and known values but keeps words", () => {
   const out = redactPublicText(
-    "vk_abc123XYZ ghp_0123456789abcdefABCDEF postgres://u:hunter2pw@db/x Bearer eyJabc.def password=s3cret my-known-value plain token words",
+    "vk_abc123XYZ ghp_0123456789abcdefABCDEF postgres://u:hunter2pw@db/x Bearer eyJabc.def password=s3cretvalue my-known-value plain token words Unexpected token: }",
     ["my-known-value"]
   );
-  for (const secret of ["vk_abc123XYZ", "ghp_0123456789", "hunter2pw", "eyJabc.def", "s3cret", "my-known-value"]) {
+  for (const secret of ["vk_abc123XYZ", "ghp_0123456789", "hunter2pw", "eyJabc.def", "s3cretvalue", "my-known-value"]) {
     assert.ok(!out.includes(secret), `${secret} redacted: ${out}`);
   }
-  assert.match(out, /plain token words/);
+  assert.match(out, /plain token words Unexpected token: \}/);
 });
 
 test("varity_deploy_logs no longer tells anyone to build locally", async () => {

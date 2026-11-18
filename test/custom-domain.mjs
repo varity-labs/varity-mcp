@@ -105,3 +105,11 @@ test("remove: one DELETE, and the app keeps its Varity address", async () => {
   assert.equal(out.data.removed, true);
   assert.match(out.message, /still serves at its Varity address/);
 });
+
+test("a claim without recordName names the host part in words, never the full hostname as Host", async () => {
+  const { recordName, ...legacy } = SUBDOMAIN;
+  const { out } = await run("varity_domain_verify", { deployment: "shop" }, {
+    "POST /api/deployments/shop/domain/verify": [200, { supported: true, domain: legacy }],
+  });
+  assert.match(out.data.dns_instructions, /Host set to the part of app\.example\.com before your domain name/);
+});

@@ -107,7 +107,7 @@ const STAGE_WORDS: Readonly<Record<string, { now: string; next: string }>> = {
   admission: { now: "checking the request", next: "the build starts" },
   build: { now: "building your app", next: "Varity finds a server for it and starts it" },
   allocation: { now: "finding a server for your app", next: "Varity starts it and checks that it responds" },
-  health: { now: "starting your app and checking that it responds", next: "it gets its web address" },
+  health: { now: "starting your app on a server and checking that it responds", next: "it gets its web address" },
   access: { now: "setting up access", next: "it gets its web address" },
   route: { now: "giving your app its web address", next: "it is live" },
 };
@@ -118,15 +118,25 @@ function timeOf(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-/** While a run is deploying: its stage, elapsed time and what happens next (J-18). */
+/**
+ * While a run is deploying: its stage, elapsed time and what happens next
+ * (J-18). `attempt` and `failover_count` are optional run fields the platform
+ * is adding; when served they say which try this is and that an earlier
+ * server did not respond. Absent fields are simply not mentioned.
+ */
 export function deployingProgress(run: RunView, now: number = Date.now()): string | null {
   const words = run.stage ? STAGE_WORDS[run.stage] : undefined;
   const started = timeOf(run.accepted_at);
-  const parts: string[] = [];
-  if (words) parts.push(`Now ${words.now}`);
-  if (started !== null) parts.push(`${plainDuration(now - started)} so far`);
-  if (parts.length === 0) return null;
-  let text = `${parts.join(", ")}.`;
+  const elapsed = started !== null ? `${plainDuration(now - started)} so far` : null;
+  const attempt = typeof run.attempt === "number" && run.attempt >= 1 ? `attempt ${run.attempt}` : null;
+  let text = "";
+  if (typeof run.failover_count === "number" && run.failover_count > 0) {
+    text += "That server didn't respond, so Varity is trying another one. ";
+  }
+  if (words && attempt) text += `Now ${words.now} (${[attempt, elapsed].filter(Boolean).join(", ")}).`;
+  else if (words) text += `Now ${words.now}${elapsed ? `, ${elapsed}` : ""}.`;
+  else if (elapsed || attempt) text += `${[elapsed, attempt].filter(Boolean).join(", ")}.`;
+  if (!text) return null;
   if (words) text += ` Next, ${words.next}.`;
   const deadline = timeOf(run.execution_deadline_at);
   if (deadline !== null && deadline > now) {
@@ -216,6 +226,9 @@ export interface RunView {
   stage?: string | null;
   accepted_at?: string | null;
   execution_deadline_at?: string | null;
+  /** Optional (not served yet): which try this run is on, and how many servers it has moved past. */
+  attempt?: number | null;
+  failover_count?: number | null;
 }
 
 /**
@@ -234,6 +247,10 @@ export async function readRun(runId: string | null): Promise<RunView> {
       stage: text(run.stage),
       accepted_at: text(run.accepted_at),
       execution_deadline_at: text(run.execution_deadline_at),
+      attempt: typeof run.attempt === "number" ? run.attempt : null,
+      failover_count: run.failover && typeof run.failover === "object" && typeof (run.failover as Record<string, unknown>).count === "number"
+        ? (run.failover as Record<string, number>).count
+        : null,
     };
   } catch {
     return { status: null, outcome: null };
@@ -339,6 +356,9 @@ export function registerDeployStatusTool(server: McpServer, options: { probe: bo
           let message = failure
             ? `Deployment ${deployment.id}: ${failure}. Deployment status: ${state}`
             : `Deployment ${deployment.id}: ${state}`;
+          // A run that never served may have had an amount set aside; the platform releases it
+          // (instantly once the billing release ships, else by its periodic sweep).
+          if (failure && deployment.status === "failed") message += ". Any amount set aside for this attempt is released automatically";
           if (buildError) {
             message += `. The build stopped with an error; its last ${buildError.lines.length} line(s) are in build_error.lines. ` +
               "Fix that in the app's code, then deploy again with varity_deploy.";

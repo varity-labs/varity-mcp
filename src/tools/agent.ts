@@ -18,6 +18,7 @@ export interface TemplateEnvSource {
   read: ProjectEnvReader;
   path?: string;
   envFile?: string;
+  confirm?: boolean;
 }
 
 /**
@@ -173,7 +174,7 @@ export async function deployTemplate(templateId: string, name?: string, envSourc
   }
   let env: Record<string, string> | undefined;
   if (envFromFile) {
-    const read = await envSource!.read(envSource!.path!, envSource!.envFile ?? ".env", requiredEnv);
+    const read = await envSource!.read(envSource!.path!, envSource!.envFile ?? ".env", requiredEnv, `a new ${template.name ?? template.id} app`, envSource!.confirm);
     if (!read.ok) return read.response;
     env = read.env;
   }
@@ -201,7 +202,11 @@ const envInputs = {
   env_file: z
     .string()
     .optional()
-    .describe("The settings file inside that folder (default .env). Values are read on this computer and never go through chat."),
+    .describe("The settings file's name in that folder (default .env). Values are read on this computer and never go through chat."),
+  confirm: z
+    .boolean()
+    .optional()
+    .describe("Set to true only after the user agreed to send the listed setting names (needed when this editor cannot ask the user itself)."),
 };
 
 /** The certified template tools (both toolsets); `readEnv` (stdio only) lets a template take its required settings from .env. */
@@ -249,8 +254,8 @@ export function registerTemplateTools(server: McpServer, readEnv?: ProjectEnvRea
         ...(readEnv ? envInputs : {}),
       },
     },
-    async ({ template, name, path, env_file }: { template: string; name?: string; path?: string; env_file?: string }) =>
-      deployTemplate(template, name, readEnv ? { read: readEnv, path, envFile: env_file } : undefined)
+    async ({ template, name, path, env_file, confirm }: { template: string; name?: string; path?: string; env_file?: string; confirm?: boolean }) =>
+      deployTemplate(template, name, readEnv ? { read: readEnv, path, envFile: env_file, confirm } : undefined)
   );
 }
 

@@ -19,7 +19,7 @@ import { registerMigrateTool } from "../tools/migrate.js";
 import { registerAgentTools } from "../tools/agent.js";
 import { registerDeleteDeploymentTool } from "../tools/delete-deployment.js";
 import { registerSetEnvTool } from "../tools/set-env.js";
-import { readProjectEnv } from "../tools/env-file.js";
+import { projectEnvReader } from "../tools/env-file.js";
 import { registerDomainTools } from "../tools/domain.js";
 import { registerRedeployTool } from "../tools/redeploy.js";
 import { registerMachinesTools } from "../tools/machines.js";
@@ -68,6 +68,6 @@ export function registerLocalToolset(server: McpServer): void {
   registerDomainTools(server);
   registerRedeployTool(server);
   registerMachinesTools(server);
-  registerAgentTools(server, readProjectEnv);
+  registerAgentTools(server, projectEnvReader(server));
   registerMigrateTool(server);
 }

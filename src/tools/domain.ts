@@ -34,8 +34,10 @@ export function dnsInstructions(claim: CustomDomainClaim): string | null {
       `and a TXT record with Host "${txtName}" and Value "${claim.challenge.value}".`;
   }
   if (!claim.expectedCname) return null;
-  const name = claim.recordName ?? hostname;
-  return `At the company where the domain is registered, add a CNAME record with Host "${name}" and Value "${claim.expectedCname}" for ${hostname}.`;
+  const host = claim.recordName
+    ? `Host "${claim.recordName}"`
+    : `Host set to the part of ${hostname} before your domain name`;
+  return `At the company where the domain is registered, add a CNAME record with ${host} and Value "${claim.expectedCname}" for ${hostname}.`;
 }
 
 /** Where the claim stands (served `state` and `dns.status`), in plain words. */

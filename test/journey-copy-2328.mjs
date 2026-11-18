@@ -115,10 +115,39 @@ test("J-18: while deploying, the stage, time so far and what happens next", asyn
   assert.equal(out.data.run_stage, "allocation");
 });
 
+test("J-18: optional attempt and failover fields, when served, say which try and that a server did not respond", async () => {
+  const now = Date.parse("2026-11-18T00:10:00Z");
+  const base = { status: "deploying", outcome: null, stage: "health", accepted_at: "2026-11-18T00:07:00Z" };
+  assert.equal(deployingProgress(base, now),
+    "Now starting your app on a server and checking that it responds, 3 minutes so far. Next, it gets its web address.");
+  assert.equal(deployingProgress({ ...base, attempt: 2, failover_count: 1 }, now),
+    "That server didn't respond, so Varity is trying another one. Now starting your app on a server and checking that it responds (attempt 2, 3 minutes so far). Next, it gets its web address.");
+  const served = await call("varity_deploy_status", { deployment_id: "op-a" }, {
+    "/api/deployments/op-a": [200, { deployment: { id: "op-a", status: "deploying", run_id: "run-a" } }],
+    "/api/deployments/runs/run-a": [200, { public_status: "deploying", stage: "health", accepted_at: new Date(Date.now() - 30_000).toISOString(), attempt: 3, failover: { count: 2 } }],
+  });
+  assert.match(served.message, /That server didn't respond, so Varity is trying another one\. Now starting your app on a server and checking that it responds \(attempt 3, \d+ seconds so far\)\./);
+});
+
 test("J-18: an unknown stage is never guessed; durations read plainly", () => {
   const now = Date.parse("2026-11-18T00:10:00Z");
   assert.equal(deployingProgress({ status: "deploying", outcome: null, stage: "mystery", accepted_at: "2026-11-18T00:09:00Z" }, now), "1 minute so far.");
   assert.equal(deployingProgress({ status: "deploying", outcome: null }, now), null);
   assert.equal(plainDuration(1000), "1 second");
   assert.equal(plainDuration(61_000), "1 minute 1 second");
+});
+
+test("J-18: a run that never served says set-aside amounts are released, never that nothing is charged", async () => {
+  const row = { id: "op-x", operation_deployment_id: "op-x", status: "failed", run_id: "run-x", outcome: { classification: "user_workload_failure", code: "health_check_failed" } };
+  const out = await call("varity_deploy_status", { deployment_id: "op-x" }, {
+    "/api/deployments/op-x": [200, { deployment: row }],
+    "/api/deployments/runs/run-x": [200, { public_status: "failed", outcome: row.outcome }],
+  });
+  assert.match(out.message, /Any amount set aside for this attempt is released automatically/);
+  assert.doesNotMatch(out.message, /nothing is being charged|not charged/i);
+  const live = await call("varity_deploy_status", { deployment_id: "op-y" }, {
+    "/api/deployments/op-y": [200, { deployment: { id: "op-y", status: "live", run_id: "run-y", url: "https://y.varity.app", outcome: { classification: "user_workload_failure" } } }],
+    "/api/deployments/runs/run-y": [200, { public_status: "failed" }],
+  });
+  assert.doesNotMatch(live.message, /released automatically/, "a live app's failed update keeps its running charge");
 });

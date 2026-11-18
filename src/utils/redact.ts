@@ -26,13 +26,15 @@ const SECRET_PATTERNS: ReadonlyArray<[RegExp, string]> = [
   [/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g, "[redacted-key]"],
   [/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, "[redacted-token]"],
   [/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, "$1 [redacted]"],
-  [/(authorization|password|passwd|secret|token|api[_-]?key|private[_-]?key|access[_-]?key)(\s*[=:]\s*)[^\s,'"`]+/gi, "$1$2[redacted]"],
+  [/(authorization|password|passwd|secret|token|api[_-]?key|private[_-]?key|access[_-]?key)(\s*[=:]\s*)[A-Za-z0-9._~+/=-]{8,}/gi, "$1$2[redacted]"],
 ];
 
 /**
  * Redact credentials from `input`. `knownValues` are exact secret strings
  * (removed wherever they occur, longest first); values shorter than 4
- * characters are skipped so a one-letter value cannot blank out the text.
+ * characters are skipped so a one-letter value cannot blank out the text
+ * (accepted gap: such a value is not secret-sized, and the gateway's env
+ * validation errors name keys, not values).
  */
 export function redactPublicText(input: string, knownValues: readonly string[] = []): string {
   let text = input;
@@ -44,18 +46,36 @@ export function redactPublicText(input: string, knownValues: readonly string[] =
   return text;
 }
 
+/** Every string inside a JSON value redacted; keys, numbers and booleans untouched. */
+function redactStrings(value: unknown, known: readonly string[]): unknown {
+  if (typeof value === "string") return redactPublicText(value, known);
+  if (Array.isArray(value)) return value.map((item) => redactStrings(item, known));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactStrings(item, known)]));
+  }
+  return value;
+}
+
 /**
  * The one guard for tool results that may echo secret values the MCP just
- * sent (env values from a project's `.env`): every text item of the response
+ * sent (env values from a project's `.env`): every string in the response
  * (message, error, suggestion, data) is passed through `redactPublicText`
- * with those values, in both raw and JSON-escaped form, since the text is
- * serialized JSON.
+ * with those values. Only string fields change, so the result stays valid
+ * JSON even when a value is "true" or "3000".
  */
 export function withoutValues<T extends { content: Array<{ type: "text"; text: string }> }>(
   response: T,
   values: readonly string[]
 ): T {
   if (values.length === 0) return response;
-  const known = values.flatMap((value) => [value, JSON.stringify(value).slice(1, -1)]);
-  return { ...response, content: response.content.map((item) => ({ ...item, text: redactPublicText(item.text, known) })) };
+  return {
+    ...response,
+    content: response.content.map((item) => {
+      try {
+        return { ...item, text: JSON.stringify(redactStrings(JSON.parse(item.text), values), null, 2) };
+      } catch {
+        return { ...item, text: redactPublicText(item.text, values) };
+      }
+    }),
+  };
 }
