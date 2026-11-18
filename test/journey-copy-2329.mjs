@@ -170,3 +170,29 @@ test("README: setup leads with the deploy key that works today; browser sign-in 
   assert.doesNotMatch(setup, /No key to copy and no restart/);
   assert.match(setup, /https:\/\/developer\.store\.varity\.so\/dashboard\/settings\?tab=api-keys/);
 });
+
+test("T2: varity_login's description is true in both states: browser when switched on, else a deploy key in the editor's MCP settings, never in chat", async () => {
+  const client = await connect();
+  const tool = (await client.listTools()).tools.find((t) => t.name === "varity_login");
+  await client.close();
+  const d = tool.description;
+  assert.doesNotMatch(d, /no key to type or copy|nothing needs restarting/i, d);
+  assert.match(d, /I'll open a browser tab: confirm there to connect Varity\./);
+  assert.match(d, /SIGN_IN_UNAVAILABLE/);
+  assert.match(d, /deploy key/);
+  assert.match(d, /editor's MCP settings/);
+  assert.match(d, /never (?:typed|pasted) into (?:the )?chat|Never ask the user to (?:type|paste) a key/i);
+});
+
+test("J-22: the set_env restart hold uses the measured release time, not 'a few minutes'", async () => {
+  const { RESTART_NOTE } = await import("../dist/tools/set-env.js");
+  const client = await connect();
+  const tool = (await client.listTools()).tools.find((t) => t.name === "varity_set_env");
+  await client.close();
+  for (const text of [RESTART_NOTE, tool.description]) {
+    assert.match(text, /released when billing next settles, usually within 20 minutes/, text);
+    assert.doesNotMatch(text, /few minutes/, text);
+  }
+  const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  assert.doesNotMatch(readme, /maximum for a few minutes/);
+});

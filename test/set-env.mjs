@@ -96,7 +96,7 @@ test("one PATCH with all requested keys, merge only, says the app restarts; valu
   assert.deepEqual(patches[0].body, { env: { API_KEY: SECRET, OTHER } }, "only the named keys, no replace");
   assert.equal(result.out.success, true);
   assert.equal(result.out.data.count, 2);
-  assert.match(result.out.message, /Your app restarts to use the new settings\. Restarting holds one more month's maximum for a few minutes, then releases it\./);
+  assert.match(result.out.message, /Your app restarts to use the new settings\. Restarting holds one more month's maximum, released when billing next settles, usually within 20 minutes\./);
   assertNoValues(result);
 });
 
@@ -264,7 +264,7 @@ test("the user confirms key names and the app before anything is sent", async ()
   const declined = await run("varity_set_env", args, routes, { elicit: { action: "decline" } });
   assert.equal(declined.out.error.code, "ENV_NOT_CONFIRMED");
   assert.equal(declined.calls.filter((call) => call.method !== "GET").length, 0, "decline: nothing sent");
-  assert.deepEqual(declined.asked, ["Set API_KEY, OTHER on shop? Your app restarts to use the new settings. Restarting holds one more month's maximum for a few minutes, then releases it."]);
+  assert.deepEqual(declined.asked, ["Set API_KEY, OTHER on shop? Your app restarts to use the new settings. Restarting holds one more month's maximum, released when billing next settles, usually within 20 minutes."]);
   assertNoValues(declined);
 
   const accepted = await run("varity_set_env", args, routes, { elicit: { action: "accept", content: { confirm: true } } });
@@ -274,7 +274,7 @@ test("the user confirms key names and the app before anything is sent", async ()
   const unconfirmed = await run("varity_set_env", { ...args, confirm: undefined }, routes);
   assert.equal(unconfirmed.out.data.confirmation_required, true);
   assert.equal(unconfirmed.out.data.sent, false);
-  assert.match(unconfirmed.out.message, /^Set API_KEY, OTHER on shop\? Your app restarts to use the new settings\. Restarting holds one more month's maximum for a few minutes, then releases it\. Nothing has been sent yet\./);
+  assert.match(unconfirmed.out.message, /^Set API_KEY, OTHER on shop\? Your app restarts to use the new settings\. Restarting holds one more month's maximum, released when billing next settles, usually within 20 minutes\. Nothing has been sent yet\./);
   assert.equal(unconfirmed.calls.filter((call) => call.method !== "GET").length, 0, "no elicitation and no confirm: nothing sent");
   assertNoValues(unconfirmed);
 });
@@ -298,7 +298,7 @@ test("J-19: for a running app the confirm question carries the restart cost note
   }, { elicit: { action: "accept", content: { confirm: true } } });
   assert.equal(result.out.success, true);
   assert.equal(result.asked.length, 1);
-  assert.match(result.asked[0], /Restarting holds one more month's maximum for a few minutes, then releases it/);
+  assert.match(result.asked[0], /Restarting holds one more month's maximum, released when billing next settles, usually within 20 minutes/);
 });
 
 test("J-19: a gateway 409 refusal is mapped to plain words with no 'retry later'", async () => {
