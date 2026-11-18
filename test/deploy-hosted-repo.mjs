@@ -721,3 +721,66 @@ test("SP30-1: the run read after the create is cut to the 230 s hard deadline, a
     Date.now = realNow;
   }
 });
+
+test("ST30-3/SP30-2: pacing ends on its own: a sleep that never advances the clock, against a gateway that always answers 429, gives at most 3 paced waits per request, then busy", { timeout: 10_000 }, async () => {
+  const { pacing } = await import("../dist/tools/deploy-private-copy.js");
+  const realSleep = pacing.sleep;
+  pacing.sleep = async () => {};
+  const always429 = [[429, { code: "hosted_capacity_exhausted", message: "Varity is busy." }, { "Retry-After": "5" }]];
+  try {
+    for (const route of [HOSTED, CHANGES]) {
+      const { dir, cleanup } = project();
+      try {
+        const { isError, out, calls } = await deploy({ path: dir }, { ...base, [route]: always429 });
+        assert.equal(isError, true, route);
+        assert.equal(out.error.code, "hosted_capacity_exhausted", route);
+        assert.equal(out.error.suggestion, "Call varity_deploy again with the same path after 5 seconds.", route);
+        assert.equal(of(calls, route).length, 4, `${route}: one send and 3 paced resends`);
+        assert.equal(of(calls, CREATE).length, 0);
+      } finally {
+        cleanup();
+      }
+    }
+  } finally {
+    pacing.sleep = realSleep;
+  }
+});
+
+test("SP30-2: each paced wait is the served Retry-After plus 1 s plus 0-3 s of jitter", async () => {
+  await withPacedClock(async (clock) => {
+    for (let run = 0; run < 3; run += 1) {
+      const { dir, cleanup } = project(many(32, (i) => [`img${String(i).padStart(2, "0")}.png`, PNG]));
+      try {
+        clock.offset = 0;
+        const { isError } = await deploy({ path: dir }, { ...base, ...minuteLedger(clock) }, { uploadOff: true });
+        assert.equal(isError, false);
+      } finally {
+        cleanup();
+      }
+    }
+    assert.ok(clock.slept.length >= 6, String(clock.slept.length));
+    for (const ms of clock.slept) assert.ok(ms >= 1_000 && ms <= 64_000, String(ms));
+    // Every wait lands 1-4 s after a window boundary (the stub's windows start at offset 0).
+    assert.ok(clock.slept.some((ms) => ms % 1000 !== 0), `no jitter: ${clock.slept}`);
+  });
+});
+
+test("SP30-5: an unpaced 429 after a commit landed answers FOLDER_SAVE_INCOMPLETE with the served wait", async () => {
+  const { dir, cleanup } = project(many(60, (i) => [`f${String(i).padStart(2, "0")}.txt`, `${i}\n`]));
+  try {
+    const { isError, out, calls } = await deploy({ path: dir }, {
+      ...base,
+      [CHANGES]: [
+        [201, { branch: "b", commit_sha: sha(1), base_sha: sha(999) }],
+        [429, { code: "rate_limited", message: "Too many saves by your API keys." }, { "Retry-After": "1800" }],
+      ],
+    }, { uploadOff: true });
+    assert.equal(isError, true);
+    assert.equal(out.error.code, "FOLDER_SAVE_INCOMPLETE");
+    assert.equal(out.error.suggestion, "Call varity_deploy again with the same path after 1800 seconds.");
+    assert.equal(of(calls, CHANGES).length, 2);
+    assert.equal(of(calls, CREATE).length, 0);
+  } finally {
+    cleanup();
+  }
+});

@@ -10,7 +10,6 @@ import {
   VarityPublicApiError,
   type HostedChange,
   type HostedChangeFile,
-  type HostedRepository,
 } from "../utils/public-api.js";
 import { acceptanceSummary, checkStatusAction, lifecycleAcceptance, startUnconfirmed } from "../utils/lifecycle-acceptance.js";
 import type { CollectedFolder } from "./pack.js";
@@ -44,6 +43,8 @@ export const PRIVATE_COPY_LIMITS = {
    * deadline answers FOLDER_SAVE_INCOMPLETE and the next call starts a fresh run).
    */
   pacedWindows: 3,
+  /** Paced waits per request (#1099 SP30-2): each counts toward the per-actor change limit. */
+  maxPacedWaits: 3,
   /** No commit starts after this (claude.ai cuts a tool call at 240 s). */
   commitDeadlineMs: 170_000,
   /** No deploy starts after this. */
@@ -132,11 +133,12 @@ function tooLarge(why: string) {
   return errorResponse("FOLDER_TOO_LARGE_FOR_VARITY", `${why} ${NOTHING}`, TOO_LARGE_ACTION);
 }
 
-function incomplete() {
+/** `retryAfterSeconds`: the served wait of the 429 that stopped the save, when that was the cause. */
+function incomplete(retryAfterSeconds?: number) {
   return errorResponse(
     "FOLDER_SAVE_INCOMPLETE",
     `Varity stopped before this folder was completely saved, so nothing was deployed or charged.`,
-    AGAIN
+    retryAfterSeconds === undefined ? AGAIN : `Call varity_deploy again with the same path after ${retryAfterSeconds} seconds.`
   );
 }
 
@@ -185,46 +187,68 @@ function classify(err: unknown): "resend" | "incomplete" | "refused" {
   return "refused";
 }
 
+/** What a paced send ended on: its value, or the error that ended it. */
+type Sent<T> = { value: T } | { err: unknown };
+
+/** Thrown in place of a request when no time is left before the hard deadline. */
+const OUT_OF_TIME = new Error("No time left before the hard deadline.");
+
 /**
- * #1099 pacing: a 429 whose Retry-After (plus 1 s, to land past the window's
- * end) still fits the commit deadline is waited out, and the caller resends
- * the same request. The gateway refuses a budget before any GitHub write and
- * stores no replay for a failure, so the same Idempotency-Key is processed
- * fresh. Answers whether it waited; a 503 or a wait past the deadline is not
- * paced.
+ * #1099 pacing: a 429 with a Retry-After is waited out and the same request
+ * sent again. The gateway refuses a budget before any GitHub write and stores
+ * no replay for a failure, so the same Idempotency-Key is processed fresh.
+ * Each wait is the Retry-After plus 1 s (past the window's end) plus 0-3 s of
+ * jitter (so paced keys do not all wake at the boundary); a request waits at
+ * most `maxPacedWaits` times, and only while the wait ends by the commit
+ * deadline. That deadline is read on the clock the waits advance, so a sleep
+ * that returns early still counts its whole wait and the loop always ends.
+ * A 503, a 429 without Retry-After, or a wait that does not fit ends it.
  */
-async function paced(err: unknown, startedAt: number): Promise<boolean> {
-  if (!(err instanceof VarityPublicApiError) || err.status !== 429 || err.retryAfterSeconds === undefined) return false;
-  const waitMs = (err.retryAfterSeconds + 1) * 1000;
-  if (Date.now() + waitMs > startedAt + PRIVATE_COPY_LIMITS.commitDeadlineMs) return false;
-  await pacing.sleep(waitMs);
-  return true;
+async function withPacing<T>(send: () => Promise<T>, startedAt: number): Promise<Sent<T>> {
+  const deadlineAt = startedAt + PRIVATE_COPY_LIMITS.commitDeadlineMs;
+  let waits = 0;
+  let wokeAt = 0;
+  while (true) {
+    try {
+      return { value: await send() };
+    } catch (err) {
+      if (!(err instanceof VarityPublicApiError) || err.status !== 429 || err.retryAfterSeconds === undefined) return { err };
+      const waitMs = (err.retryAfterSeconds + 1) * 1000 + Math.floor(Math.random() * 3000);
+      const now = Math.max(Date.now(), wokeAt);
+      if (waits === PRIVATE_COPY_LIMITS.maxPacedWaits || now + waitMs > deadlineAt) return { err };
+      waits += 1;
+      wokeAt = now + waitMs;
+      await pacing.sleep(waitMs);
+    }
+  }
 }
 
 /**
- * One commit, with at most one resend of the same key after a network or
- * unlanded 504 failure; paced waits are not counted. Answers the new head
- * sha, or the result that ends the deploy. No attempt starts without time
- * left before the hard deadline, and none runs past it. A 429 that cannot be
- * paced ends the run as busy before any commit landed, else incomplete.
+ * One commit, paced, with at most one resend of the same key after a network
+ * or unlanded 504 failure. No attempt starts without time left before the
+ * hard deadline, and none runs past it. Answers the new head sha, or the
+ * error that ended the commit (`commitFailure` says what it means).
  */
-async function commitOnce(change: HostedChange, key: string, startedAt: number, landed: boolean): Promise<string | ToolResult> {
+async function commitOnce(change: HostedChange, key: string, startedAt: number): Promise<Sent<string>> {
   const deadlineAt = startedAt + PRIVATE_COPY_LIMITS.hardDeadlineMs;
-  for (let attempt = 0; attempt < 2; ) {
-    const timeoutMs = timeoutBefore(deadlineAt);
-    if (timeoutMs <= 0) return incomplete();
-    try {
-      return (await commitHostedChange(change, key, timeoutMs)).commit_sha;
-    } catch (err) {
-      if (await paced(err, startedAt)) continue;
-      if (landed && err instanceof VarityPublicApiError && err.status === 429) return incomplete();
-      const next = classify(err);
-      if (next === "refused") return refused(err as VarityPublicApiError, change.files);
-      if (next === "incomplete") return incomplete();
-      attempt += 1;
-    }
-  }
-  return incomplete();
+  const attempt = () =>
+    withPacing(() => {
+      const timeoutMs = timeoutBefore(deadlineAt);
+      return timeoutMs > 0 ? commitHostedChange(change, key, timeoutMs) : Promise.reject(OUT_OF_TIME);
+    }, startedAt);
+  let sent = await attempt();
+  if ("err" in sent && classify(sent.err) === "resend") sent = await attempt();
+  return "value" in sent ? { value: sent.value.commit_sha } : sent;
+}
+
+/**
+ * What a failed commit answers: the gateway's own refusal (a 429 or 503 before
+ * any commit landed is busy with its wait), else incomplete; a 429 after a
+ * commit landed is incomplete too, because part of the folder is saved.
+ */
+function commitFailure(err: unknown, files: HostedChangeFile[], landed: boolean): ToolResult {
+  if (!(err instanceof VarityPublicApiError) || classify(err) !== "refused") return incomplete();
+  return landed && err.status === 429 ? incomplete(err.retryAfterSeconds) : refused(err, files);
 }
 
 /** The create's own refusal: null when the hosted route is unavailable (the caller's no-folder copy). */
@@ -269,15 +293,9 @@ export async function deployPrivateCopy(collected: CollectedFolder, deploy: Fold
     return tooLarge("This folder needs more saves than one folder deploy allows.");
   }
 
-  let repo: HostedRepository | undefined;
-  while (!repo) {
-    try {
-      repo = await createHostedRepository(deploy.appName);
-    } catch (err) {
-      if (await paced(err, deploy.startedAt)) continue;
-      return createRefused(err);
-    }
-  }
+  const created = await withPacing(() => createHostedRepository(deploy.appName), deploy.startedAt);
+  if ("err" in created) return createRefused(created.err);
+  const repo = created.value;
 
   const run = randomUUID();
   const branch = runBranch();
@@ -293,9 +311,9 @@ export async function deployPrivateCopy(collected: CollectedFolder, deploy: Fold
       files,
       open_pr: false,
     };
-    const committed = await commitOnce(change, `mcp-change:${run}:${i}`, deploy.startedAt, head !== undefined);
-    if (typeof committed !== "string") return committed;
-    head = committed;
+    const committed = await commitOnce(change, `mcp-change:${run}:${i}`, deploy.startedAt);
+    if ("err" in committed) return commitFailure(committed.err, files, head !== undefined);
+    head = committed.value;
   }
   if (Date.now() - deploy.startedAt > limits.deployDeadlineMs) return incomplete();
 
