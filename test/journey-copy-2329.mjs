@@ -237,16 +237,17 @@ test("T2: varity_login's description is true in both states: browser when switch
   assert.match(d, /never (?:typed|pasted) into (?:the )?chat|Never ask the user to (?:type|paste) a key/i);
 });
 
-test("J-22: the set_env restart hold uses the measured release time, not 'a few minutes'", async () => {
+test("J-22: FX2 restart consent states a possible hold without an unsupported amount or settlement deadline", async () => {
   const { RESTART_NOTE } = await import("../dist/tools/set-env.js");
   const client = await connect();
   const tool = (await client.listTools()).tools.find((t) => t.name === "varity_set_env");
   await client.close();
   for (const text of [RESTART_NOTE, tool.description]) {
-    assert.match(text, /released when billing next settles, usually within 20 minutes/, text);
-    assert.doesNotMatch(text, /few minutes/, text);
+    assert.match(text, /restarting may temporarily hold additional balance until billing settles/i, text);
+    assert.doesNotMatch(text, /one more month|another month|usually within \d+ minutes|few minutes|up to one month/i, text);
   }
   const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  assert.match(readme, /restarting may temporarily hold additional balance until billing settles/i);
   assert.doesNotMatch(readme, /maximum for a few minutes/);
 });
 

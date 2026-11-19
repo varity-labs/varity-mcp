@@ -141,7 +141,7 @@ The URL comes from `varity_deploy_status` and the monthly maximum from `varity_c
 | `varity_deploy_status` | Check the status of a deployment: the current step and time so far while it deploys, how long it took once live, and the last lines of the build error when a build failed |
 | `varity_deploy_logs` | Read runtime logs |
 | `varity_delete_deployment` | Request deletion; poll `varity_deploy_status` until it is deleted and billing is stopped. If Varity saved a private copy of a folder for this app, that copy is deleted too. |
-| `varity_set_env` | Set an app's settings (such as API keys) from the project's own `.env` file: you name the settings, the values are read on your computer and never pass through chat. Your app restarts; restarting holds one more month's maximum, released when billing next settles, usually within 20 minutes |
+| `varity_set_env` | Set an app's settings (such as API keys) from the project's own `.env` file: you name the settings, the values are read on your computer and never pass through chat. Your app restarts; restarting may temporarily hold additional balance until billing settles |
 | `varity_domain_add` | Point your own domain at an app and get the exact DNS record to add at your registrar |
 | `varity_domain_verify` | Check whether that DNS record is in place and the domain is live |
 | `varity_domain_remove` | Stop serving an app at its custom domain (it keeps its Varity address) |
