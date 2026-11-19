@@ -170,7 +170,7 @@ test("the writer is the only place the MCP writes the sign-in file", () => {
 
 // ── varity_login (src/tools/login.ts) ────────────────────────────────────────
 
-test("varity_login: browser tab, bounded wait returns pending, the next call resumes the same sign-in", async () => {
+test("varity_login: browser tab, bounded waits return pending and resume the same sign-in until connected", { timeout: 5_000 }, async (testContext) => {
   const opened = [];
   const t = await tools({ baseUrl: fake.base, waitMs: 50, headless: () => false, openBrowser: async (url) => { opened.push(url); return true; } });
   const first = await t.call("varity_login");
@@ -187,7 +187,16 @@ test("varity_login: browser tab, bounded wait returns pending, the next call res
   assert.equal(opened.length, 1);
 
   await fake.approveInBrowser(opened[0]);
-  const done = await t.call("varity_login");
+  // Callback HTTP completion precedes token redemption and the atomic key save.
+  // A bounded call can still be pending; resume the same sign-in, as the tool directs.
+  let done = await t.call("varity_login");
+  while (done.success && done.data?.status === "pending" && !testContext.signal.aborted) {
+    assert.equal(done.data.sign_in_url, opened[0], "pending resumes keep the same sign-in");
+    assert.equal(opened.length, 1, "pending resumes never open another tab");
+    assert.equal(fake.state.authorizeHits.length, 1, "pending resumes never authorize again");
+    assert.doesNotMatch(JSON.stringify(done), /vk_/, "pending results carry no key");
+    done = await t.call("varity_login");
+  }
   assert.equal(done.success, true);
   assert.equal(done.data.authenticated, true);
   assert.match(done.message, /no restart is needed/);
