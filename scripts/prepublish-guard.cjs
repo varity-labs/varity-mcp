@@ -58,4 +58,64 @@ if (offenders.length) {
   process.exit(1);
 }
 console.log("[prepublish-guard] ✅ dist/ is clean (no forbidden positioning content).");
-process.exit(0);
+
+// R1 release gate (ARCHITECTURE.md ## Verification): the private copy works only while the
+// gateway's hosted-repository route serves deploy keys. A package whose built text promises it
+// is published only with the live-acceptance receipt committed at acceptance/r1-live.json.
+const { FLAG, receiptProblem } = require("./r1-receipt.cjs");
+
+const ROOT = path.join(__dirname, "..");
+
+const PHRASE = /private copy/i;
+/** The delete tool's cleanup sentence: it names an existing copy and promises none. */
+const CLEANUP = "If Varity saved a private copy of a folder for this app, that copy is deleted too.";
+
+/**
+ * The initializer text of `export const <name> = ...;` in a built module, or null. Relies on
+ * tsc emitting each top-level constant as `export const X = …;` followed by a newline.
+ */
+function declaration(file, name) {
+  const match = new RegExp(`export const ${name} =([\\s\\S]*?);\\n`).exec(fs.readFileSync(file, "utf8"));
+  return match ? match[1] : null;
+}
+
+/**
+ * The package promises the private copy through what it tells a model or a reader, read
+ * statically (no dist code runs in this hook): a non-empty FOLDER_RULE (so a rewording stays
+ * gated), stdio SERVER_RULES that say "private copy", or a README that says it outside the
+ * delete tool's cleanup sentence. Fail closed: a missing deploy copy module, a FOLDER_RULE
+ * export that cannot be found (renamed, moved or unexported), or one that is not a plain string
+ * counts as a promise. A version that drops the promise declares `export const FOLDER_RULE = "";`.
+ */
+function promisesPrivateCopy() {
+  const copy = path.join(DIST, "tools", "deploy-copy.js");
+  if (!fs.existsSync(copy)) return true;
+  const rule = declaration(copy, "FOLDER_RULE");
+  if (rule === null || !/^\s*"(?:[^"\\]|\\.)*"\s*$/.test(rule) || rule.trim() !== '""') return true;
+  const rules = path.join(DIST, "toolsets", "instructions.js");
+  if (fs.existsSync(rules) && PHRASE.test(declaration(rules, "SERVER_RULES") ?? "")) return true;
+  const readme = path.join(ROOT, "README.md");
+  return fs.existsSync(readme) && PHRASE.test(fs.readFileSync(readme, "utf8").split(CLEANUP).join(""));
+}
+
+function main() {
+  if (promisesPrivateCopy()) {
+    const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
+    const problem = receiptProblem(ROOT, pkg);
+    if (problem) {
+      console.error(`\n[prepublish-guard] ❌ the package promises the private copy, but ${problem} — publish BLOCKED.`);
+      console.error(`Publish only after the gateway serves deploy keys in production (${FLAG}=true) and its live acceptance passed;`);
+      console.error("then commit that receipt, acceptance/r1-live.json (ARCHITECTURE.md ## Verification).\n");
+      process.exit(1);
+    }
+    console.log("[prepublish-guard] ✅ private-copy promise backed by acceptance/r1-live.json.");
+  }
+  process.exit(0);
+}
+
+try {
+  main();
+} catch (err) {
+  console.error(`[prepublish-guard] ❌ ${err?.message ?? err} — publish BLOCKED.`);
+  process.exit(1);
+}

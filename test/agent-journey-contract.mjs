@@ -171,6 +171,15 @@ test("an undeclared argument is refused with the accepted names", async () => {
   assert.match(result.content[0].text, /Unknown argument\. varity_deploy_status accepts only: deployment_id, path, limit/);
 });
 
+// FX-1 (#1107): producer bodies as captured, with `credit_policy` removed. LIVE_1_14_185 is
+// `GET https://api.varity.app/api/pricing?profile=static-site` at
+// 2026-11-18T20:54Z (gateway 1.14.185, which ignores the key; credit_policy
+// omitted). The other two are the FX-1 gateway's anonymous and keyed answers
+// for an owner holding 3 active static sites.
+const LIVE_1_14_185_STATIC = {"profile":"static-site","verified":"2026-07-30","mode":"static","currency":"USD","monthly_max_usd":0,"free":true,"free_sites_included":3,"additional_site_monthly_usd":1,"active_static_sites":0,"billing_model":"free_static","billing_note":"First 3 static sites free, then $1/month per site","pricing_policy_version":"managed-cloud-presets-v1-2026-07-30","comparison":{"available":false}};
+const ANONYMOUS_STATIC_ESTIMATE = {"profile":"static-site","verified":"2026-07-30","mode":"static","currency":"USD","monthly_max_usd":0,"free":true,"free_sites_included":3,"additional_site_monthly_usd":1,"active_static_sites":null,"billing_model":"free_static","billing_note":"Whether this site is free depends on your account. First 3 static sites are free, then $1/month per site. Sign in with your deploy key to price it for your account.","pricing_policy_version":"managed-cloud-presets-v1-2026-07-30","comparison":{"available":false},"quote_scope":"anonymous"};
+const ACCOUNT_THREE_SITES_ESTIMATE = {"profile":"static-site","verified":"2026-07-30","mode":"static","currency":"USD","monthly_max_usd":1,"free":false,"free_sites_included":3,"additional_site_monthly_usd":1,"active_static_sites":3,"billing_model":"static_additional_site_monthly","billing_note":"You have 3 active static sites; this one is $1/month. First 3 static sites are free, then $1/month per site.","pricing_policy_version":"managed-cloud-presets-v1-2026-07-30","comparison":{"available":false},"quote_scope":"account"};
+
 test("the cost calculator lists its profiles and estimates before sign-in", async () => {
   const client = await connect();
   const { tools } = await client.listTools();
@@ -182,10 +191,11 @@ test("the cost calculator lists its profiles and estimates before sign-in", asyn
   delete process.env["VARITY_DEPLOY_KEY"];
   try {
     const { out, calls } = await call({
-      "/api/pricing": [200, { profile: "static-site", currency: "USD", monthly_max_usd: 0, billing_model: "free_static" }],
+      "/api/pricing": [200, ANONYMOUS_STATIC_ESTIMATE],
     }, "varity_cost_calculator", { app_profile: "static" });
     assert.equal(out.success, true);
-    assert.equal(out.data.monthly_max_usd, 0);
+    assert.equal(out.data.quote_scope, "anonymous");
+    assert.equal("monthly_max_usd" in out.data, false, "an anonymous static quote is not the caller's price");
     assert.equal(calls[0].url, "https://gw.test/api/pricing?profile=static");
     assert.equal(calls[0].init.headers.Authorization, undefined, "a pre-deploy estimate needs no key");
   } finally {
@@ -405,10 +415,54 @@ test("J-1: cost_calculator never offers a profile it refuses", async () => {
   assert.doesNotMatch(unknown.out.error.suggestion, /ai-agent-gpu/);
 });
 
+/** A static quote the owner priced for the caller's account (`quote_scope`). */
 const STATIC_ESTIMATE = {
   profile: "static-site", currency: "USD", monthly_max_usd: 0, billing_model: "free_static",
-  billing_note: "First 3 static sites free, then $1/month per site", mode: "static",
+  billing_note: "First 3 static sites free, then $1/month per site", mode: "static", quote_scope: "account",
 };
+
+test("FX-1: a static quote the owner did not price for the account states no price (gateway 1.14.185, key sent)", async () => {
+  const { out, calls } = await call({ "/api/pricing": [200, LIVE_1_14_185_STATIC] }, "varity_cost_calculator", { app_profile: "static-site" });
+  assert.equal(calls[0].init.headers.Authorization, "Bearer api-key");
+  assert.equal(out.success, true);
+  assert.equal(out.message, "static-site: no price stated, because Varity did not check your account. First 3 static sites free, then $1/month per site.");
+  assert.equal("monthly_max_usd" in out.data, false);
+  assert.equal(out.data.quote_scope, null);
+  assert.equal(out.data.free_sites_included, 3);
+  assert.equal(out.data.additional_site_monthly_usd, 1);
+});
+
+test("FX-1: an anonymous static quote says the allowance depends on the account and states no price", async () => {
+  const saved = process.env["VARITY_DEPLOY_KEY"];
+  delete process.env["VARITY_DEPLOY_KEY"];
+  try {
+    const { out } = await call({ "/api/pricing": [200, ANONYMOUS_STATIC_ESTIMATE] }, "varity_cost_calculator", { app_profile: "static-site" });
+    assert.equal(out.message, "static-site: no price stated. Whether this site is free depends on your account. First 3 static sites are free, then $1/month per site. Sign in with your deploy key to price it for your account. Run varity_login, then ask again.");
+    assert.equal("billing_model" in out.data, false, "free_static is the first-site assumption, not this caller's billing");
+    assert.doesNotMatch(out.message, /\$0/);
+    assert.equal("monthly_max_usd" in out.data, false);
+    assert.equal(out.data.quote_scope, "anonymous");
+  } finally {
+    process.env["VARITY_DEPLOY_KEY"] = saved;
+  }
+});
+
+test("FX-1: a static quote priced for the account states its price and the account's count", async () => {
+  const { out } = await call({ "/api/pricing": [200, ACCOUNT_THREE_SITES_ESTIMATE] }, "varity_cost_calculator", { app_profile: "static-site" });
+  assert.match(out.message, /^static-site: up to \$1\.00\/month \(monthly maximum, USD\)\. You have 3 active static sites; this one is \$1\/month\./);
+  assert.equal(out.data.monthly_max_usd, 1);
+  assert.equal(out.data.quote_scope, "account");
+  assert.equal(out.data.active_static_sites, 3);
+});
+
+test("FX-1: the tool description says the deploy key prices a static site for the account", async () => {
+  const client = await connect();
+  const { tools } = await client.listTools();
+  await client.close();
+  const cost = tools.find((tool) => tool.name === "varity_cost_calculator");
+  assert.doesNotMatch(cost.description, /no sign-in needed/);
+  assert.match(cost.description, /When signed in, a static site is priced for your account/);
+});
 
 test("J-4: the estimate carries the configured deploy key so the owner can price the caller's real count", async () => {
   const { calls } = await call({ "/api/pricing": [200, STATIC_ESTIMATE] }, "varity_cost_calculator", { app_profile: "static-site" });
@@ -539,13 +593,11 @@ test("J-7: a deployment that itself failed says so, and the list names a failed 
 // ── 9. Journey 2.3.27 re-run rows ───────────────────────────────────────────
 
 test("J-10: the billing_note joins the summary as a full sentence, whatever punctuation is served", async () => {
-  const TRAFFIC = " Traffic alone does not change an app's monthly price.";
   const estimate = async (billing_note) => {
     const result = await call({
       "/api/pricing": [200, { ...STATIC_ESTIMATE, billing_note }],
     }, "varity_cost_calculator", { app_profile: "static-site" });
-    assert.ok(result.out.message.endsWith(TRAFFIC), result.out.message);
-    result.out.message = result.out.message.slice(0, -TRAFFIC.length);
+    assert.doesNotMatch(result.out.message, /traffic/i);
     return result;
   };
   const bare = await estimate("First 3 static sites free, then $1/month per site");

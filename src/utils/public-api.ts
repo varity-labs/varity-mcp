@@ -90,7 +90,9 @@ export class VarityPublicApiError extends Error {
     public readonly status?: number,
     public readonly action?: string,
     /** Extra served fields of a refusal (e.g. `profiles` on `profile_unknown`). */
-    public readonly served?: Record<string, unknown>
+    public readonly served?: Record<string, unknown>,
+    /** The served `Retry-After` in whole seconds (429/503), when sent. */
+    public readonly retryAfterSeconds?: number
   ) {
     super(message);
     this.name = "VarityPublicApiError";
@@ -264,7 +266,7 @@ async function withBillingCopy(err: VarityPublicApiError): Promise<VarityPublicA
   }
   const message = PURCHASE_TEXT.test(err.message) ? BILLING_FALLBACK.message : err.message;
   const action = err.action && PURCHASE_TEXT.test(err.action) ? OUTSIDE_CHAT : err.action;
-  return new VarityPublicApiError(message, err.code, err.status, action, err.served);
+  return new VarityPublicApiError(message, err.code, err.status, action, err.served, err.retryAfterSeconds);
 }
 
 /**
@@ -295,6 +297,11 @@ export interface PublicDeployment {
   updated_at?: string | null;
   updatedAt?: string | null;
   billing?: Record<string, unknown> | null;
+  /** `registry_durable`, `durable_only` (never went live) or `registry_legacy` (public-deployment-view.ts). */
+  membership?: string;
+  deleted_at?: string | null;
+  /** What the active release serves: a repository URL for a repository deploy. */
+  source?: { type?: string; repository_url?: string } | null;
 }
 
 export interface PublicLogLine {
@@ -336,7 +343,12 @@ export interface PublicApiRequestOptions {
   raw?: { data: Uint8Array; contentType: string };
   /** Overrides `PUBLIC_API_GET_TIMEOUT_MS` (an upload of a large archive). */
   timeoutMs?: number;
+  /** Extra request headers (an approval id); never the key, idempotency or content headers. */
+  headers?: Record<string, string>;
 }
+
+/** Headers this client owns; an extra header with one of these names is dropped. */
+const RESERVED_HEADERS = new Set(["authorization", "idempotency-key", "content-type", "accept", "user-agent"]);
 
 type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -353,6 +365,9 @@ async function sendRequest<T>(
   if (options.body !== undefined) headers["Content-Type"] = "application/json";
   if (options.raw) headers["Content-Type"] = options.raw.contentType;
   if (options.idempotencyKey) headers["Idempotency-Key"] = options.idempotencyKey;
+  for (const [name, value] of Object.entries(options.headers ?? {})) {
+    if (!RESERVED_HEADERS.has(name.toLowerCase())) headers[name] = value;
+  }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? PUBLIC_API_GET_TIMEOUT_MS);
   try {
@@ -372,12 +387,14 @@ async function sendRequest<T>(
       const badKey = code === "invalid_api_key";
       const action = badKey ? signInAction() : agentAction(body.action);
       const prose = typeof body.error === "string" && !errorCode ? body.error : undefined;
+      const retryAfter = Number(res.headers?.get?.("retry-after") ?? NaN);
       throw new VarityPublicApiError(
         badKey ? "The deploy key is invalid or revoked." : body.message ?? prose ?? `Varity API returned ${res.status}.`,
         code,
         res.status,
         action,
-        data as Record<string, unknown>
+        data as Record<string, unknown>,
+        Number.isFinite(retryAfter) && retryAfter >= 0 ? Math.ceil(retryAfter) : undefined
       );
     }
     return data as T;
@@ -415,9 +432,11 @@ export async function listDeployments(): Promise<PublicDeployment[]> {
   return Array.isArray(data.deployments) ? data.deployments : [];
 }
 
-export async function getDeployment(id: string): Promise<PublicDeployment> {
-  const data = await publicApiGet<{ deployment?: PublicDeployment }>(
-    `/api/deployments/${encodeURIComponent(id)}`
+export async function getDeployment(id: string, timeoutMs?: number): Promise<PublicDeployment> {
+  const data = await publicApiRequest<{ deployment?: PublicDeployment }>(
+    "GET",
+    `/api/deployments/${encodeURIComponent(id)}`,
+    timeoutMs === undefined ? {} : { timeoutMs }
   );
   if (!data.deployment) {
     throw new VarityPublicApiError(
@@ -475,19 +494,24 @@ export interface PublicRunAcceptance {
  * `idempotency_key` is used when present. Any other
  * failure, or a second 504, is returned unchanged.
  */
-async function idempotentCreate<T>(path: string, body: unknown, keyPrefix: string): Promise<T> {
+/** `timeoutMs`, when given, bounds the whole create: the confirming resend gets only what is left. */
+async function idempotentCreate<T>(path: string, body: unknown, keyPrefix: string, timeoutMs?: number): Promise<T> {
   const idempotencyKey = `${keyPrefix}:${randomUUID()}`;
+  const startedAt = Date.now();
   try {
-    return await publicApiRequest<T>("POST", path, { body, idempotencyKey });
+    return await publicApiRequest<T>("POST", path, { body, idempotencyKey, timeoutMs });
   } catch (err) {
     if (!(err instanceof VarityPublicApiError && err.status === 504 && err.code === "deploy_acceptance_unconfirmed")) {
       throw err;
     }
+    const left = timeoutMs === undefined ? undefined : timeoutMs - (Date.now() - startedAt);
+    if (left !== undefined && left <= 0) throw err;
     // The gateway names the key it holds the create under; it equals ours.
     const served = err.served?.idempotency_key;
     return publicApiRequest<T>("POST", path, {
       body,
       idempotencyKey: typeof served === "string" && served ? served : idempotencyKey,
+      timeoutMs: left,
     });
   }
 }
@@ -497,9 +521,12 @@ async function idempotentCreate<T>(path: string, body: unknown, keyPrefix: strin
  * image, template_id, hosting, env, ...) passed through unchanged; `source`
  * is always `mcp` so the operation is attributed to this surface.
  */
-export async function createDeployment(request: Record<string, unknown>): Promise<PublicRunAcceptance> {
+export async function createDeployment(
+  request: Record<string, unknown>,
+  options: { timeoutMs?: number } = {}
+): Promise<PublicRunAcceptance> {
   return idempotentCreate<PublicRunAcceptance>(
-    "/api/deployments", { ...request, source: "mcp" }, "mcp-deploy"
+    "/api/deployments", { ...request, source: "mcp" }, "mcp-deploy", options.timeoutMs
   );
 }
 
@@ -556,6 +583,140 @@ export async function createUploadDeployment(
     { ...request, source: { type: "upload", source_id: sourceId, client: "mcp" } },
     "mcp-deploy"
   );
+}
+
+/**
+ * A private repository Varity keeps for the caller (gateway
+ * `createHostedRepository`): `<owner prefix>-<name>` in Varity's hosted org.
+ * Creation is idempotent by name.
+ */
+export interface HostedRepository {
+  id: number;
+  owner: string;
+  name: string;
+  full_name: string;
+  default_branch: string | null;
+}
+
+/** `POST /api/github/hosted-repositories {name}` — 201 `{repository}`. */
+export async function createHostedRepository(name: string): Promise<HostedRepository> {
+  const data = await publicApiRequest<{ repository?: Partial<HostedRepository> }>("POST", "/api/github/hosted-repositories", {
+    body: { name },
+  });
+  const repo = data.repository;
+  if (!repo || typeof repo.owner !== "string" || typeof repo.name !== "string" || typeof repo.full_name !== "string") {
+    throw new VarityPublicApiError(
+      "Varity answered in a form this MCP version does not understand.",
+      "hosted_repository_unrecognized",
+      undefined,
+      "Update the Varity MCP server, then call varity_deploy again."
+    );
+  }
+  return repo as HostedRepository;
+}
+
+/** One file of a change: UTF-8 text, or base64 of the exact bytes. */
+export interface HostedChangeFile {
+  path: string;
+  content: string;
+  encoding: "utf-8" | "base64";
+}
+
+export interface HostedChange {
+  repo: { owner: string; name: string };
+  base_ref: string;
+  branch: string;
+  expected_head_sha?: string;
+  message: string;
+  files: HostedChangeFile[];
+  open_pr: false;
+}
+
+/** `POST /api/github/changes` (Idempotency-Key) — 201 `{branch, commit_sha, base_sha}`. Never retried here. */
+export async function commitHostedChange(
+  change: HostedChange,
+  idempotencyKey: string,
+  timeoutMs?: number
+): Promise<{ commit_sha: string }> {
+  const data = await publicApiRequest<{ commit_sha?: unknown }>("POST", "/api/github/changes", { body: change, idempotencyKey, timeoutMs });
+  if (typeof data.commit_sha !== "string" || !/^[0-9a-f]{40}$/.test(data.commit_sha)) {
+    throw new VarityPublicApiError(
+      "Varity answered the save in a form this MCP version does not understand.",
+      "hosted_change_unrecognized",
+      undefined,
+      "Update the Varity MCP server, then call varity_deploy again."
+    );
+  }
+  return { commit_sha: data.commit_sha };
+}
+
+export interface HostedRepositoryListing {
+  repositories: Array<{ id: number; name: string; full_name: string; created_by?: string }>;
+  truncated?: boolean;
+}
+
+/**
+ * The gateway has no private-copy route for this key: 404 (an older gateway,
+ * or the deploy-key flag off) or the single 403 `repo_authority_required`.
+ */
+export function hostedRouteUnavailable(err: unknown): boolean {
+  return err instanceof VarityPublicApiError && (err.status === 404 || (err.status === 403 && err.code === "repo_authority_required"));
+}
+
+/** `GET /api/github/hosted-repositories` — the caller's own private copies. */
+export async function listHostedRepositories(): Promise<HostedRepositoryListing> {
+  const data = await publicApiGet<Partial<HostedRepositoryListing>>("/api/github/hosted-repositories");
+  return { repositories: Array.isArray(data.repositories) ? data.repositories : [], truncated: data.truncated === true };
+}
+
+/** `POST /v1/deployment-approvals {action}` — 201 `{approval_id}`; single use. */
+export async function createDeploymentApproval(action: Record<string, unknown>, timeoutMs?: number): Promise<string> {
+  const data = await publicApiRequest<{ approval_id?: unknown }>("POST", "/v1/deployment-approvals", {
+    body: { action },
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
+  });
+  if (typeof data.approval_id !== "string" || !data.approval_id) {
+    throw new VarityPublicApiError("Varity returned no approval.", "approval_unrecognized", undefined, "Retry the request.");
+  }
+  return data.approval_id;
+}
+
+/**
+ * `POST /api/github/hosted-repositories/:name/deletion {repository_id}` with
+ * `X-Varity-Approval-Id` — 202 pending (or 200 deleted). The gateway's worker
+ * deletes the repository once no deployment uses it.
+ */
+export async function queueHostedRepositoryDeletion(
+  name: string,
+  repositoryId: number,
+  approvalId: string
+): Promise<{ status?: string }> {
+  return publicApiRequest("POST", `/api/github/hosted-repositories/${encodeURIComponent(name)}/deletion`, {
+    body: { repository_id: repositoryId },
+    headers: { "X-Varity-Approval-Id": approvalId },
+  });
+}
+
+/**
+ * `POST /api/deployments/:id/source-revision {commit}` with `X-Varity-Approval-Id`
+ * (a `deploy_revision` approval for `deployment:<id>` and this commit) — 202
+ * `{id, app_name, subdomain, status: "redeploying", commit_sha, run_id, status_url}`.
+ * Deploys the commit of a dynamic app in place, keeping its saved settings and
+ * attached keys (gateway public-api.ts `deploySourceRevision`). Never retried here.
+ */
+export async function deploySourceRevision(
+  deployment: string,
+  commit: string,
+  approvalId: string,
+  idempotencyKey: string,
+  timeoutMs: number
+): Promise<PublicRunAcceptance> {
+  return publicApiRequest("POST", deploymentPath(deployment, "/source-revision"), {
+    body: { commit },
+    idempotencyKey,
+    headers: { "X-Varity-Approval-Id": approvalId },
+    timeoutMs,
+  });
 }
 
 /** `DELETE /api/deployments/:id` — 202 `{status:"deleting", run_id}` or 200 `{deleted:true}`. */
@@ -674,10 +835,8 @@ export async function removeCustomDomain(deployment: string): Promise<CustomDoma
  * `GET /api/deployments/runs/:runId` — the durable run view plus
  * `public_status`, `outcome`, `url`, `error_message`, `support_id`, `events`.
  */
-export async function getRun(runId: string): Promise<Record<string, unknown>> {
-  return publicApiGet<Record<string, unknown>>(
-    `/api/deployments/runs/${encodeURIComponent(runId)}`
-  );
+export async function getRun(runId: string, timeoutMs?: number): Promise<Record<string, unknown>> {
+  return publicApiRequest<Record<string, unknown>>("GET", `/api/deployments/runs/${encodeURIComponent(runId)}`, { timeoutMs });
 }
 
 /** `GET /api/machines` — `{machines}` plus inventory completeness fields when partial. */

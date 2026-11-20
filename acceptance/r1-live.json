@@ -1,0 +1,8 @@
+{
+  "gateway_version": "1.14.192",
+  "flag": {"name": "VARITY_HOSTED_REPOS_DEPLOY_KEYS_ENABLED", "value": true},
+  "observed_at": "2026-11-20T19:06:00Z",
+  "result": "passed",
+  "package_version": "2.3.30",
+  "evidence": {"path": "acceptance/r1-live-transcript.txt", "sha256": "fceb0a18ea9829b1b7bda2985169bae7e7a42dd0fa5fb7793f6ff55659d16ad5"}
+}

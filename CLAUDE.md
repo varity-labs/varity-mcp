@@ -25,15 +25,19 @@ refs, CI receipts, and fresh live evidence own those facts.
 
 ## Actual runtime shape
 
-- The published package serves MCP clients over stdio only. Hosted MCP, its
-  OAuth adapter, and its container release lane are retired and absent here.
+- `src/index.ts` serves MCP clients over stdio. `src/server.ts` exports
+  `createVarityServer` with local and remote toolsets through the package
+  `./server` export. The gateway owns the hosted HTTP transport, OAuth mount
+  and release; this package owns the server factory and toolsets.
 - Deployment, template and machine reads and mutations (deploy, template
   catalog and deploy, delete, redeploy, logs, status, runs, machines) and
   pricing reads use the one owner-scoped public Varity client in
   `src/utils/public-api.ts`.
 - Only the migration preview runs the `varitykit` CLI, through
-  `src/utils/cli-bridge.ts`. `varity_login` signs in through the browser
-  (or a device code) and saves the deploy key to `~/.varitykit/config.json`;
+  `src/utils/cli-bridge.ts`. When browser sign-in is switched on,
+  `varity_login` signs in through the browser (or a device code) and saves the
+  deploy key to `~/.varitykit/config.json`; until then it tells the user to add
+  a deploy key to the editor's MCP settings;
   the key is read from `VARITY_DEPLOY_KEY`, that file, or the legacy
   `VARITY_API_KEY` (`src/utils/config.ts`); sign-in runs no CLI.
 - Several developer tools operate directly on the MCP host's filesystem or
@@ -66,8 +70,9 @@ release sequence is in [ARCHITECTURE.md](ARCHITECTURE.md#verification).
 - Do not place credentials in tool arguments, command arguments, logged values,
   responses, docs, or fixtures. Treat registry passwords, GitHub tokens, and
   deploy keys as secrets.
-- Do not reintroduce a network transport or present retired `mcp.varity.so` as
-  an active offering without a separately governed architecture change.
+- Keep the hosted HTTP transport and OAuth implementation in the gateway;
+  its mount consumes this package's server factory. Verify the serving endpoint
+  before describing hosted MCP as active.
 - Update `ARCHITECTURE.md` in the same change when ownership, an adapter
   interface, auth/custody, persistent or process-local state, transport
   topology, or failure semantics change.

@@ -1,0 +1,21 @@
+R1 live acceptance — 2026-11-20T18:58Z..19:06Z (UTC)
+Gateway: https://varity.app (gateway 1.14.192 @ 825be3c9; deploy-api 0.5.398 @ 575a6234)
+Flag: VARITY_HOSTED_REPOS_DEPLOY_KEYS_ENABLED=true on both gateway replicas (release ops 84d4a770)
+Tool: @varity-labs/mcp 2.3.30 (dist built at 51ff8000), in-memory MCP client, VARITY_GATEWAY_URL=https://varity.app
+
+1. varity_deploy {path:<tmp>/r1folder, source:"upload", app_name:"r1-live-mwpcgmxx"}
+   -> success: accepted; source "varity_private_repository"; saved_files 1; left_out_count 0
+      id 12c8d760-a631-41d0-86b5-b35aeb661910; run a34b77a8-92a2-4a4e-b635-ed21d68eddce; status deploying
+   Hosted private copy created: varity-labs/0b3161f5d27e925f-r1-live-mwpcgmxx (private; created_by=deploy_key)
+2. GET /api/deployments/12c8d760-a631-41d0-86b5-b35aeb661910
+   -> status live; outcome deployment_succeeded at 2026-11-20T19:01:03Z; public_url https://varity.app/r1-live-mwpcgmxx/
+3. GET https://varity.app/r1-live-mwpcgmxx/
+   -> HTTP 200; body contains "R1-LIVE-MARKER-r1-live-mwpcgmxx"
+4. Cross-owner: POST /api/github/changes repo=varity-labs/ffffffffffffffff-r1-live-mwpcgmxx
+   -> HTTP 403; code "repo_authority_required"; retryable false
+5. varity_delete_deployment {deployment:"r1-live-mwpcgmxx"}
+   -> deleted true; outcome deployment_deleted; source_copy "deletion_queued"
+6. GET /api/github/hosted-repositories
+   -> 0 repositories matching r1-live-mwpcgmxx (private copy removed)
+
+Result: PASSED

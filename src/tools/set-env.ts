@@ -8,7 +8,7 @@ import { ENV_KEY, projectEnvReader, type ProjectEnvReader } from "./env-file.js"
 
 /** Said before and after every env change: it restarts the app (V9-1/V9-3). */
 export const RESTART_NOTE =
-  "Your app restarts to use the new settings. Restarting holds one more month's maximum, released when billing next settles, usually within 20 minutes.";
+  "Your app restarts to use the new settings. Restarting may temporarily hold additional balance until billing settles.";
 
 /**
  * `varity_set_env` (stdio only): reads the named settings from the project's
@@ -115,8 +115,8 @@ export function registerSetEnvTool(server: McpServer): void {
         "Set environment variables (settings such as API keys) on a deployed app from the project's own .env file. " +
         "Pass the app, the project folder and the setting NAMES; the values are read from the file on this computer and " +
         "never go through chat. Never ask the user to type a value into chat: ask them to put it in .env. " +
-        "This restarts the app, and restarting holds one more month's maximum, released when billing next settles, usually within 20 minutes, so tell the user before calling. " +
-        "The user is asked to confirm the names and the restart before anything is sent. " +
+        "Before calling, tell the user the setting names, that the app restarts, and that restarting may temporarily hold additional balance until billing settles; ask them to confirm all three. " +
+        "The user is asked to confirm the names, the restart and the possible additional hold before anything is sent. " +
         "Call it once; do not repeat it on a timeout (check varity_deploy_status instead).",
       inputSchema: {
         deployment: z
@@ -139,7 +139,7 @@ export function registerSetEnvTool(server: McpServer): void {
         confirm: z
           .boolean()
           .optional()
-          .describe("Set to true only after the user agreed to the setting names and the restart (needed when this editor cannot ask the user itself)."),
+          .describe("Set to true only after the user agreed to the setting names, the restart and the possible additional hold (needed when this editor cannot ask the user itself)."),
       },
     },
     async ({ deployment, path, keys, env_file, confirm }) =>

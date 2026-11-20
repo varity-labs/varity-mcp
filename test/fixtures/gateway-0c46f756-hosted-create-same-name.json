@@ -1,0 +1,14 @@
+{
+  "_source": "varity-platform 0c46f75661f09d221e44909b6bf3bb8d99e6065a: services/varity-gateway/src/routes/github-changes.ts:709 res.status(201).json({ repository }); the same-name re-find body is services/varity-gateway/src/services/github-authority.ts:686 { id: live.repositoryId, owner, name, full_name, default_branch: live.defaultBranch, private: true }; values from src/__tests__/hosted-repositories-deploy-key.test.ts SP-2 (ORG 'varity-labs', owner did:privy:alice, adopted id 8100, slug 'site'), with default_branch set to a non-main live branch ('trunk') per PLAN-2.3.30 §2.7",
+  "status": 201,
+  "body": {
+    "repository": {
+      "id": 8100,
+      "owner": "varity-labs",
+      "name": "f65ae13b1d75d83c-site",
+      "full_name": "varity-labs/f65ae13b1d75d83c-site",
+      "default_branch": "trunk",
+      "private": true
+    }
+  }
+}

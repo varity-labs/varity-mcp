@@ -11,9 +11,13 @@ import { monthlyMaximum, usd } from "../utils/money.js";
  * forwards estimate inputs or projects the billing fields returned for an
  * owner-scoped deployment; it owns no profile catalog or billing defaults.
  *
- * A pre-deploy estimate reads the public `GET /api/pricing?profile=` (no
- * auth), the same computation the portal deploy page renders; a live
- * deployment's projection reads its owner-scoped billing block. The tool
+ * A pre-deploy estimate reads the public `GET /api/pricing?profile=`, sending
+ * the deploy key when one is configured so the owner can price a static site
+ * for the caller's account; a live deployment's projection reads its
+ * owner-scoped billing block. A static estimate states a price only when the
+ * owner served `quote_scope: "account"`: an anonymous quote, or one from an
+ * owner that ignored the key, is the first-site assumption, not the caller's
+ * price (FX-1). The tool
  * reports the USD field the owner served under that field's own name and
  * never converts between units or invents a monthly projection. Money is USD
  * only.
@@ -57,6 +61,55 @@ const GPU_CONTAINER_PROFILE = "ai-agent-gpu";
 /** The served `billing_model` of a monthly maximum charged by running time. */
 const PRORATED_MONTHLY_MAX = "reserved_monthly_max_prorated";
 
+/** The served note's words, trimmed and closed as a sentence only when it has
+ *  no terminal punctuation (before any closing quote or bracket); the
+ *  structured `billing_note` stays exactly as served. */
+function summaryNote(data: Record<string, unknown>): string {
+  const servedNote = typeof data.billing_note === "string" ? data.billing_note.trim() : "";
+  const closed = /[.!?…]["'’”)\]]*$/.test(servedNote);
+  return servedNote ? `${servedNote}${closed ? "" : "."}` : "";
+}
+
+/**
+ * FX-1: whether a new static site is free depends on how many static sites
+ * the account already runs, so its price is stated only when the owner served
+ * `quote_scope: "account"`. Any other static estimate (anonymous, or from an
+ * owner that ignored the key and sends no scope) is the first-site
+ * assumption, not the caller's price.
+ */
+function isUnpricedStaticQuote(data: Record<string, unknown>): boolean {
+  return data.mode === "static" && data.quote_scope !== "account";
+}
+
+function unpricedStaticResponse(
+  data: Record<string, unknown>,
+  source: string,
+  input: { app_profile?: string; subdomain?: string },
+) {
+  const scope = typeof data.quote_scope === "string" ? data.quote_scope : null;
+  const why = scope === null ? ", because Varity did not check your account" : "";
+  const note = summaryNote(data);
+  const signIn = scope === "anonymous" ? " Run varity_login, then ask again." : "";
+  const name = String(data.profile ?? input.app_profile ?? "static-site");
+  return successResponse(
+    {
+      source,
+      input,
+      // Explicit whitelist: no price field and no billing model, so nothing
+      // in the result reads as this caller's price.
+      profile: data.profile,
+      currency: data.currency,
+      quote_scope: scope,
+      free_sites_included: data.free_sites_included,
+      additional_site_monthly_usd: data.additional_site_monthly_usd,
+      billing_note: data.billing_note,
+      mode: data.mode,
+      verified: data.verified,
+    },
+    `${name}: no price stated${why}.${note ? ` ${note}` : ""}${signIn}`
+  );
+}
+
 export function registerCostCalculatorTool(server: McpServer): void {
   server.registerTool(
     "varity_cost_calculator",
@@ -66,7 +119,8 @@ export function registerCostCalculatorTool(server: McpServer): void {
         "Request a current deployment-price estimate from the Varity public pricing interface. " +
         "Use whenever a developer asks what a Varity deployment costs. " +
         "Pass `subdomain` for a live deployment's current billing projection (needs a deploy key), or " +
-        "`app_profile` for a pre-deploy estimate (no sign-in needed). " +
+        "`app_profile` for a pre-deploy estimate. When signed in, a static site is priced for your account, " +
+        "because whether it is free depends on how many static sites you already run; otherwise no static price is stated. " +
         // Mirrors gateway PROFILE_PRICING keys for discoverability; the served
         // list in a `profile_unknown` refusal stays the authority.
         "Profiles: static-site (alias static), web-app, web-app-db, ai-agent-cpu; " +
@@ -145,6 +199,10 @@ export function registerCostCalculatorTool(server: McpServer): void {
         );
       }
 
+      if (!subdomain && isUnpricedStaticQuote(data)) {
+        return unpricedStaticResponse(data, source, { app_profile, subdomain });
+      }
+
       const projection = projectOwnerPricing(data);
       if (!projection) {
         return errorResponse(
@@ -159,22 +217,16 @@ export function registerCostCalculatorTool(server: McpServer): void {
       const price = "monthly_max_usd" in projection
         ? monthlyMaximum(amount)
         : `${usd(amount)}/${unit} (USD)`;
-      // The served note's words, trimmed and closed as a sentence only when it
-      // has no terminal punctuation (before any closing quote or bracket);
-      // `data.billing_note` stays exactly as served. The prorated monthly
-      // maximum's served note uses billing terms ("reserved deployment,
-      // prorated"), so the summary says the same thing in plain words (J-17).
-      const servedNote = typeof data.billing_note === "string" ? data.billing_note.trim() : "";
-      const closed = /[.!?\u2026]["'\u2019\u201D)\]]*$/.test(servedNote);
+      // The prorated monthly maximum's served note uses billing terms
+      // ("reserved deployment, prorated"), so the summary says the same thing
+      // in plain words (J-17).
       const plainNote = data.billing_model === PRORATED_MONTHLY_MAX
         ? "It is charged only for the time it runs, and never more than that in a month."
-        : servedNote ? `${servedNote}${closed ? "" : "."}` : "";
-      // V1-verified claim; apps only (a machine is priced by the hour).
-      const traffic = unit === "month" ? " Traffic alone does not change an app's monthly price." : "";
+        : summaryNote(data);
       // A new Starter app may be the account's one free app (gateway free-app
       // admission: plan starter). Said only for a plain Starter estimate.
       const freeStarter = !subdomain && isPlainStarter(data) ? " Free accounts can run one Starter app at no charge." : "";
-      const summary = `${String(estimateName)}: ${price}.${plainNote ? ` ${plainNote}` : ""}${traffic}${freeStarter}`;
+      const summary = `${String(estimateName)}: ${price}.${plainNote ? ` ${plainNote}` : ""}${freeStarter}`;
 
       return successResponse(
         {
@@ -185,6 +237,9 @@ export function registerCostCalculatorTool(server: McpServer): void {
           profile: data.profile,
           currency: data.currency,
           ...served,
+          // A static quote priced for the account: whose quote and its count.
+          quote_scope: data.quote_scope,
+          active_static_sites: data.active_static_sites,
           billing_model: data.billing_model,
           billing_note: data.billing_note,
           mode: data.mode,

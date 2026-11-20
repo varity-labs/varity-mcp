@@ -1,0 +1,176 @@
+{
+  "producer": "varity-labs/varity-platform services/varity-gateway @ 98042b7766b0832243f92b8688b98bf5157bf450",
+  "note": "Bodies copied from producer source; placeholders in <> are filled by the test. Field names and codes are verbatim.",
+  "detail_dynamic": {
+    "source": "src/services/public-deployment-view.ts:369-412 (publicDeploymentView) with src/services/deploy-ops-public.ts:1593-1604 (liveRepositorySource); served by src/routes/public-api.ts:1576-1580 as {deployment}",
+    "status": 200,
+    "body": {
+      "deployment": {
+        "id": "<record id>",
+        "operation_deployment_id": "<ops id>",
+        "app_name": "<app>",
+        "subdomain": "<app>",
+        "status": "live",
+        "runtime": "dynamic",
+        "source": {
+          "type": "repository",
+          "repository_owner": "<org>",
+          "repository_url": "https://github.com/<org>/<prefix>-<app>",
+          "commit_sha": "<sha>"
+        },
+        "membership": "registry_durable",
+        "deleted_at": null
+      }
+    }
+  },
+  "detail_owner_only_source": {
+    "source": "src/routes/public-api.ts:743-748 (spec.repoUrl fallback when the durable inventory is not observed) -> src/services/public-deployment-view.ts:105-108 repositorySource",
+    "body": {
+      "type": "repository",
+      "repository_owner": "<org>"
+    }
+  },
+  "approval_created": {
+    "source": "src/services/deployment-approvals-routes.ts:253-256",
+    "status": 201,
+    "body": {
+      "approval_id": "<approval id>",
+      "expires_at": "<iso>"
+    }
+  },
+  "source_revision_accepted": {
+    "source": "src/routes/public-api.ts:2243-2252",
+    "status": 202,
+    "body": {
+      "id": "<record id>",
+      "app_name": "<app>",
+      "subdomain": "<app>",
+      "status": "redeploying",
+      "commit_sha": "<sha>",
+      "run_id": "<run id>",
+      "status_url": "/api/deployments/runs/<run id>?app=<app>"
+    }
+  },
+  "update_in_progress": {
+    "source": "src/routes/public-api.ts:2015-2020 via sourceRevisionRefusal :2074",
+    "status": 409,
+    "body": {
+      "code": "deployment_update_in_progress",
+      "message": "Another update of this deployment is still running.",
+      "action": "Wait for it to finish (GET /api/deployments/{id}), then deploy the commit again.",
+      "retryable": true
+    }
+  },
+  "source_revision_unavailable": {
+    "source": "src/routes/public-api.ts:2027-2032 via :2074 (message relayed from deploy-api, redacted)",
+    "status": 409,
+    "body": {
+      "code": "source_revision_unavailable",
+      "message": "<relayed deploy-api message>",
+      "action": "Deploy the app again from its repository; a new commit can then be deployed in place.",
+      "retryable": false
+    }
+  },
+  "repository_credential_required": {
+    "source": "src/routes/public-api.ts:2179-2186 (api-key branch)",
+    "status": 403,
+    "body": {
+      "code": "repository_credential_required",
+      "message": "This repository is private and Varity holds no credential that can clone it for you.",
+      "action": "Send a git_token that can read this repository, or deploy the project folder with varitykit deploy or the varity_deploy tool.",
+      "retryable": false
+    }
+  },
+  "runtime_not_started": {
+    "source": "src/routes/public-api.ts:638-647 (failed branch)",
+    "status": 409,
+    "body": {
+      "code": "runtime_not_started",
+      "message": "This deployment failed before it went live, so it has no running app to change.",
+      "action": "Read its outcome at GET /api/deployments/{id}, fix the cause, and deploy again.",
+      "retryable": false
+    }
+  },
+  "deploy_service_unavailable": {
+    "source": "src/routes/public-api.ts:2212-2217",
+    "status": 503,
+    "body": {
+      "code": "deploy_service_unavailable",
+      "message": "The deployment service did not answer.",
+      "action": "Retry with the same Idempotency-Key and a new approval.",
+      "retryable": true
+    }
+  },
+  "detail_durable_only": {
+    "source": "src/services/public-deployment-view.ts:410-411 membership; deploy-ops-public.ts publicDurableDeployment (id = durable id)",
+    "body": {
+      "deployment": {
+        "id": "<durable id>",
+        "operation_deployment_id": "<durable id>",
+        "app_name": "<app>",
+        "subdomain": null,
+        "status": "failed",
+        "runtime": "dynamic",
+        "membership": "durable_only",
+        "deleted_at": null,
+        "source": {
+          "type": "repository",
+          "repository_owner": "<org>",
+          "repository_url": "https://github.com/<org>/<prefix>-<app>",
+          "commit_sha": "<sha>"
+        }
+      }
+    }
+  },
+  "detail_deleted": {
+    "source": "src/routes/public-api.ts:1522-1540 (J-13 closed registry record) via publicDeployment",
+    "body": {
+      "deployment": {
+        "id": "<record id>",
+        "operation_deployment_id": "<durable id>",
+        "app_name": "<app>",
+        "subdomain": "<app>",
+        "status": "deleted",
+        "runtime": "dynamic",
+        "membership": "registry_durable",
+        "deleted_at": "<iso>",
+        "source": {
+          "type": "repository",
+          "repository_owner": "<org>",
+          "repository_url": "https://github.com/<org>/<prefix>-<app>",
+          "commit_sha": "<sha>"
+        }
+      }
+    }
+  },
+  "locator_not_found": {
+    "source": "src/routes/public-api.ts:1645-1650",
+    "status": 404,
+    "body": {
+      "code": "deployment_not_found",
+      "message": "Deployment not found.",
+      "action": "Check the deployment id and API key owner.",
+      "retryable": false
+    }
+  },
+  "ownership_check_unavailable": {
+    "source": "src/routes/public-api.ts:603-608",
+    "status": 503,
+    "body": {
+      "code": "ownership_check_unavailable",
+      "message": "Deployment ownership is temporarily unavailable.",
+      "action": "Retry the request.",
+      "retryable": true
+    }
+  },
+  "idempotency_key_reused": {
+    "source": "src/routes/public-api.ts:2021-2026 via sourceRevisionRefusal",
+    "status": 409,
+    "body": {
+      "code": "idempotency_key_reused",
+      "message": "This Idempotency-Key was already used for a different request.",
+      "action": "Use a new Idempotency-Key for a different commit.",
+      "retryable": false
+    }
+  }
+}

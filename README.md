@@ -113,9 +113,9 @@ The MCP exposes Varity's deploy surface so your AI tool can take action — not 
 
 Ask your agent to finish with one plain line: where the app is, what it can cost, and how to stop paying. It reads like this:
 
-> Your app is live at `<live URL>`. It costs up to `<monthly maximum>`/month (monthly maximum). Traffic alone does not change an app's monthly price. To stop billing, ask me to delete it.
+> Your app is live at `<live URL>`. It costs up to `<monthly maximum>`/month (monthly maximum). To stop billing, ask me to delete it.
 
-The URL comes from `varity_deploy_status` and the monthly maximum from `varity_cost_calculator` or `varity_template_info`. The traffic sentence applies to apps only; virtual machines are priced by the hour.
+The URL comes from `varity_deploy_status` and the monthly maximum from `varity_cost_calculator` or `varity_template_info`. Virtual machines are priced by the hour.
 
 **Docs and pricing**
 - "Search Varity docs for environment variables"
@@ -137,11 +137,11 @@ The URL comes from `varity_deploy_status` and the monthly maximum from `varity_c
 | `varity_open_browser` | Open a URL locally |
 | `varity_dev_server` | Start the local development server |
 | `varity_create_repo` | Create a GitHub repository and push the project |
-| `varity_deploy` | Deploy the current project to production |
+| `varity_deploy` | Deploy the current project to production; a folder without a readable GitHub repository is saved as a private copy Varity keeps (deleted with the deployment) and built |
 | `varity_deploy_status` | Check the status of a deployment: the current step and time so far while it deploys, how long it took once live, and the last lines of the build error when a build failed |
 | `varity_deploy_logs` | Read runtime logs |
-| `varity_delete_deployment` | Request deletion; poll `varity_deploy_status` until it is deleted and billing is stopped |
-| `varity_set_env` | Set an app's settings (such as API keys) from the project's own `.env` file: you name the settings, the values are read on your computer and never pass through chat. Your app restarts; restarting holds one more month's maximum, released when billing next settles, usually within 20 minutes |
+| `varity_delete_deployment` | Request deletion; poll `varity_deploy_status` until it is deleted and billing is stopped. If Varity saved a private copy of a folder for this app, that copy is deleted too. |
+| `varity_set_env` | Set an app's settings (such as API keys) from the project's own `.env` file: you name the settings, the values are read on your computer and never pass through chat. Your app restarts; restarting may temporarily hold additional balance until billing settles |
 | `varity_domain_add` | Point your own domain at an app and get the exact DNS record to add at your registrar |
 | `varity_domain_verify` | Check whether that DNS record is in place and the domain is live |
 | `varity_domain_remove` | Stop serving an app at its custom domain (it keeps its Varity address) |

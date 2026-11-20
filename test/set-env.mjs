@@ -96,7 +96,7 @@ test("one PATCH with all requested keys, merge only, says the app restarts; valu
   assert.deepEqual(patches[0].body, { env: { API_KEY: SECRET, OTHER } }, "only the named keys, no replace");
   assert.equal(result.out.success, true);
   assert.equal(result.out.data.count, 2);
-  assert.match(result.out.message, /Your app restarts to use the new settings\. Restarting holds one more month's maximum, released when billing next settles, usually within 20 minutes\./);
+  assert.match(result.out.message, /Your app restarts to use the new settings\. Restarting may temporarily hold additional balance until billing settles\./);
   assertNoValues(result);
 });
 
@@ -213,7 +213,27 @@ test("the tool takes names, not values, in its arguments", async () => {
   await client.close();
   const tool = tools.find((t) => t.name === "varity_set_env");
   assert.deepEqual(Object.keys(tool.inputSchema.properties).sort(), ["confirm", "deployment", "env_file", "keys", "path"]);
-  assert.match(tool.description, /restarts the app/);
+  assert.match(tool.description, /the app restarts/);
+});
+
+test("PLUGIN-S4: the description asks consent for the names, the restart and the possible additional balance hold before calling", async () => {
+  const [serverSide, clientSide] = InMemoryTransport.createLinkedPair();
+  await createVarityServer().connect(serverSide);
+  const client = new Client({ name: "set-env", version: "1" });
+  await client.connect(clientSide);
+  const { tools } = await client.listTools();
+  await client.close();
+  const tool = tools.find((t) => t.name === "varity_set_env");
+  const consent = tool.description.split(/(?<=\.) /).filter((sentence) => /confirm/.test(sentence));
+  assert.ok(consent.length > 0, tool.description);
+  for (const sentence of consent) {
+    assert.match(sentence, /names/, sentence);
+    assert.match(sentence, /restart/, sentence);
+    assert.match(sentence, /hold/, sentence);
+  }
+  assert.match(tool.description, /restarting may temporarily hold additional balance until billing settles/);
+  assert.doesNotMatch(tool.description, /holds (one more|another) month|restarting never holds|no (extra|additional) (balance )?hold|usually within 20 minutes/i);
+  assert.match(tool.inputSchema.properties.confirm.description, /possible additional hold/);
 });
 
 const TEMPLATE = {
@@ -264,7 +284,7 @@ test("the user confirms key names and the app before anything is sent", async ()
   const declined = await run("varity_set_env", args, routes, { elicit: { action: "decline" } });
   assert.equal(declined.out.error.code, "ENV_NOT_CONFIRMED");
   assert.equal(declined.calls.filter((call) => call.method !== "GET").length, 0, "decline: nothing sent");
-  assert.deepEqual(declined.asked, ["Set API_KEY, OTHER on shop? Your app restarts to use the new settings. Restarting holds one more month's maximum, released when billing next settles, usually within 20 minutes."]);
+  assert.deepEqual(declined.asked, ["Set API_KEY, OTHER on shop? Your app restarts to use the new settings. Restarting may temporarily hold additional balance until billing settles."]);
   assertNoValues(declined);
 
   const accepted = await run("varity_set_env", args, routes, { elicit: { action: "accept", content: { confirm: true } } });
@@ -274,7 +294,7 @@ test("the user confirms key names and the app before anything is sent", async ()
   const unconfirmed = await run("varity_set_env", { ...args, confirm: undefined }, routes);
   assert.equal(unconfirmed.out.data.confirmation_required, true);
   assert.equal(unconfirmed.out.data.sent, false);
-  assert.match(unconfirmed.out.message, /^Set API_KEY, OTHER on shop\? Your app restarts to use the new settings\. Restarting holds one more month's maximum, released when billing next settles, usually within 20 minutes\. Nothing has been sent yet\./);
+  assert.match(unconfirmed.out.message, /^Set API_KEY, OTHER on shop\? Your app restarts to use the new settings\. Restarting may temporarily hold additional balance until billing settles\. Nothing has been sent yet\./);
   assert.equal(unconfirmed.calls.filter((call) => call.method !== "GET").length, 0, "no elicitation and no confirm: nothing sent");
   assertNoValues(unconfirmed);
 });
@@ -298,7 +318,7 @@ test("J-19: for a running app the confirm question carries the restart cost note
   }, { elicit: { action: "accept", content: { confirm: true } } });
   assert.equal(result.out.success, true);
   assert.equal(result.asked.length, 1);
-  assert.match(result.asked[0], /Restarting holds one more month's maximum, released when billing next settles, usually within 20 minutes/);
+  assert.match(result.asked[0], /Restarting may temporarily hold additional balance until billing settles/);
 });
 
 test("J-19: a gateway 409 refusal is mapped to plain words with no 'retry later'", async () => {

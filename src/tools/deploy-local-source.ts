@@ -1,13 +1,13 @@
 import { access, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, parse, resolve, sep } from "node:path";
-import { PackRefused, packFolder } from "./pack.js";
+import { PackRefused, collectFolder, packCollected } from "./pack.js";
 import { errorResponse } from "../utils/responses.js";
 import type { LocalSource } from "./deploy.js";
 
 /**
  * The stdio deploy source: a project directory, its Git `origin` remote, and
- * the folder packer for an upload. Reads the invoking user's filesystem, so
+ * the folder walk and packer for an upload or a private copy. Reads the invoking user's filesystem, so
  * only the local toolset injects it into `registerDeployTool`.
  */
 
@@ -58,7 +58,7 @@ export const localDeploySource: LocalSource = {
     }
     return { folder, repoUrl: await detectGitRemote(folder), explicit: Boolean(path) };
   },
-  pack: (folder) => {
+  collect: (folder) => {
     const home = resolve(homedir());
     if (folder === home || folder === parse(folder).root || home.startsWith(folder + sep)) {
       throw new PackRefused(
@@ -67,6 +67,7 @@ export const localDeploySource: LocalSource = {
         "Pass the absolute path of the project folder itself."
       );
     }
-    return packFolder(folder);
+    return collectFolder(folder);
   },
+  pack: packCollected,
 };

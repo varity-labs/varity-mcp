@@ -1,4 +1,4 @@
-import { getRun, type PublicRunAcceptance } from "./public-api.js";
+import { getRun, type PublicRunAcceptance, type VarityPublicApiError } from "./public-api.js";
 
 /**
  * The owner's view of one accepted lifecycle operation (deploy, redeploy,
@@ -18,13 +18,19 @@ export interface LifecycleAcceptance {
   outcome: unknown;
 }
 
+/**
+ * `timeoutMs` cuts the run read to a caller's deadline; at or below 0 the run
+ * is not read (status unobserved), so the caller's own bound holds.
+ */
 export async function lifecycleAcceptance(
-  accepted: PublicRunAcceptance
+  accepted: PublicRunAcceptance,
+  timeoutMs?: number
 ): Promise<LifecycleAcceptance> {
   const runId = typeof accepted.run_id === "string" && accepted.run_id ? accepted.run_id : null;
   if (!runId) return { run_id: null, public_status: null, outcome: null };
+  if (timeoutMs !== undefined && timeoutMs <= 0) return { run_id: runId, public_status: null, outcome: null };
   try {
-    const run = await getRun(runId);
+    const run = await getRun(runId, timeoutMs);
     return {
       run_id: runId,
       public_status: typeof run.public_status === "string" ? run.public_status : null,
@@ -46,4 +52,18 @@ export function acceptanceSummary(subject: string, id: unknown, acceptance: Life
   }
   return `${subject} accepted (id ${id ?? "unassigned"}, run ${acceptance.run_id}, status ${acceptance.public_status ?? "unobserved"}). ` +
     "Track its terminal outcome with varity_deploy_status using this id; status returns the same id.";
+}
+
+/**
+ * The create's start cannot be confirmed: the request never got an answer (a
+ * client-side abort at the deadline reads as unreachable), or the gateway's
+ * own 504 `deploy_acceptance_unconfirmed` outlived the confirming resend.
+ */
+export function startUnconfirmed(err: VarityPublicApiError): boolean {
+  return err.code === "VARITY_API_UNREACHABLE" || (err.status === 504 && err.code === "deploy_acceptance_unconfirmed");
+}
+
+/** What to do when the start is unconfirmed: read the status before a second deploy. */
+export function checkStatusAction(appName: string): string {
+  return `Check varity_deploy_status with "${appName}" before deploying again.`;
 }

@@ -42,7 +42,9 @@ async function call(name, args, routes, shared) {
   const original = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
     const { pathname, search } = new URL(url);
-    const [status, body] = routes[`${init?.method ?? "GET"} ${pathname}${search}`] ?? routes[`${init?.method ?? "GET"} ${pathname}`] ?? [404, { code: "not_found" }];
+    // The app lookup a folder deploy sends first (PLAN-W2) exists whatever the upload and hosted flags say: no such app is the producer's own deployment_not_found (gateway public-api.ts:1645-1650).
+    const lookup = (init?.method ?? "GET") === "GET" && /^\/api\/deployments\/(?!runs\/)[^/]+$/.test(pathname) ? [404, { code: "deployment_not_found", message: "Deployment not found." }] : undefined;
+    const [status, body] = routes[`${init?.method ?? "GET"} ${pathname}${search}`] ?? routes[`${init?.method ?? "GET"} ${pathname}`] ?? lookup ?? [404, { code: "not_found" }];
     return { ok: status >= 200 && status < 300, status, json: async () => body };
   };
   try {
@@ -73,6 +75,43 @@ test("U-ADV: varity_deploy never promises a folder upload or private code before
   const text = [tool.description, tool.inputSchema.properties.path.description, tool.inputSchema.properties.source.description].join(" ");
   assert.doesNotMatch(text, /is uploaded to Varity directly|code stays private|no GitHub needed/i, text);
   assert.match(tool.description, new RegExp(NO_FOLDER_YET.replace(/[.?*+^$()|[\]\\]/g, "\\$&")), tool.description);
+});
+
+/**
+ * SP-2 (R1 review spec-95e8809): "private copy" is a promise that is true only while the gateway's
+ * hosted-repository route serves deploy keys. The copy is tied to that state by a release gate, not by
+ * its wording: a version whose model-visible text or README claims the private copy is published only
+ * after that route is live in production with its flag on and its live acceptance passed. So any
+ * "private copy" claim (tool text, stdio instructions, README) needs that gate recorded in
+ * ARCHITECTURE.md's release sequence; without it the claim is an unreleased promise and this fails.
+ */
+const PRIVATE_COPY = /private copy/i;
+const PRIVATE_COPY_GATE =
+  "A version whose tool text, instructions or README promises the private copy is published only after the " +
+  "gateway's hosted-repository route serves deploy keys in production (`VARITY_HOSTED_REPOS_DEPLOY_KEYS_ENABLED=true`) " +
+  "and its live acceptance has passed";
+
+test("U-ADV/SP-2: a private-copy promise ships only behind the recorded release gate", async () => {
+  const [serverSide, clientSide] = InMemoryTransport.createLinkedPair();
+  await createVarityServer().connect(serverSide);
+  const client = new Client({ name: "u-adv", version: "1" });
+  await client.connect(clientSide);
+  const tool = (await client.listTools()).tools.find((t) => t.name === "varity_deploy");
+  const instructions = client.getInstructions() ?? "";
+  await client.close();
+  const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  const claims = [
+    ["varity_deploy description", tool.description],
+    ["varity_deploy path", tool.inputSchema.properties.path.description],
+    ["varity_deploy source", tool.inputSchema.properties.source.description],
+    ["stdio instructions", instructions],
+    ["README", readme],
+  ].filter(([, text]) => PRIVATE_COPY.test(text)).map(([where]) => where);
+  const verification = readFileSync(new URL("../ARCHITECTURE.md", import.meta.url), "utf8").split("## Verification")[1] ?? "";
+  // S5: the upload path is flag-off; its copy is re-reviewed before it is turned on.
+  assert.ok(verification.includes("Turning uploads on requires a plugin re-review and release (varity-plugin#5) of the S5 copy"), verification);
+  if (claims.length === 0) return;
+  assert.ok(verification.includes(PRIVATE_COPY_GATE), `private copy promised in ${claims.join(", ")} without the release gate in ARCHITECTURE.md ## Verification`);
 });
 
 test("E3 (fresh process): a private repo does not lead with an upload nobody has seen work", async () => {
@@ -198,16 +237,17 @@ test("T2: varity_login's description is true in both states: browser when switch
   assert.match(d, /never (?:typed|pasted) into (?:the )?chat|Never ask the user to (?:type|paste) a key/i);
 });
 
-test("J-22: the set_env restart hold uses the measured release time, not 'a few minutes'", async () => {
+test("J-22: FX2 restart consent states a possible hold without an unsupported amount or settlement deadline", async () => {
   const { RESTART_NOTE } = await import("../dist/tools/set-env.js");
   const client = await connect();
   const tool = (await client.listTools()).tools.find((t) => t.name === "varity_set_env");
   await client.close();
   for (const text of [RESTART_NOTE, tool.description]) {
-    assert.match(text, /released when billing next settles, usually within 20 minutes/, text);
-    assert.doesNotMatch(text, /few minutes/, text);
+    assert.match(text, /restarting may temporarily hold additional balance until billing settles/i, text);
+    assert.doesNotMatch(text, /one more month|another month|usually within \d+ minutes|few minutes|up to one month/i, text);
   }
   const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  assert.match(readme, /restarting may temporarily hold additional balance until billing settles/i);
   assert.doesNotMatch(readme, /maximum for a few minutes/);
 });
 
@@ -298,7 +338,7 @@ test("P1 T3: the error message itself (not only the suggestion) leads with Chat 
     `Varity can't read this project's code on GitHub: it is private or does not exist. Nothing was deployed or charged. The way to get it online today without GitHub is Varity's Chat and Build: describe the app, and Varity builds it and publishes it to a live address: ${CHAT_AND_BUILD}`);
 });
 
-test("r3/M1: server instructions: stdio routes the local folder to varity_deploy; hosted keeps the repo order; both within 512 characters, no other-host rule", async () => {
+test("r3/M1: server instructions: stdio routes the local folder to varity_deploy and UPLOAD_UNAVAILABLE to Chat and Build; hosted keeps the repo order; both within 512 characters, no other-host rule, no sign-in promise", async () => {
   const texts = {};
   for (const [name, options] of [["stdio", undefined], ["remote", { toolset: "remote", credentialProvider: async () => "k" }]]) {
     const [serverSide, clientSide] = InMemoryTransport.createLinkedPair();
@@ -309,10 +349,10 @@ test("r3/M1: server instructions: stdio routes the local folder to varity_deploy
     await client.close();
   }
   assert.equal(texts.stdio,
-    "To deploy the folder the user is working in, call varity_deploy with path set to the absolute project folder, " +
-    "then varity_deploy_status with the returned id until it is live. " +
-    `If varity_deploy answers UPLOAD_UNAVAILABLE, offer Varity's Chat and Build: ${CHAT_AND_BUILD} ` +
-    "Sign in with varity_login; never ask for a key in chat.");
+    "Varity deploys the folder the user is working in: call varity_deploy with path set to the absolute project folder. " +
+    "Varity packs it (honouring .gitignore, keeping secret files on this computer), keeps a private copy and builds it; " +
+    "then call varity_deploy_status with the returned id until it is live. Connect with varity_login; never ask for a key in chat. " +
+    `If varity_deploy answers UPLOAD_UNAVAILABLE, offer Varity's Chat and Build: ${CHAT_AND_BUILD}`);
   assert.match(texts.remote, /varity_deploy \(public repo_url or image\)/);
   assert.match(texts.remote, /Never ask the user for a key in chat\./);
   assert.ok(texts.remote.includes(`If the user has no public GitHub repository, offer Varity's Chat and Build first: ${CHAT_AND_BUILD}`), texts.remote);
@@ -321,6 +361,8 @@ test("r3/M1: server instructions: stdio routes the local folder to varity_deploy
   for (const [name, text] of Object.entries(texts)) {
     assert.ok(text.length <= 512, `${name}: ${text.length} characters`);
     assert.doesNotMatch(text, /never suggest|hosting service/i, name);
+    // Listings audit F6: browser sign-in is not live (varity_login answers SIGN_IN_UNAVAILABLE), so no "sign in", "sign-in" or "signin" promise.
+    assert.doesNotMatch(text, /\bsign[- ]?in\b/i, name);
   }
 });
 
@@ -342,4 +384,24 @@ test("R2-2: structured and text results agree: same message, counts and profiles
 test("R2-3: the key line has one home (public-api); login does not re-export it", async () => {
   const login = await import("../dist/tools/login.js");
   assert.equal(login.KEY_SIGN_IN_LINE, undefined);
+});
+
+test("S5/PLUGIN-PRIV: no tool text, instruction, README line or src string claims privacy beyond what ships", async () => {
+  const OVERCLAIM = /code stays private|keeps? the code private|other private paths/i;
+  const texts = [["README", readFileSync(new URL("../README.md", import.meta.url), "utf8")]];
+  const { readdirSync } = await import("node:fs");
+  const sources = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory() ? sources(join(dir, e.name)) : e.name.endsWith(".ts") ? [join(dir, e.name)] : []);
+  for (const file of sources(new URL("../src", import.meta.url).pathname)) texts.push([file, readFileSync(file, "utf8")]);
+  for (const [name, options] of [["stdio", undefined], ["remote", { toolset: "remote", credentialProvider: async () => "k" }]]) {
+    const [serverSide, clientSide] = InMemoryTransport.createLinkedPair();
+    await createVarityServer(options).connect(serverSide);
+    const client = new Client({ name: "s5", version: "1" });
+    await client.connect(clientSide);
+    texts.push([`${name} instructions`, client.getInstructions() ?? ""]);
+    for (const tool of (await client.listTools()).tools) texts.push([`${name} ${tool.name}`, JSON.stringify(tool)]);
+    await client.close();
+  }
+  const overclaims = texts.filter(([, text]) => OVERCLAIM.test(text)).map(([where, text]) => `${where}: ${text.match(OVERCLAIM)[0]}`);
+  assert.deepEqual(overclaims, []);
 });

@@ -77,7 +77,9 @@ function stubGateway(routes) {
     const raw = init.body;
     const body = typeof raw === "string" ? JSON.parse(raw) : undefined;
     calls.push({ route, origin: parsed.origin, headers: init.headers, body, raw: raw instanceof Uint8Array ? Buffer.from(raw) : undefined });
-    const queue = routes[route] ?? [[404, { code: "not_found", message: "Not found" }]];
+    // The app lookup a folder deploy sends first (PLAN-W2) exists whatever the upload and hosted flags say: no such app is the producer's own deployment_not_found (gateway public-api.ts:1645-1650).
+    const lookup = /^GET \/api\/deployments\/(?!runs\/|sources)[^/]+$/.test(route) ? [[404, { code: "deployment_not_found", message: "Deployment not found." }]] : undefined;
+    const queue = routes[route] ?? lookup ?? [[404, { code: "not_found", message: "Not found" }]];
     const index = Math.min(used[route] ?? 0, queue.length - 1);
     used[route] = (used[route] ?? 0) + 1;
     const [status, payload] = queue[index];
@@ -160,7 +162,7 @@ test("a folder with no GitHub repo is uploaded privately and deployed, secrets k
     assert.equal(create.app_name, "my-site");
 
     assert.match(out.message, /no GitHub repository/);
-    assert.match(out.message, /uploaded this folder to Varity \(7 files\); your code stays private/);
+    assert.match(out.message, /uploaded this folder to Varity \(7 files\); nothing was published to GitHub\./);
     assert.match(out.message, /Left out \d+ ignored items/);
     assert.deepEqual(out.data.secret_files_not_uploaded, [".env", "config/secrets/", "server.pem"]);
     assert.match(out.message, /did not upload them: \.env, config\/secrets\/, server\.pem/);
@@ -184,7 +186,8 @@ for (const [label, refusal] of [
       assert.match(out.error.message, /^Tell the user exactly this: "Varity can't take a folder from this computer yet\. Nothing was uploaded, deployed or charged\./);
       assert.match(out.error.suggestion, /varity_list_templates/);
       assert.match(out.error.suggestion, /ask first/);
-      assert.deepEqual(calls.map((call) => call.route), [SOURCES], "no upload and no create");
+      // R1 M3: the private-copy route is asked next (after the app lookup, PLAN-W2); off too (404 here), so nothing was created.
+      assert.deepEqual(calls.map((call) => call.route), [SOURCES, "GET /api/deployments/my-site", "POST /api/github/hosted-repositories"], "no upload and no create");
     } finally {
       cleanup();
     }
@@ -251,7 +254,7 @@ test("J-14: once an upload worked, an explicit private repo_url offers the folde
   assert.equal(out.error.code, "source_repository_unreadable");
   assert.match(out.error.message, /private or does not exist\. Nothing was deployed and nothing was charged\./);
   const suggestion = out.error.suggestion;
-  const upload = suggestion.indexOf("I'll upload your project folder to Varity instead; your code stays private.");
+  const upload = suggestion.indexOf("I'll upload your project folder to Varity instead; nothing is published to GitHub.");
   const template = suggestion.indexOf("varity_list_templates");
   const publish = suggestion.indexOf("--visibility public");
   assert.ok(upload >= 0 && upload < template && template < publish, suggestion);
@@ -411,6 +414,8 @@ test("review: many empty files are refused locally on the server's tar-stream ra
   try {
     for (let i = 0; i < 3000; i += 1) writeFileSync(join(root, `f${i}.txt`), "");
     const { out, calls } = await callTool({ [SOURCES]: [SLOT()] }, { path: root, source: "upload" });
+    // SP-5 (PLAN-R1 M3): while the upload route is not known to be off, a folder it cannot take gets the
+    // upload's own refusal; the private copy is only the path once the upload route answered off.
     assert.equal(out.error.code, "FOLDER_NOT_UPLOADABLE");
     assert.equal(calls.length, 0);
   } finally {
@@ -446,6 +451,19 @@ test("review: 408 and 429 upload refusals say wait and retry, and start no deplo
       assert.match(out.error.suggestion, /Wait a minute/);
       assert.equal(route(calls, CREATE).length, 0);
     }
+  } finally {
+    cleanup();
+  }
+});
+
+test("SPN-2: an uploaded folder whose create is unconfirmed says the start is unconfirmed, never 'not started'", async () => {
+  const { dir, cleanup } = project();
+  try {
+    const unconfirmed = [504, { code: "deploy_acceptance_unconfirmed", message: "Varity could not confirm the deploy was accepted." }];
+    const { out } = await callTool({ [SOURCES]: [SLOT()], [PUT]: [SEALED], [CREATE]: [unconfirmed] }, { path: dir });
+    assert.equal(out.error.code, "deploy_acceptance_unconfirmed");
+    assert.equal(out.error.message, "The folder was uploaded; whether the deploy started is unconfirmed.");
+    assert.equal(out.error.suggestion, 'Check varity_deploy_status with "my-site" before deploying again.');
   } finally {
     cleanup();
   }

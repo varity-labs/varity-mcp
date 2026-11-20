@@ -6,7 +6,7 @@
  * stage, elapsed time and what happens next. J-16 lives in test/balance.mjs.
  */
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -91,17 +91,31 @@ test("J-17: the estimate is in plain words; the served note stays exact in data"
     "/api/pricing": [200, { profile: "web-app", currency: "USD", monthly_max_usd: 7, billing_model: "reserved_monthly_max_prorated", billing_note: note, mode: "dynamic" }],
   });
   assert.equal(out.message,
-    "web-app: up to $7.00/month (monthly maximum, USD). It is charged only for the time it runs, and never more than that in a month. " +
-    "Traffic alone does not change an app's monthly price.");
+    "web-app: up to $7.00/month (monthly maximum, USD). It is charged only for the time it runs, and never more than that in a month.");
   assert.doesNotMatch(out.message, /pricing interface|reserved deployment|prorated/);
   assert.equal(out.data.billing_note, note);
 });
 
-test("J-17/V9-9: an hourly (machine) projection never carries the app traffic line", async () => {
+// Listings audit F5: "Traffic alone does not change an app's monthly price." is not in control PRICING.md and
+// breaks marketing-canon section 5, so no estimate, README or ARCHITECTURE text promises a price traffic cannot move.
+test("F5: no monthly estimate and no shipped doc carries a traffic price promise", async () => {
+  const out = await call("varity_cost_calculator", { app_profile: "web-app" }, {
+    "/api/pricing": [200, { profile: "web-app", currency: "USD", monthly_max_usd: 7, billing_model: "reserved_monthly_max_prorated", billing_note: "x", mode: "dynamic" }],
+  });
+  assert.doesNotMatch(out.message, /traffic/i);
+  for (const doc of ["../README.md", "../ARCHITECTURE.md"]) {
+    assert.doesNotMatch(readFileSync(new URL(doc, import.meta.url), "utf8"), /Traffic alone|traffic sentence/i, doc);
+  }
+});
+
+test("J-17/V9-9: an hourly (machine) projection is priced by the hour and says nothing about a month", async () => {
   const out = await call("varity_cost_calculator", { subdomain: "vm-1" }, {
     "/api/deployments/vm-1": [200, { deployment: { id: "vm-1", status: "live", billing: { currency: "USD", hourly_cost_usd: 0.05 } } }],
   });
-  assert.doesNotMatch(out.message, /Traffic alone/);
+  assert.equal(out.data.hourly_cost_usd, 0.05);
+  assert.equal(out.data.monthly_max_usd, undefined);
+  assert.match(out.message, /^vm-1: \$0\.05\/hour \(USD\)\.$/);
+  assert.doesNotMatch(out.message, /month/i);
 });
 
 test("J-18: while deploying, the stage, time so far and what happens next", async () => {
